@@ -163,7 +163,7 @@
     const nav = h("nav", { class: "tabs", role: "tablist", "aria-label": "MTOP" },
       tabs.map(([id, label]) => h("button", {
         class: "tab", role: "tab", type: "button", id: `tab-${id}`, "aria-selected": String(S.view === id), "aria-controls": `view-${id}`,
-        onclick: () => { S.view = id; history.replaceState(null, "", `#${id}`); render(); window.scrollTo(0, 0); },
+        onclick: () => { S.view = id; try { history.replaceState(null, "", `#${id}`); } catch (e) { /* sandboxed frame */ } render(); window.scrollTo(0, 0); },
       }, label)));
     const langSw = h("div", { class: "lang", role: "group", "aria-label": "Language" },
       [["en", "EN"], ["cs", "CZ"]].map(([code, lbl]) => h("button", {
