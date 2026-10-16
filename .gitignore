@@ -1,0 +1,31 @@
+# ---------------------------------------------------------------------------
+# PATIENT DATA MUST NEVER BE COMMITTED
+# Raw exports, cleaned row-level data, row-level predictions and local reports
+# (which list patient IDs) stay on the analysis computer only.
+# ---------------------------------------------------------------------------
+data/raw/*
+!data/raw/README.md
+data/processed/
+artifacts/private/
+reports/*
+!reports/README.md
+*.xlsx
+*.xls
+*.csv
+*.parquet
+*.sav
+*.dta
+!data/synthetic/registry_synthetic.xlsx
+
+# build output (GitHub Actions builds the site)
+site/
+
+# Python / tooling
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+.DS_Store
+.ipynb_checkpoints/

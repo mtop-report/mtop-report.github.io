@@ -1,0 +1,77 @@
+# MTOP pipeline settings. Paths are relative to the repository root.
+
+cohort:
+  min_age: 18                    # adults only
+  require_outcome: true          # 90-day mRS must be known
+  exclude_diagnostic_only: true  # "PAG": diagnostic angiography without endovascular treatment
+
+split:
+  temporal_test_from_year: 2021  # development cohort <= 2020, temporal validation >= 2021
+  recent_era_from_year: 2021     # deployed model is intercept-recalibrated to this era
+
+seed: 20261016
+
+cv:
+  folds: 5
+  repeats: 3
+
+tuning:
+  trials: 50
+  max_rounds: 3000
+  early_stopping: 100
+
+bootstrap:
+  n: 2000
+
+privacy:
+  min_cell: 10      # aggregate cells with fewer patients are suppressed in public outputs
+  min_leaf: 20      # every LightGBM leaf must contain at least this many training patients
+
+targets:
+  good_outcome:
+    label: {en: "Functional independence (mRS 0–2) at 90 days", cs: "Funkční nezávislost (mRS 0–2) za 90 dní"}
+    short: {en: "mRS 0–2", cs: "mRS 0–2"}
+    sign: 1        # monotone constraints in features.yaml are written for this target
+    primary: true
+  death90:
+    label: {en: "Death within 90 days (mRS 6)", cs: "Úmrtí do 90 dní (mRS 6)"}
+    short: {en: "Death", cs: "Úmrtí"}
+    sign: -1       # constraints are flipped for mortality
+    primary: false
+
+stages:
+  - id: admission
+    order: 1
+    label: {en: "Admission", cs: "Příjem"}
+    title: {en: "Before thrombectomy", cs: "Před trombektomií"}
+    requires: []
+  - id: procedure
+    order: 2
+    label: {en: "End of MT", cs: "Konec MT"}
+    title: {en: "End of thrombectomy", cs: "Konec trombektomie"}
+    requires: [tici]
+  - id: h24
+    order: 3
+    label: {en: "24 hours", cs: "24 hodin"}
+    title: {en: "24 hours after treatment", cs: "24 hodin po léčbě"}
+    requires: [nihss_24h]     # alive and assessable at 24 h
+  - id: d7
+    order: 4
+    label: {en: "Day 7", cs: "7. den"}
+    title: {en: "Day 7", cs: "7. den"}
+    requires: [nihss_7d]      # alive and assessable at day 7
+
+site:
+  title: "MTOP Outcome Explorer"
+  repo_url: ""          # set after the first push, e.g. https://github.com/<user>/mtop
+  contact: "viktor.gajdosik@fno.cz"
+  authors:
+    - name: "Viktor Gajdošík"
+      affiliations: &aff
+        - {en: "Faculty of Medicine, University of Ostrava", cs: "Lékařská fakulta Ostravské univerzity"}
+        - {en: "University Hospital Ostrava", cs: "Fakultní nemocnice Ostrava"}
+    - name: "Václav Procházka"
+      affiliations: *aff
+  funding:
+    en: "Student grant SGS18/LF/2026, Faculty of Medicine, University of Ostrava"
+    cs: "Studentská grantová soutěž SGS18/LF/2026, Lékařská fakulta Ostravské univerzity"
