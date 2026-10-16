@@ -112,11 +112,16 @@ def oof_lgbm(X, y, params, rounds, seed, folds=5, repeats=1):
 
 # ------------------------------------------------------------------------------- comparators
 def fit_logreg(X, y, seed):
+    import inspect
+
+    kw = dict(Cs=np.logspace(-3, 1, 12), cv=5, scoring="neg_log_loss", max_iter=5000, random_state=seed)
+    accepted = inspect.signature(LogisticRegressionCV).parameters
+    if "use_legacy_attributes" in accepted:      # scikit-learn >= 1.9: silence the transition warning
+        kw.update(use_legacy_attributes=False, l1_ratios=(0.0,))
     model = make_pipeline(
         SimpleImputer(strategy="median", add_indicator=True, keep_empty_features=True),
         StandardScaler(),
-        LogisticRegressionCV(Cs=np.logspace(-3, 1, 12), cv=5, scoring="neg_log_loss", l1_ratios=(0.0,),
-                             use_legacy_attributes=False, max_iter=5000, random_state=seed),
+        LogisticRegressionCV(**kw),
     )
     return model.fit(X, y)
 

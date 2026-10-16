@@ -18,7 +18,8 @@ browser: no server, no patient data, nothing typed in is sent anywhere.
 
 > **Research tool, not a medical device.** Do not use it on its own to decide treatment.
 
-**Live app:** _set after the first GitHub Pages deployment_ (Settings → Pages → Source: GitHub Actions)
+**Live app:** https://viktorgajdosik.github.io/mt/ (published by GitHub Actions on every push to `main`;
+enable once under Settings → Pages → Source: GitHub Actions)
 
 ## What the app contains
 
@@ -100,6 +101,7 @@ Full tables (Brier, calibration, ΔAUROC with paired-bootstrap CIs, subgroups) a
 ## Quick start
 
 ```bash
+git clone https://github.com/viktorgajdosik/mt && cd mt
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 

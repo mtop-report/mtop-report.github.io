@@ -63,7 +63,7 @@ stages:
 
 site:
   title: "MTOP Outcome Explorer"
-  repo_url: ""          # set after the first push, e.g. https://github.com/<user>/mtop
+  repo_url: "https://github.com/viktorgajdosik/mt"
   contact: "viktor.gajdosik@fno.cz"
   authors:
     - name: "Viktor Gajdošík"
