@@ -72,7 +72,9 @@ def booster_to_json(booster: lgb.Booster) -> dict:
 
 
 def min_leaf_count(model_json: dict) -> int:
-    return min(c for t in model_json["trees"] for f, c in zip(t["f"], t["c"]) if f == -1 and len(t["f"]) > 1)
+    """Smallest leaf among trees with at least one split (single-leaf trees summarise everyone)."""
+    counts = [c for t in model_json["trees"] if len(t["f"]) > 1 for f, c in zip(t["f"], t["c"]) if f == -1]
+    return min(counts) if counts else 10**9
 
 
 def _ui_features() -> list[dict]:
