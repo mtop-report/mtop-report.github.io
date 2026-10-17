@@ -53,9 +53,85 @@ and to severity (SBP or onset time missing in sicker patients).
 - Minimum leaf size: each leaf's hessian sum ≥ 5, which guarantees ≥ 20 patients per leaf
   (each patient contributes at most 0.25 for log-loss). This is both regularisation and a
   disclosure-control measure.
-- Comparators: L2 logistic regression (median imputation + missing indicators, standardised,
-  C by CV), XGBoost (grid on depth / min child weight, early stopping), MLP (grid on width /
-  weight decay, 5-seed average), THRIVE, SPAN-100, NIHSS at 24 h alone, NIHSS on day 7 alone.
+- **Comparison learners, tuned with the same budget:** XGBoost, a multilayer perceptron, and
+  penalised logistic regression, linear and with restricted cubic splines. Every learner,
+  LightGBM included, gets 50 candidate settings, each scored by 5-fold stratified cross-validated
+  log-loss on the development cohort with the same folds (`src/mtop/tuning.py`). Search spaces
+  and the chosen settings are in section 5a.
+- **Benchmarks without settings:** THRIVE, SPAN-100, HIAT2, PRE, the FNO 7-item bedside score and
+  NIHSS at 24 h or day 7 alone (points mapped to probabilities by one logistic fit on the
+  development cohort); the THRIVE-c and MR PREDICTS@24H predictor sets refitted with the
+  logistic-regression pipeline.
+
+## 5a. Comparison models and their settings
+
+Every learner had the same budget: 50 candidate settings, each scored by 5-fold stratified cross-validated log-loss on the development patients (onset ≤ 2020), with the same folds for every learner (seed 20261016). The 2021–2025 patients were not used for any choice. Published point scores have no settings; their points are mapped to probabilities by one logistic fit on the development patients.
+
+| Learner | Searched |
+|---|---|
+| LightGBM | Optuna TPE: learning rate 0.01–0.08 (log), leaves 3–15, depth 2–5, patients per leaf 20–80, column fraction 0.5–1, row fraction 0.6–1, L2 0.001–30 (log); trees by early stopping (100 rounds, max 3000); monotone constraints; every leaf ≥ 20 patients |
+| XGBoost | Optuna TPE: learning rate 0.01–0.08 (log), depth 2–5, minimum child weight 1–20 (log), row fraction 0.6–1, column fraction 0.5–1, L2 0.001–30 (log), minimum split gain (gamma) 0.001–5 (log); trees by early stopping (100 rounds, max 3000) |
+| MLP | Optuna TPE: 1–3 hidden layers, first layer 8–128 neurons (log; each further layer half as wide), ReLU or tanh, weight decay 1e-5–10 (log), Adam learning rate 1e-4–1e-2 (log), batch 32/64/128/256; early stopping on 20 % of the training fold (patience 25, max 1000 epochs); median imputation with missing indicators and standardisation; the best setting trained from 5 random starts and averaged |
+| Logistic regression | L2 penalty strength C over 50 values (1e-4–1e2, log grid); median imputation with missing indicators and standardisation |
+| Logistic regression (splines) | as logistic regression, plus restricted cubic splines (3, 4 or 5 knots at Harrell's percentiles) for age, NIHSS, onset to puncture, glucose, procedure duration and later NIHSS; 50 values of C for each number of knots |
+
+**Chosen settings** (development cohort, onset ≤ 2020)
+
+*LightGBM*
+
+| Stage | Outcome | Learning rate | Leaves | Depth | Min leaf | Columns | Rows | L2 | Trees | CV log-loss |
+|---|---|---|---|---|---|---|---|---|---|---|
+| admission | mRS 0–2 | 0.0616 | 5 | 3 | 25 | 0.505 | 0.639 | 0.0124 | 73 | 0.581 |
+| admission | death | 0.0379 | 9 | 2 | 25 | 0.517 | 0.653 | 0.707 | 176 | 0.448 |
+| procedure | mRS 0–2 | 0.0144 | 12 | 5 | 27 | 0.513 | 0.747 | 0.0762 | 315 | 0.548 |
+| procedure | death | 0.0292 | 7 | 5 | 45 | 0.922 | 0.631 | 0.0383 | 137 | 0.440 |
+| h24 | mRS 0–2 | 0.0309 | 6 | 2 | 32 | 0.526 | 0.767 | 0.162 | 177 | 0.377 |
+| h24 | death | 0.0598 | 8 | 3 | 40 | 0.631 | 0.985 | 2.96 | 105 | 0.298 |
+| d7 | mRS 0–2 | 0.0158 | 13 | 3 | 74 | 0.751 | 0.986 | 0.00861 | 375 | 0.331 |
+| d7 | death | 0.0218 | 6 | 2 | 34 | 0.58 | 0.844 | 0.139 | 311 | 0.246 |
+
+*XGBoost*
+
+| Stage | Outcome | Learning rate | Depth | Min child weight | Rows | Columns | L2 | Gamma | Trees | CV log-loss |
+|---|---|---|---|---|---|---|---|---|---|---|
+| admission | mRS 0–2 | 0.023 | 2 | 2.86 | 0.623 | 0.54 | 0.042 | 0.2 | 288 | 0.584 |
+| admission | death | 0.0589 | 4 | 6.61 | 0.681 | 0.642 | 1.58 | 0.0759 | 62 | 0.448 |
+| procedure | mRS 0–2 | 0.0221 | 2 | 5.7 | 0.621 | 0.555 | 0.00737 | 0.028 | 334 | 0.552 |
+| procedure | death | 0.0164 | 5 | 5.33 | 0.627 | 0.593 | 0.024 | 0.875 | 248 | 0.442 |
+| h24 | mRS 0–2 | 0.0125 | 2 | 1.02 | 0.882 | 0.539 | 0.00163 | 0.0779 | 463 | 0.374 |
+| h24 | death | 0.0198 | 2 | 1.04 | 0.998 | 0.5 | 0.0588 | 0.0257 | 411 | 0.290 |
+| d7 | mRS 0–2 | 0.0441 | 2 | 3.42 | 0.871 | 0.786 | 0.307 | 0.00605 | 136 | 0.331 |
+| d7 | death | 0.0232 | 3 | 1.11 | 0.764 | 0.594 | 0.0244 | 0.484 | 195 | 0.242 |
+
+*MLP*
+
+| Stage | Outcome | Hidden layers | Activation | Weight decay | Learning rate | Batch | CV log-loss |
+|---|---|---|---|---|---|---|---|
+| admission | mRS 0–2 | 30 | tanh | 0.000636 | 0.00276 | 256 | 0.581 |
+| admission | death | 100 | relu | 1.44 | 0.00589 | 32 | 0.465 |
+| procedure | mRS 0–2 | 46 | tanh | 1.15 | 0.00275 | 32 | 0.547 |
+| procedure | death | 113→56 | tanh | 0.00488 | 0.00046 | 128 | 0.460 |
+| h24 | mRS 0–2 | 74→37 | tanh | 0.577 | 0.0049 | 32 | 0.389 |
+| h24 | death | 72 | relu | 0.587 | 0.00408 | 32 | 0.317 |
+| d7 | mRS 0–2 | 119 | relu | 4.94 | 0.006 | 256 | 0.384 |
+| d7 | death | 72 | relu | 0.455 | 0.00311 | 32 | 0.262 |
+
+*Logistic regression*
+
+| Stage | Outcome | C (linear) | CV log-loss | Knots (splines) | C (splines) | CV log-loss |
+|---|---|---|---|---|---|---|
+| admission | mRS 0–2 | 0.0281 | 0.581 | 3 | 0.016 | 0.579 |
+| admission | death | 0.0281 | 0.457 | 3 | 0.016 | 0.456 |
+| procedure | mRS 0–2 | 0.0281 | 0.550 | 3 | 0.0212 | 0.549 |
+| procedure | death | 0.016 | 0.453 | 3 | 0.0121 | 0.451 |
+| h24 | mRS 0–2 | 0.0869 | 0.383 | 3 | 0.0869 | 0.385 |
+| h24 | death | 0.0494 | 0.313 | 3 | 0.0281 | 0.310 |
+| d7 | mRS 0–2 | 0.153 | 0.356 | 3 | 0.0869 | 0.360 |
+| d7 | death | 0.0655 | 0.250 | 3 | 0.0373 | 0.244 |
+
+C is the inverse penalty strength: smaller C means stronger shrinkage.
+
+Regenerated by `python -m mtop report` as `reports/model_settings.md`.
 
 ## 6. Validation
 
@@ -64,6 +140,9 @@ and to severity (SBP or onset time missing in sicker patients).
   bootstrap for ΔAUROC, calibration intercept (calibration-in-the-large) and slope, integrated
   calibration index, calibration by deciles, decision curves, subgroup AUROC (sex, age,
   circulation, IVT, admission route).
+- **Model comparison:** LightGBM against XGBoost, an MLP and logistic regression (linear and with
+  splines), every learner tuned with the same budget on the same folds (section 5a), and against
+  published scores.
 - **Internal validation:** 5-fold × 3 repeated cross-validation in the development cohort.
 - **Updating check:** the intercept re-estimated on 2021–2022 patients and evaluated on 2023+.
 
@@ -77,7 +156,8 @@ and to severity (SBP or onset time missing in sicker patients).
 
 ## 7a. Additions in v1.1 (beta, same deployed models)
 
-- **Comparators for the calculator:** penalised logistic regression on the MTOP predictors;
+- **Comparators for the calculator:** penalised logistic regression on the MTOP predictors, linear
+  and with restricted cubic splines, tuned as in section 5a but on all years;
   THRIVE, SPAN-100, HIAT2 and PRE mapped to probabilities by logistic recalibration on the
   registry; THRIVE-c and MR PREDICTS@24H predictor sets refitted on the registry (published
   coefficients not used; MR PREDICTS@24H without the CTA collateral score, not recorded). All are

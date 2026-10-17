@@ -42,8 +42,9 @@ with its typeface bundled, so opening it contacts no third-party server.
   puncture, two decades of trends (volume, age, thrombolysis, transfers, times, reperfusion, sICH,
   technique, anaesthesia, stenting), data completeness by year, and Table 1. Aggregates only;
   groups under 10 patients are hidden.
-- **Validation.** Temporal validation of every stage against logistic regression, XGBoost, an
-  MLP and published scores, with ROC, calibration, decision curves, subgroup performance and an
+- **Validation.** Temporal validation of every stage against logistic regression (linear and with
+  splines), XGBoost, an MLP (all tuned with the same budget as LightGBM, with the chosen settings
+  shown) and published scores, with ROC, calibration, decision curves, subgroup performance and an
   explanation of the post-2020 outcome drift.
 - **Adaptive** *(v1.1 beta).* How the model is kept up to date: six update strategies compared year
   by year 2018–2025 (frozen, intercept or logistic recalibration, refit, refit + recalibration,
@@ -68,23 +69,26 @@ with its typeface bundled, so opening it contacts no third-party server.
 
 **mRS 0–2 at 90 days** — AUROC (95% CI)
 
-| Stage | n (events) | LightGBM | Logistic regression | XGBoost | MLP | Published score |
-|---|---|---|---|---|---|---|
-| 1 · Admission | 378 (110) | 0.771 (0.72–0.82) | 0.737 (0.68–0.79) | 0.769 (0.72–0.82) | 0.726 (0.67–0.78) | THRIVE 0.677; SPAN-100 0.574 |
-| 2 · End of MT | 370 (108) | 0.805 (0.76–0.85) | 0.765 (0.71–0.81) | 0.795 (0.74–0.84) | 0.745 (0.69–0.80) | THRIVE 0.673 |
-| 3 · 24 h | 206 (73) | 0.859 (0.81–0.91) | 0.838 (0.78–0.89) | 0.856 (0.81–0.90) | 0.804 (0.74–0.86) | NIHSS 24 h 0.844 |
-| 4 · Day 7 | 135 (62) | 0.896 (0.84–0.94) | 0.831 (0.75–0.90) | 0.898 (0.84–0.94) | 0.818 (0.74–0.89) | NIHSS day 7 0.882 |
+| Stage | n (events) | LightGBM | XGBoost | Logistic regression | LR + splines | MLP | Published score |
+|---|---|---|---|---|---|---|---|
+| 1 · Admission | 378 (110) | 0.771 (0.72–0.82) | 0.773 (0.72–0.82) | 0.735 (0.68–0.79) | 0.733 (0.68–0.79) | 0.715 (0.66–0.77) | THRIVE 0.677; SPAN-100 0.574 |
+| 2 · End of MT | 370 (108) | 0.805 (0.76–0.85) | 0.804 (0.75–0.85) | 0.760 (0.71–0.81) | 0.758 (0.71–0.81) | 0.758 (0.70–0.81) | THRIVE 0.673 |
+| 3 · 24 h | 206 (73) | 0.859 (0.81–0.91) | 0.860 (0.81–0.91) | 0.832 (0.78–0.88) | 0.832 (0.78–0.88) | 0.832 (0.78–0.88) | NIHSS 24 h 0.844 |
+| 4 · Day 7 | 135 (62) | 0.896 (0.84–0.94) | 0.898 (0.84–0.94) | 0.834 (0.76–0.90) | 0.837 (0.76–0.90) | 0.823 (0.75–0.89) | NIHSS day 7 0.882 |
 
 **Death within 90 days** — AUROC (95% CI)
 
-| Stage | n (events) | LightGBM | Logistic regression | XGBoost | MLP | Published score |
-|---|---|---|---|---|---|---|
-| 1 · Admission | 378 (76) | 0.780 (0.72–0.83) | 0.744 (0.68–0.80) | 0.774 (0.71–0.83) | 0.708 (0.64–0.77) | THRIVE 0.605; SPAN-100 0.565 |
-| 2 · End of MT | 370 (73) | 0.805 (0.75–0.86) | 0.752 (0.68–0.82) | 0.800 (0.74–0.85) | 0.699 (0.63–0.77) | THRIVE 0.601 |
-| 3 · 24 h | 206 (27) | 0.904 (0.84–0.95) | 0.883 (0.82–0.93) | 0.911 (0.85–0.96) | 0.857 (0.78–0.92) | NIHSS 24 h 0.852 |
-| 4 · Day 7 | 135 (7) | 0.878 (0.74–0.97) | 0.856 (0.70–0.97) | 0.871 (0.72–0.97) | 0.892 (0.73–0.99) | NIHSS day 7 0.896 |
+| Stage | n (events) | LightGBM | XGBoost | Logistic regression | LR + splines | MLP | Published score |
+|---|---|---|---|---|---|---|---|
+| 1 · Admission | 378 (76) | 0.780 (0.72–0.83) | 0.774 (0.71–0.83) | 0.741 (0.68–0.80) | 0.736 (0.67–0.80) | 0.747 (0.68–0.81) | THRIVE 0.605; SPAN-100 0.565 |
+| 2 · End of MT | 370 (73) | 0.805 (0.75–0.86) | 0.797 (0.74–0.85) | 0.750 (0.68–0.81) | 0.742 (0.67–0.81) | 0.740 (0.67–0.80) | THRIVE 0.601 |
+| 3 · 24 h | 206 (27) | 0.904 (0.84–0.95) | 0.901 (0.84–0.95) | 0.882 (0.82–0.93) | 0.886 (0.82–0.94) | 0.874 (0.81–0.93) | NIHSS 24 h 0.852 |
+| 4 · Day 7 | 135 (7) | 0.878 (0.74–0.97) | 0.859 (0.69–0.97) | 0.856 (0.70–0.97) | 0.850 (0.70–0.96) | 0.884 (0.78–0.97) | NIHSS day 7 0.896 |
 
 The day-7 mortality model rests on 7 deaths in the validation years; treat it as indicative only.
+Every learner was tuned with the same budget (50 candidate settings scored on the same
+cross-validation folds of the development years); the chosen settings are in the
+[model card](docs/model_card.md#5a-comparison-models-and-their-settings).
 
 Calibration of the development model in 2021–2025 (mRS 0–2): 1 · Admission: intercept −0.51, slope 1.24, deployed shift −0.26; 2 · End of MT: intercept −0.60, slope 1.09, deployed shift −0.32; 3 · 24 h: intercept −0.74, slope 0.89, deployed shift −0.45; 4 · Day 7: intercept −0.75, slope 1.15, deployed shift −0.54.
 
@@ -110,7 +114,10 @@ Full tables (Brier, calibration, ΔAUROC with paired-bootstrap CIs, subgroups) a
 3. **Models** (`src/mtop/train.py`). One LightGBM model per stage and outcome, with **monotone
    constraints** (for example a higher NIHSS or a longer time to puncture can never raise the
    chance of independence), tuned with Optuna on cross-validated log-loss in the development
-   cohort only. Every tree leaf is guaranteed to summarise at least 20 patients.
+   cohort only. Every tree leaf is guaranteed to summarise at least 20 patients. The comparison
+   models (XGBoost, an MLP, logistic regression linear and with splines) get the same tuning
+   budget: 50 candidate settings each, scored on the same folds
+   ([model card, section 5a](docs/model_card.md#5a-comparison-models-and-their-settings)).
 4. **Validation.** Temporal split: development ≤ 2020, validation 2021–2025. Bootstrap 95 % CIs
    (2,000 resamples), calibration intercept and slope, ICI, decision curves, subgroup AUROCs.
 5. **Deployment.** Models are refitted on all years. Because recent outcomes were worse than the

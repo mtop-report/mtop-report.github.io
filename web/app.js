@@ -1260,6 +1260,8 @@
     cCard.appendChild(h("div", { class: "table-scroll" }, tbl));
     const intr = vt.internal;
     cCard.appendChild(h("p", { class: "note", text: `${t().compNote} ${t().internalCv}: AUROC ${num(intr.auroc, 3)} (${lang === "cs" ? "průměr přes foldy" : "fold mean"} ${num(intr.fold_auroc_mean, 3)} ± ${num(intr.fold_auroc_sd, 3)}).` }));
+    const tun = tuningBlock(vt.settings);
+    if (tun) cCard.appendChild(tun);
     rowTable.appendChild(cCard);
     root.appendChild(rowTable);
     root.appendChild(row1);
@@ -1349,6 +1351,66 @@
     if (recon) root.appendChild(recon);
   }
 
+  // How each learner was tuned: the same budget for all, and the settings chosen for this stage and outcome
+  const sig2 = (v) => {
+    if (v === null || v === undefined) return "–";
+    const a = Math.abs(v);
+    if (a >= 100) return num(v, 0);
+    if (a >= 1) return num(v, a >= 10 ? 0 : 1);
+    return num(v, Math.min(6, Math.max(0, 1 - Math.floor(Math.log10(a)))));
+  };
+  function tuningBlock(st) {
+    if (!st) return null;
+    const trials = (st.LightGBM && st.LightGBM.trials) || 50;
+    const SPACE = {
+      LightGBM: tx("learning rate 0.01–0.08, 3–15 leaves, depth 2–5, 20–80 patients per leaf, column and row sampling, L2 penalty; trees by early stopping",
+        "rychlost učení 0,01–0,08, 3–15 listů, hloubka 2–5, 20–80 pacientů v listu, vzorkování sloupců a řádků, penalizace L2; počet stromů časným zastavením"),
+      XGBoost: tx("learning rate 0.01–0.08, depth 2–5, minimum child weight 1–20, row and column sampling, L2 penalty, minimum split gain; trees by early stopping",
+        "rychlost učení 0,01–0,08, hloubka 2–5, minimální váha listu 1–20, vzorkování řádků a sloupců, penalizace L2, minimální zisk dělení; počet stromů časným zastavením"),
+      MLP: tx("1–3 layers of 8–128 neurons, ReLU or tanh, weight decay, learning rate, batch size; the best setting averaged over 5 random starts",
+        "1–3 vrstvy po 8–128 neuronech, ReLU nebo tanh, útlum vah, rychlost učení, velikost dávky; nejlepší nastavení zprůměrované přes 5 náhodných startů"),
+      "Logistic regression": tx("penalty strength, 50 values", "síla penalizace, 50 hodnot"),
+      "Logistic regression (splines)": tx("3, 4 or 5 knots × penalty strength (50 values each)", "3, 4 nebo 5 uzlů × síla penalizace (po 50 hodnotách)"),
+    };
+    const chosen = (k, s) => {
+      if (!s) return "–";
+      if (k === "LightGBM") return [`${tx("rate", "rychlost")} ${sig2(s.learning_rate)}`, `${s.num_leaves} ${tx("leaves", "listů")}`, `${tx("depth", "hloubka")} ${s.max_depth}`,
+        `≥${s.min_child_samples} ${tx("per leaf", "v listu")}`, `${tx("columns", "sloupce")} ${sig2(s.feature_fraction)}`, `${tx("rows", "řádky")} ${sig2(s.bagging_fraction)}`,
+        `L2 ${sig2(s.lambda_l2)}`, `${s.trees} ${tx("trees", "stromů")}`].join(" · ");
+      if (k === "XGBoost") return [`${tx("rate", "rychlost")} ${sig2(s.learning_rate)}`, `${tx("depth", "hloubka")} ${s.max_depth}`, `${tx("child weight", "váha listu")} ${sig2(s.min_child_weight)}`,
+        `${tx("rows", "řádky")} ${sig2(s.subsample)}`, `${tx("columns", "sloupce")} ${sig2(s.colsample_bytree)}`, `L2 ${sig2(s.lambda)}`, `gamma ${sig2(s.gamma)}`, `${s.trees} ${tx("trees", "stromů")}`].join(" · ");
+      if (k === "MLP") return [`${tx("layers", "vrstvy")} ${s.hidden_layers.join("→")}`, s.activation, `${tx("weight decay", "útlum vah")} ${sig2(s.alpha)}`,
+        `${tx("rate", "rychlost")} ${sig2(s.learning_rate)}`, `${tx("batch", "dávka")} ${s.batch_size}`, `${s.ensemble} ${tx("starts", "startů")}`].join(" · ");
+      if (k === "Logistic regression (splines)") return `${s.knots} ${tx("knots", "uzly")} · C ${sig2(s.C)}`;
+      return `C ${sig2(s.C)}`;
+    };
+    const keys = ["LightGBM", "Logistic regression", "Logistic regression (splines)", "XGBoost", "MLP"].filter((k) => st[k]);
+    const box = h("details", { class: "tuning" });
+    box.appendChild(h("summary", null, h("span", { text: tx("How each model was tuned", "Jak byly modely laděny") }),
+      h("span", { class: "muted", text: tx(`${trials} candidate settings each, same folds`, `po ${trials} kandidátních nastaveních, stejné foldy`) })));
+    box.appendChild(h("p", { class: "note", text: tx(
+      `Every learner had the same budget: ${trials} candidate settings (Bayesian search for the tree models and the network, a grid of penalty strengths for the regressions), each scored by 5-fold cross-validated log-loss on the development patients, with the same folds for every model. The 2021–2025 patients were never used to choose anything. Published scores have no settings: their points are turned into probabilities by one logistic fit on the development patients.`,
+      `Každý model měl stejný rozpočet: ${trials} kandidátních nastavení (bayesovské hledání u stromových modelů a sítě, mřížka sil penalizace u regresí), každé hodnocené 5násobnou křížovou validací log-loss na vývojových pacientech se stejnými foldy pro všechny modely. Pacienti z let 2021–2025 nebyli k žádné volbě použiti. Publikovaná skóre nastavení nemají: jejich body se na pravděpodobnost převádějí jedním logistickým modelem na vývojových pacientech.`) }));
+    const tbl = h("table", { class: "data compact tuning-table" },
+      h("thead", null, h("tr", null, [t().model, tx("Searched", "Prohledáno"), tx("Chosen for this stage and outcome", "Zvoleno pro tuto fázi a výsledek"), tx("CV log-loss", "CV log-loss")].map((x) => h("th", { scope: "col", text: x })))),
+      h("tbody", null, keys.map((k) => h("tr", null, h("th", { scope: "row", text: mname(k) }),
+        h("td", { class: "txt", "data-l": tx("Searched", "Prohledáno"), text: SPACE[k] || "" }),
+        h("td", { class: "txt", "data-l": tx("Chosen", "Zvoleno"), text: chosen(k, st[k]) }),
+        h("td", { "data-l": "CV log-loss", text: num(st[k].cv_logloss, 3) })))));
+    box.appendChild(h("div", { class: "table-scroll" }, tbl));
+    const ll = keys.map((k) => st[k].cv_logloss);
+    const best = keys[ll.indexOf(Math.min(...ll))];
+    const equal = Math.max(...ll) - Math.min(...ll) < 0.01;
+    box.appendChild(h("p", { class: "note", text: tx(
+      `CV log-loss: cross-validated log-loss on the development patients, the quantity each learner was tuned to minimise (lower is better). ${equal
+        ? "Here the learners fit the development years about equally well (within 0.01); the differences in the table above appear when the models meet 2021–2025 patients."
+        : `Here ${mname(best)} fits the development years best; the table above shows how each model does on 2021–2025 patients.`}`,
+      `CV log-loss: křížově validovaná log-loss na vývojových pacientech, tedy veličina, kterou každý model při ladění minimalizoval (nižší je lepší). ${equal
+        ? "Zde se modely letům vývoje přizpůsobí zhruba stejně dobře (do 0,01); rozdíly v tabulce výše se projeví až u pacientů z let 2021–2025."
+        : `Zde letům vývoje nejlépe odpovídá ${mname(best)}; tabulka výše ukazuje, jak si každý model vede u pacientů z let 2021–2025.`}`) }));
+    return box;
+  }
+
   // Same registry, earlier analysis: the HTML report rebuilt from the raw data
   function reconciliationCard() {
     const R = DATA.reconciliation;
@@ -1358,7 +1420,9 @@
     const S1 = R.setups["report cohort, report split (test 2023-2025)"];
     const S2 = R.setups["report cohort, report split, + 12 extra predictors"];
     const S3 = R.setups["MTOP cohort, MTOP split (test 2021-2025)"];
+    const S5 = R.setups["MTOP cohort, MTOP split, + 12 extra predictors"];
     if (!S1 || !S3) return null;
+    const LGB = S3.models.LightGBM ? "LightGBM" : "LightGBM (MTOP settings)";
     const A = (s2, k) => (s2 && s2.models[k] ? num(s2.models[k].auroc, 3) : "–");
     const card = h("div", { class: "card card-pad block recon" });
     card.appendChild(h("div", { class: "chart-head" }, h("div", null,
@@ -1383,19 +1447,28 @@
         `MTOP vynechává ${num(steps["of which diagnostic angiography only"])} diagnostických angiografií bez trombektomie a ponechává 29 pacientů s nemožnými časy, jejichž časy se berou jako chybějící.`),
       tx(`MTOP tests on 2021–2025 (${num(S3.n_test)} patients) instead of 2023–2025 (${num(S1.n_test)}).`, `MTOP testuje na letech 2021–2025 (${num(S3.n_test)} pacientů) místo 2023–2025 (${num(S1.n_test)}).`),
       tx("MTOP uses 17 admission predictors; the report used 33.", "MTOP používá 17 prediktorů při přijetí; zpráva jich měla 33."),
+      ...((() => {
+        if (!S2 || !S5) return [];
+        const dd = (a, b, k) => (a.models[k] && b.models[k] ? signed(b.models[k].auroc - a.models[k].auroc, 3) : "–");
+        return [tx(`Adding the report's 12 extra history and lifestyle items changed the AUROC on the report's test years by ${dd(S1, S2, LGB)} for LightGBM and ${dd(S1, S2, "Logistic regression (splines)")} for regression with splines; on 2021–2025 by ${dd(S3, S5, LGB)} and ${dd(S3, S5, "Logistic regression (splines)")}.`,
+          `Přidání 12 dalších anamnestických položek a položek životního stylu ze zprávy změnilo AUROC na testovacích letech zprávy o ${dd(S1, S2, LGB)} u LightGBM a ${dd(S1, S2, "Logistic regression (splines)")} u regrese se splajny; na letech 2021–2025 o ${dd(S3, S5, LGB)} a ${dd(S3, S5, "Logistic regression (splines)")}.`)];
+      })()),
       tx("SPAN-100 is scored here with its published cut-off of 100, which gives a lower AUROC than the continuous age + NIHSS.", "SPAN-100 se zde hodnotí s publikovanou hranicí 100, což dává nižší AUROC než spojitý součet věku a NIHSS."),
     ].map((x) => h("li", { text: x })))));
     const rk = [[tx("Report set-up (test 2023–2025)", "Nastavení zprávy (test 2023–2025)"), S1], [tx("MTOP set-up (test 2021–2025)", "Nastavení MTOP (test 2021–2025)"), S3]];
     why.appendChild(h("div", null, h("h4", { text: tx("Which model ranks first depends on the test years", "Pořadí modelů závisí na testovacích letech") }),
       h("div", { class: "table-scroll" }, h("table", { class: "data compact" },
-        h("thead", null, h("tr", null, ["", "LightGBM", tx("Regression", "Regrese"), tx("Splines", "Splajny"), tx("Bedside", "Bedside")].map((x) => h("th", { scope: "col", text: x })))),
+        h("thead", null, h("tr", null, ["", "LightGBM", "XGBoost", "MLP", tx("Regression", "Regrese"), tx("Splines", "Splajny"), tx("Bedside", "Bedside")].map((x) => h("th", { scope: "col", text: x })))),
         h("tbody", null, rk.map(([lbl, s2]) => h("tr", null, h("th", { scope: "row", text: lbl }),
-          h("td", { text: A(s2, "LightGBM (MTOP settings)") }), h("td", { text: A(s2, "Logistic regression (linear)") }),
-          h("td", { text: A(s2, "Logistic regression (splines)") }), h("td", { text: A(s2, "Bedside score") })))))),
+          [LGB, "XGBoost", "MLP", "Logistic regression (linear)", "Logistic regression (splines)", "Bedside score"].map((k) => h("td", { text: A(s2, k) }))))))),
       h("p", { class: "note", text: (() => {
-        const d = S3.models["LightGBM (MTOP settings)"].delta_vs_spline_lr;
-        return tx(`On the report's test years all regression and tree models lie within 0.02 of each other with overlapping intervals, as the report found. On MTOP's larger 2021–2025 test set LightGBM leads regression with splines by ${num(-d.mean, 3)} (95% CI ${num(-d.ci[1], 3)} to ${num(-d.ci[0], 3)}).`,
-          `Na testovacích letech zprávy leží všechny regresní i stromové modely do 0,02 od sebe s překrývajícími se intervaly, jak uvádí zpráva. Na větším testovacím souboru MTOP 2021–2025 vede LightGBM před regresí se splajny o ${num(-d.mean, 3)} (95% IS ${num(-d.ci[1], 3)} až ${num(-d.ci[0], 3)}).`);
+        const d = S3.models[LGB].delta_vs_spline_lr;
+        const keys = [LGB, "XGBoost", "Logistic regression (linear)", "Logistic regression (splines)"].filter((k) => S1.models[k]);
+        const a1 = keys.map((k) => S1.models[k].auroc);
+        const spread = Math.max(...a1) - Math.min(...a1);
+        const eq = tx("Every learner was tuned on each set-up's own training patients with the same budget.", "Každý model byl laděn na trénovacích pacientech daného nastavení se stejným rozpočtem.");
+        return tx(`${eq} On the report's test years the tree models and both regressions lie within ${num(spread, 3)} AUROC of each other with overlapping intervals, as the report found. On MTOP's larger 2021–2025 test set LightGBM leads regression with splines by ${num(-d.mean, 3)} (95% CI ${num(-d.ci[1], 3)} to ${num(-d.ci[0], 3)}).`,
+          `${eq} Na testovacích letech zprávy leží stromové modely i obě regrese do ${num(spread, 3)} AUROC od sebe s překrývajícími se intervaly, jak uvádí zpráva. Na větším testovacím souboru MTOP 2021–2025 vede LightGBM před regresí se splajny o ${num(-d.mean, 3)} (95% IS ${num(-d.ci[1], 3)} až ${num(-d.ci[0], 3)}).`);
       })() })));
     card.appendChild(why);
     return card;
@@ -1481,8 +1554,8 @@
         : `Modely vycházejí z prospektivního registru trombektomií Fakultní nemocnice Ostrava (FNO). Z ${num(E.flow[0].n)} záznamů registru bylo analyzováno ${num(nAll)} dospělých pacientů po endovaskulární léčbě se známým mRS za 90 dní (${E.period[0]}–${E.period[1]}). Diagnostická angiografie bez léčby byla vyřazena. NIHSS 43 v registru označuje úmrtí a 99 „nehodnotitelné“; tyto kódy se nikdy nepoužívají jako skóre.`),
       h("h3", { text: en ? "Models" : "Modely" }),
       P(en
-        ? `Each stage has its own gradient-boosted tree model (LightGBM) with monotone constraints, so that, for example, a longer time to puncture or a higher NIHSS can never raise the predicted chance of independence. Hyperparameters were tuned by cross-validation on the development cohort only. Logistic regression (linear and with restricted cubic splines), XGBoost, a multilayer perceptron, the 7-item FNO bedside score from the earlier registry analysis, published scores (THRIVE, SPAN-100, HIAT2, PRE, NIHSS alone) and refitted published predictor sets (THRIVE-c, MR PREDICTS@24H) serve as comparators. Explanations are exact TreeSHAP values computed in your browser.`
-        : `Každá fáze má vlastní model gradientně boostovaných stromů (LightGBM) s monotónními omezeními, takže například delší čas do punkce nebo vyšší NIHSS nikdy nezvýší predikovanou šanci na nezávislost. Hyperparametry byly laděny křížovou validací pouze na vývojové kohortě. Jako srovnání slouží logistická regrese (lineární i s restrikovanými kubickými splajny), XGBoost, vícevrstvý perceptron, 7položkové bedside skóre FNO z dřívější analýzy registru, publikovaná skóre (THRIVE, SPAN-100, HIAT2, PRE, samotné NIHSS) a přepočtené publikované sady prediktorů (THRIVE-c, MR PREDICTS@24H). Vysvětlení jsou přesné hodnoty TreeSHAP počítané ve vašem prohlížeči.`),
+        ? `Each stage has its own gradient-boosted tree model (LightGBM) with monotone constraints, so that, for example, a longer time to puncture or a higher NIHSS can never raise the predicted chance of independence. Hyperparameters were tuned by cross-validation on the development cohort only. Logistic regression (linear and with restricted cubic splines), XGBoost, a multilayer perceptron, the 7-item FNO bedside score from the earlier registry analysis, published scores (THRIVE, SPAN-100, HIAT2, PRE, NIHSS alone) and refitted published predictor sets (THRIVE-c, MR PREDICTS@24H) serve as comparators; every learner was tuned with the same budget (50 candidate settings on the same cross-validation folds). Explanations are exact TreeSHAP values computed in your browser.`
+        : `Každá fáze má vlastní model gradientně boostovaných stromů (LightGBM) s monotónními omezeními, takže například delší čas do punkce nebo vyšší NIHSS nikdy nezvýší predikovanou šanci na nezávislost. Hyperparametry byly laděny křížovou validací pouze na vývojové kohortě. Jako srovnání slouží logistická regrese (lineární i s restrikovanými kubickými splajny), XGBoost, vícevrstvý perceptron, 7položkové bedside skóre FNO z dřívější analýzy registru, publikovaná skóre (THRIVE, SPAN-100, HIAT2, PRE, samotné NIHSS) a přepočtené publikované sady prediktorů (THRIVE-c, MR PREDICTS@24H); každý model byl laděn se stejným rozpočtem (50 kandidátních nastavení na stejných foldech křížové validace). Vysvětlení jsou přesné hodnoty TreeSHAP počítané ve vašem prohlížeči.`),
       h("h3", { text: en ? "Validation" : "Validace" }),
       P(en
         ? `Temporal validation on patients treated in 2021–2025 gave an AUROC for mRS 0–2 of ${auc("admission")} before thrombectomy, ${auc("procedure")} at the end of the procedure, ${auc("h24")} at 24 hours and ${auc("d7")} on day 7. Outcomes in recent years were worse than the development data predicted, so the published models are refitted on all years and their intercepts shifted to the 2021–2025 outcome level.`

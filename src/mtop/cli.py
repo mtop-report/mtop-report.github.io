@@ -85,13 +85,13 @@ def cmd_compare(args):
     from .compare import run
 
     base, _ = flow(_load_clean())
-    run(base)
+    run(base, quick=getattr(args, "quick", False))
 
 
 def cmd_reconcile(args):
     from .reconcile import run
 
-    run(_load_clean())
+    run(_load_clean(), quick=getattr(args, "quick", False))
     print(f"reconciliation: {paths.REPORTS / 'reconciliation.md'}, {paths.PUBLIC / 'reconciliation.json'}")
 
 
@@ -171,7 +171,7 @@ def main(argv=None):
         p.set_defaults(fn=fn)
         if name in ("clean", "all"):
             p.add_argument("--input", help="registry Excel file (default: data/raw/mt_patients_master.xlsx)")
-        if name in ("train", "extras", "all", "fed-demo", "associations"):
+        if name in ("train", "extras", "all", "fed-demo", "associations", "compare", "reconcile"):
             p.add_argument("--quick", action="store_true", help="fewer tuning trials / bootstrap refits, for testing")
         if name == "extras":
             p.add_argument("--comparators-only", action="store_true",

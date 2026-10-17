@@ -1035,3 +1035,21 @@ tr.dd-outcome th, tr.dd-outcome td { border-top: 1px solid var(--line-2); }
   ul.dd-map li { grid-template-columns: minmax(0, 1fr); }
   .table-scroll:has(> table.dd) { overflow: visible; }
 }
+
+/* ---------------------------------------------------------------- validation: tuning details */
+details.tuning { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 12px; }
+details.tuning > summary { cursor: pointer; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; font-size: 14px; font-weight: 600; color: var(--ink); list-style-position: outside; }
+details.tuning > summary .muted { font-weight: 400; font-size: 12.5px; color: var(--muted); }
+details.tuning > .note { margin-top: 10px; max-width: 100ch; }
+table.tuning-table th, table.tuning-table td { text-align: left; vertical-align: top; }
+table.tuning-table td.txt { white-space: normal; color: var(--ink-2); line-height: 1.45; min-width: 180px; }
+table.tuning-table td:last-child, table.tuning-table th:last-child { text-align: right; white-space: nowrap; }
+table.tuning-table tbody th[scope="row"] { white-space: nowrap; font-weight: 600; }
+@media (max-width: 620px) {
+  table.tuning-table, table.tuning-table tbody, table.tuning-table tr, table.tuning-table th, table.tuning-table td { display: block; width: auto; min-width: 0 !important; }
+  table.tuning-table thead { display: none; }
+  table.tuning-table tr { padding: 10px 0 12px; border-top: 1px solid var(--line); }
+  table.tuning-table tbody th[scope="row"], table.tuning-table td { border: 0; padding: 2px 0; text-align: left !important; white-space: normal !important; }
+  table.tuning-table td[data-l]::before { content: attr(data-l) ": "; font-size: 12px; color: var(--muted); }
+  .table-scroll:has(> table.tuning-table) { overflow: visible; }
+}

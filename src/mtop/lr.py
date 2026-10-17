@@ -1,8 +1,10 @@
 """Penalised logistic regression used as a comparator, and its browser export.
 
 Pipeline: median imputation with missing-value indicators -> standardisation -> L2 logistic
-regression with C chosen by 5-fold cross-validated log-loss. The browser reproduces the same
-arithmetic from the exported numbers (tests/test_extras_parity.py).
+regression. The penalty strength C, its only setting, is chosen from 50 values (1e-4 ... 1e2, log
+grid) by 5-fold cross-validated log-loss on the same folds every learner is tuned on
+(tuning.shared_folds). The browser reproduces the arithmetic from the exported numbers
+(tests/test_extras_parity.py).
 """
 from __future__ import annotations
 
@@ -10,22 +12,43 @@ import inspect
 
 import numpy as np
 from sklearn.impute import SimpleImputer
-from sklearn.linear_model import LogisticRegressionCV
+from sklearn.linear_model import LogisticRegression, LogisticRegressionCV
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
+C_GRID = np.logspace(-4, 2, 50)
+
+
+def cv_logloss(clf) -> float:
+    """Best mean cross-validated log-loss of a fitted LogisticRegressionCV (either attribute layout)."""
+    s = clf.scores_
+    if isinstance(s, dict):
+        s = next(iter(s.values()))
+    return float(-np.max(np.asarray(s, float).mean(axis=0)))
+
+
+def _pipeline(clf):
+    return make_pipeline(SimpleImputer(strategy="median", add_indicator=True, keep_empty_features=True), StandardScaler(), clf)
+
+
+def fit_logreg_fixed(X, y, C: float):
+    """The same pipeline with a given penalty strength (no search): out-of-fold predictions for a
+    setting already chosen, as for LightGBM's out-of-fold recalibration."""
+    return _pipeline(LogisticRegression(C=C, max_iter=5000)).fit(X, y)
+
 
 def fit_logreg(X, y, seed):
-    kw = dict(Cs=np.logspace(-3, 1, 12), cv=5, scoring="neg_log_loss", max_iter=5000, random_state=seed)
+    from .tuning import shared_folds
+
+    kw = dict(Cs=C_GRID, cv=shared_folds(y, seed), scoring="neg_log_loss", max_iter=5000, random_state=seed)
     accepted = inspect.signature(LogisticRegressionCV).parameters
     if "use_legacy_attributes" in accepted:      # scikit-learn >= 1.9: silence the transition warning
         kw.update(use_legacy_attributes=False, l1_ratios=(0.0,))
-    model = make_pipeline(
-        SimpleImputer(strategy="median", add_indicator=True, keep_empty_features=True),
-        StandardScaler(),
-        LogisticRegressionCV(**kw),
-    )
-    return model.fit(X, y)
+    model = _pipeline(LogisticRegressionCV(**kw))
+    model.fit(X, y)
+    clf = model.steps[2][1]
+    model.settings = {"C": float(np.ravel(clf.C_)[0]), "cv_logloss": cv_logloss(clf), "candidates": len(C_GRID)}
+    return model
 
 
 def export_logreg(model, columns: list[str], shift: float = 0.0) -> dict:

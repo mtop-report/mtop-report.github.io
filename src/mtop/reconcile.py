@@ -9,8 +9,10 @@ The earlier report (2026) used the same registry export with different choices:
 MTOP keeps patients with impossible times (the times become missing), drops the diagnostic-only
 angiographies, tests on 2021-2025 and uses 17 admission predictors.
 
-This module rebuilds the report's cohort and split from the raw registry, then compares MTOP's
-models and the regression comparators on both set-ups. Output (aggregates only):
+This module rebuilds the report's cohort and split from the raw registry, then compares the five
+learners (LightGBM, XGBoost, MLP, logistic regression linear and with splines; each tuned anew on
+every set-up's training patients with the same budget, tuning.py) and the scores on both set-ups,
+with and without 12 extra history and lifestyle predictors. Output (aggregates only):
 reports/reconciliation.md and artifacts/public/reconciliation.json.
 """
 from __future__ import annotations
@@ -22,11 +24,11 @@ import pandas as pd
 from . import metrics as M
 from .config import settings
 from .features import design_matrix, monotone_vector
-from .lr import fit_logreg
-from .paths import PRIVATE, PUBLIC, REPORTS
+from .paths import PUBLIC, REPORTS
 from .scores import POINT_SCORES, apply_points_map, fit_points_map
 from .splines import fit_spline_logreg
-from .train import _params, cv_rounds, fit_lgbm
+from .train import _params, fit_lgbm, tune_lgbm
+from .tuning import comparator_models, jsonable, lgbm_settings
 
 REPORT_NUMBERS = {"registry": 1577, "after_exclusions": 1543, "known_mrs": 1422, "train": 1201, "test": 221,
                   "test_good_rate": 0.262, "auc_spline_lr": 0.815, "auc_bedside": 0.774, "auc_bedside_lr": 0.793,
@@ -55,18 +57,22 @@ def report_cohort(clean: pd.DataFrame, issues: pd.DataFrame) -> tuple[pd.DataFra
     return d.copy(), steps
 
 
-def _lgbm(X_tr, y_tr, X_te, seed):
-    res = json.loads((PRIVATE / "train_results.json").read_text())
-    p = res["stages"]["admission"]["targets"]["good_outcome"]["params"]
+def _lgbm(X_tr, y_tr, X_te, seed, trials):
+    """LightGBM tuned on this set-up's training patients exactly as in train.py."""
+    cfg = settings()
     mono = monotone_vector("admission", "good_outcome")
     if len(mono) != X_tr.shape[1]:
         mono = mono + [0] * (X_tr.shape[1] - len(mono))
-    prm = _params(p, mono, seed)
-    rounds = cv_rounds(X_tr, y_tr, prm, seed, 2000, 100)
-    return fit_lgbm(X_tr, y_tr, prm, rounds).predict(X_te)
+    best, rounds, cv_ll = tune_lgbm(X_tr, y_tr, mono, seed, trials, cfg["tuning"]["max_rounds"],
+                                    cfg["tuning"]["early_stopping"], int(cfg["privacy"]["min_leaf"]))
+    model = fit_lgbm(X_tr, y_tr, _params(best, mono, seed), rounds)
+    return model.predict(X_te), lgbm_settings(best, rounds, cv_ll, trials)
 
 
-def compare(d: pd.DataFrame, test_from: int, seed: int, n_boot: int, extended: bool = False) -> dict:
+NAMES = {"Logistic regression": "Logistic regression (linear)"}
+
+
+def compare(d: pd.DataFrame, test_from: int, seed: int, n_boot: int, extended: bool = False, trials: int = 50) -> dict:
     d = d[d["year"].notna()]
     tr, te = d[d["year"] < test_from], d[d["year"] >= test_from]
     X = design_matrix(d, "admission")
@@ -74,11 +80,13 @@ def compare(d: pd.DataFrame, test_from: int, seed: int, n_boot: int, extended: b
         X = pd.concat([X, d[EXTRA_PREDICTORS].astype(float)], axis=1)
     X_tr, X_te = X.loc[tr.index], X.loc[te.index]
     y_tr, y_te = tr["good_outcome"].to_numpy(float), te["good_outcome"].to_numpy(float)
-    preds = {
-        "Logistic regression (splines)": fit_spline_logreg(X_tr, y_tr, seed).predict_proba(X_te)[:, 1],
-        "LightGBM (MTOP settings)": _lgbm(X_tr, y_tr, X_te, seed),
-        "Logistic regression (linear)": fit_logreg(X_tr, y_tr, seed).predict_proba(X_te)[:, 1],
-    }
+    preds, used = {}, {}
+    preds["LightGBM"], used["LightGBM"] = _lgbm(X_tr, y_tr, X_te, seed, trials)
+    for name, mdl in comparator_models(X_tr, y_tr, seed, trials).items():
+        preds[NAMES.get(name, name)] = mdl.predict_proba(X_te)[:, 1]
+        used[NAMES.get(name, name)] = jsonable(mdl.settings)
+    order = ["Logistic regression (splines)", "LightGBM", "XGBoost", "MLP", "Logistic regression (linear)"]
+    preds = {k: preds[k] for k in order}
     if not extended:
         b7 = d[BEDSIDE_VARS].astype(float)
         preds["7-variable regression (splines)"] = fit_spline_logreg(b7.loc[tr.index], y_tr, seed).predict_proba(b7.loc[te.index])[:, 1]
@@ -89,7 +97,7 @@ def compare(d: pd.DataFrame, test_from: int, seed: int, n_boot: int, extended: b
         preds["SPAN index (age + NIHSS)"] = apply_points_map(fit_points_map(span(tr), y_tr), span(te))
     ci = M.bootstrap_ci(y_te, preds, n_boot=n_boot, seed=seed, ref="Logistic regression (splines)")
     out = {"n_train": int(len(tr)), "n_test": int(len(te)), "test_good_rate": float(y_te.mean()),
-           "train_good_rate": float(y_tr.mean()), "predictors": int(X.shape[1]), "models": {}}
+           "train_good_rate": float(y_tr.mean()), "predictors": int(X.shape[1]), "models": {}, "settings": used}
     for k, p in preds.items():
         s = M.summary(y_te, p)
         out["models"][k] = {"auroc": s["auroc"], "auroc_ci": ci[k].get("auroc"), "citl": s["citl"], "slope": s["slope"],
@@ -97,8 +105,9 @@ def compare(d: pd.DataFrame, test_from: int, seed: int, n_boot: int, extended: b
     return out
 
 
-def run(clean: pd.DataFrame, n_boot: int = 1000) -> dict:
+def run(clean: pd.DataFrame, n_boot: int = 1000, quick: bool = False) -> dict:
     seed = int(settings()["seed"])
+    trials = 8 if quick else int(settings()["tuning"]["trials"])
     issues = pd.read_excel(REPORTS / "data_quality.xlsx", sheet_name="issues")
     rep, rep_steps = report_cohort(clean, issues)
     from .cohort import flow
@@ -109,10 +118,12 @@ def run(clean: pd.DataFrame, n_boot: int = 1000) -> dict:
         "report_cohort_rebuilt": rep_steps,
         "mtop_cohort": mtop_steps,
         "setups": {
-            "report cohort, report split (test 2023-2025)": compare(rep, 2023, seed, n_boot),
-            "report cohort, report split, + 12 extra predictors": compare(rep, 2023, seed, n_boot, extended=True),
-            "MTOP cohort, report split (test 2023-2025)": compare(mtop_base, 2023, seed, n_boot),
-            "MTOP cohort, MTOP split (test 2021-2025)": compare(mtop_base, mtop_test_from, seed, n_boot),
+            "report cohort, report split (test 2023-2025)": compare(rep, 2023, seed, n_boot, trials=trials),
+            "report cohort, report split, + 12 extra predictors": compare(rep, 2023, seed, n_boot, extended=True, trials=trials),
+            "MTOP cohort, report split (test 2023-2025)": compare(mtop_base, 2023, seed, n_boot, trials=trials),
+            "MTOP cohort, MTOP split (test 2021-2025)": compare(mtop_base, mtop_test_from, seed, n_boot, trials=trials),
+            "MTOP cohort, MTOP split, + 12 extra predictors": compare(mtop_base, mtop_test_from, seed, n_boot, extended=True,
+                                                                      trials=trials),
         },
     }
     PUBLIC.mkdir(parents=True, exist_ok=True)

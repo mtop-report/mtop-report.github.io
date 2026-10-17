@@ -73,6 +73,81 @@ def subgroup_performance(clean: pd.DataFrame, min_n=30, min_events=10) -> list[d
     return out
 
 
+SEARCH_SPACES = [
+    ("LightGBM", "Optuna TPE: learning rate 0.01–0.08 (log), leaves 3–15, depth 2–5, patients per leaf 20–80, "
+                 "column fraction 0.5–1, row fraction 0.6–1, L2 0.001–30 (log); trees by early stopping (100 rounds, "
+                 "max 3000); monotone constraints; every leaf ≥ 20 patients"),
+    ("XGBoost", "Optuna TPE: learning rate 0.01–0.08 (log), depth 2–5, minimum child weight 1–20 (log), row "
+                "fraction 0.6–1, column fraction 0.5–1, L2 0.001–30 (log), minimum split gain (gamma) 0.001–5 (log); "
+                "trees by early stopping (100 rounds, max 3000)"),
+    ("MLP", "Optuna TPE: 1–3 hidden layers, first layer 8–128 neurons (log; each further layer half as wide), ReLU or "
+            "tanh, weight decay 1e-5–10 (log), Adam learning rate 1e-4–1e-2 (log), batch 32/64/128/256; early stopping "
+            "on 20 % of the training fold (patience 25, max 1000 epochs); median imputation with missing indicators "
+            "and standardisation; the best setting trained from 5 random starts and averaged"),
+    ("Logistic regression", "L2 penalty strength C over 50 values (1e-4–1e2, log grid); median imputation with missing "
+                            "indicators and standardisation"),
+    ("Logistic regression (splines)", "as logistic regression, plus restricted cubic splines (3, 4 or 5 knots at "
+                                      "Harrell's percentiles) for age, NIHSS, onset to puncture, glucose, procedure "
+                                      "duration and later NIHSS; 50 values of C for each number of knots"),
+]
+
+
+def settings_markdown(results: dict) -> str:
+    """Methods supplement: search spaces and the settings chosen for every stage and outcome."""
+    trials = int(settings()["tuning"]["trials"])
+    L = ["# How the models were tuned", "",
+         f"Every learner had the same budget: {trials} candidate settings, each scored by 5-fold stratified "
+         "cross-validated log-loss on the development patients (onset ≤ 2020), with the same folds for every "
+         "learner (seed " + str(settings()["seed"]) + "). The 2021–2025 patients were not used for any choice. "
+         "Published point scores have no settings; their points are mapped to probabilities by one logistic fit "
+         "on the development patients.", "",
+         "| Learner | Searched |", "|---|---|"]
+    L += [f"| {k} | {v} |" for k, v in SEARCH_SPACES]
+    rows = []
+    for st, sres in results["stages"].items():
+        for tg, tres in sres["targets"].items():
+            if "settings" in tres:
+                rows.append((st, tg, tres["settings"]))
+    if not rows:
+        return "\n".join(L) + "\n"
+    out = {"good_outcome": "mRS 0–2", "death90": "death"}
+    f = lambda v: "–" if v is None else (f"{v:.3g}" if isinstance(v, float) else str(v))  # noqa: E731
+    f3 = lambda v: "–" if v is None else f"{v:.3f}"  # noqa: E731
+    L += ["", "## Chosen settings", "", "### LightGBM", "",
+          "| Stage | Outcome | Learning rate | Leaves | Depth | Min leaf | Columns | Rows | L2 | Trees | CV log-loss |",
+          "|---|---|---|---|---|---|---|---|---|---|---|"]
+    for st, tg, s in rows:
+        g = s.get("LightGBM", {})
+        L.append(f"| {st} | {out[tg]} | {f(g.get('learning_rate'))} | {f(g.get('num_leaves'))} | {f(g.get('max_depth'))} | "
+                 f"{f(g.get('min_child_samples'))} | {f(g.get('feature_fraction'))} | {f(g.get('bagging_fraction'))} | "
+                 f"{f(g.get('lambda_l2'))} | {f(g.get('trees'))} | {f3(g.get('cv_logloss'))} |")
+    L += ["", "### XGBoost", "",
+          "| Stage | Outcome | Learning rate | Depth | Min child weight | Rows | Columns | L2 | Gamma | Trees | CV log-loss |",
+          "|---|---|---|---|---|---|---|---|---|---|---|"]
+    for st, tg, s in rows:
+        g = s.get("XGBoost", {})
+        L.append(f"| {st} | {out[tg]} | {f(g.get('learning_rate'))} | {f(g.get('max_depth'))} | {f(g.get('min_child_weight'))} | "
+                 f"{f(g.get('subsample'))} | {f(g.get('colsample_bytree'))} | {f(g.get('lambda'))} | {f(g.get('gamma'))} | "
+                 f"{f(g.get('trees'))} | {f3(g.get('cv_logloss'))} |")
+    L += ["", "### MLP", "",
+          "| Stage | Outcome | Hidden layers | Activation | Weight decay | Learning rate | Batch | CV log-loss |",
+          "|---|---|---|---|---|---|---|---|"]
+    for st, tg, s in rows:
+        g = s.get("MLP", {})
+        layers = "→".join(str(x) for x in g.get("hidden_layers", [])) or "–"
+        L.append(f"| {st} | {out[tg]} | {layers} | {g.get('activation', '–')} | {f(g.get('alpha'))} | {f(g.get('learning_rate'))} | "
+                 f"{f(g.get('batch_size'))} | {f3(g.get('cv_logloss'))} |")
+    L += ["", "### Logistic regression", "",
+          "| Stage | Outcome | C (linear) | CV log-loss | Knots (splines) | C (splines) | CV log-loss |",
+          "|---|---|---|---|---|---|---|"]
+    for st, tg, s in rows:
+        a, b = s.get("Logistic regression", {}), s.get("Logistic regression (splines)", {})
+        L.append(f"| {st} | {out[tg]} | {f(a.get('C'))} | {f3(a.get('cv_logloss'))} | {f(b.get('knots'))} | {f(b.get('C'))} | "
+                 f"{f3(b.get('cv_logloss'))} |")
+    L += ["", "C is the inverse penalty strength: smaller C means stronger shrinkage.", ""]
+    return "\n".join(L)
+
+
 def build_report(clean: pd.DataFrame) -> None:
     REPORTS.mkdir(parents=True, exist_ok=True)
     figdir = REPORTS / "figures"
@@ -142,6 +217,7 @@ def build_report(clean: pd.DataFrame) -> None:
         with open(PUBLIC / "subgroups.json", "w", encoding="utf-8") as fh:
             json.dump(sub, fh, ensure_ascii=False, separators=(",", ":"))
     (REPORTS / "validation_summary.md").write_text("\n".join(md), encoding="utf-8")
+    (REPORTS / "model_settings.md").write_text(settings_markdown(res), encoding="utf-8")
 
     # ---------------- figures
     tg = "good_outcome"

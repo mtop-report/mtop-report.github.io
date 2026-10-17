@@ -171,6 +171,8 @@ def export_all() -> None:
             v["deployed"] = tres["deployed"]
             v["params"] = tres["params"]
             v["rounds_dev"] = tres["rounds_dev"]
+            if "settings" in tres:
+                v["settings"] = tres["settings"]
             validation["stages"][stage]["targets"][target] = v
 
     canon = json.dumps(bundle["models"], sort_keys=True, separators=(",", ":")).encode("utf-8")

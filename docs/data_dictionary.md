@@ -56,7 +56,7 @@ listed with the patient ID in `reports/data_quality.xlsx` (never published).
 | `IAT` | Intra-arterial lysis is rare and part of the procedure details. |
 | `Stroke onset to IVT (min)`, `Stroke onset to recanalization (min)` | Onset to puncture and procedure duration carry the same timing. |
 | `non-SICH` | Only symptomatic haemorrhage is used. |
-| `Hyperlipidemia`, `Smoking`, `Alcohol abusus`, `Statins before`, `TIA before`, `BMI`, `Heart condition`, `Diastolic BP`, antiplatelets | No added value in this registry: adding twelve such items (with onset hour and posterior circulation) changed the 2021–2025 AUROC by +0.004 for the MTOP model and −0.012 for spline regression (`python -m mtop reconcile`); several are often missing. |
+| `Hyperlipidemia`, `Smoking`, `Alcohol abusus`, `Statins before`, `TIA before`, `BMI`, `Heart condition`, `Diastolic BP`, antiplatelets | No added value in this registry: adding twelve such items (with onset hour and posterior circulation) changed the 2021–2025 AUROC by +0.001 for the MTOP model and −0.022 for spline regression, and on the earlier report's 2023–2025 test years by +0.006 and +0.018 (every model re-tuned with the same budget; `python -m mtop reconcile`); several are often missing. |
 | `Cholesterol` | Measured later in the stay; whether it is missing tracks early death, which would leak the outcome. |
 | `Etiology` | Known only after the work-up, not at the prediction moments. |
 | `Decompression surgery` | Happens after the prediction moments. |

@@ -5,8 +5,9 @@ For every stage x target:
      (onset <= 2020) with Optuna, minimising 5-fold cross-validated log-loss.
   2. Internal validation: repeated stratified CV on the development cohort.
   3. Temporal validation on 2021+ patients for LightGBM and comparators
-     (logistic regression, linear and with splines, XGBoost, MLP) and published scores;
-     bootstrap 95% CIs and decision curves for every model.
+     (logistic regression, linear and with splines, XGBoost, MLP), each tuned with the same
+     budget on the same folds (tuning.py), and published scores; bootstrap 95% CIs and decision
+     curves for every model.
   4. Recalibration analysis: does re-estimating the intercept on 2021-22 fix calibration
      in 2023+?
   5. Deployment model: refit on all years, then intercept-recalibrate to the recent era
@@ -23,19 +24,14 @@ import lightgbm as lgb
 import numpy as np
 import optuna
 import pandas as pd
-from sklearn.impute import SimpleImputer
-from sklearn.model_selection import GridSearchCV, RepeatedStratifiedKFold, StratifiedKFold
-from sklearn.neural_network import MLPClassifier
-from sklearn.pipeline import make_pipeline
-from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import RepeatedStratifiedKFold, StratifiedKFold
 
 from . import metrics as M
 from .cohort import split_temporal, stage_cohort
 from .config import settings, stage_ids, targets
 from .features import column_to_feature, design_matrix, monotone_vector
-from .lr import fit_logreg
 from .scores import benchmark_predictions
-from .splines import fit_spline_logreg
+from .tuning import comparator_models, jsonable, lgbm_settings
 
 log = logging.getLogger("mtop.train")
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -110,60 +106,6 @@ def oof_lgbm(X, y, params, rounds, seed, folds=5, repeats=1):
         cnt[va] += 1
         aucs.append(M.roc_auc_score(y[va], p))
     return pred / cnt, aucs
-
-
-# ------------------------------------------------------------------------------- comparators
-def fit_mlp(X, y, seed):
-    """MLP comparator: small grid search, then a 5-seed average of the best setting (stabler)."""
-    from sklearn.base import clone
-
-    base = make_pipeline(
-        SimpleImputer(strategy="median", add_indicator=True, keep_empty_features=True),
-        StandardScaler(),
-        MLPClassifier(max_iter=1000, early_stopping=True, validation_fraction=0.2,
-                      n_iter_no_change=25, random_state=seed),
-    )
-    grid = {"mlpclassifier__hidden_layer_sizes": [(16,), (32, 16)],
-            "mlpclassifier__alpha": [1e-2, 1e-1, 1.0],
-            "mlpclassifier__learning_rate_init": [1e-3]}
-    gs = GridSearchCV(base, grid, scoring="neg_log_loss", n_jobs=2,
-                      cv=StratifiedKFold(5, shuffle=True, random_state=seed)).fit(X, y)
-    members = [clone(base).set_params(**gs.best_params_, mlpclassifier__random_state=seed + k).fit(X, y)
-               for k in range(5)]
-
-    class _Ensemble:
-        def predict_proba(self, Xn):
-            return np.mean([m.predict_proba(Xn) for m in members], axis=0)
-
-    return _Ensemble()
-
-
-def fit_xgb(X, y, seed):
-    import xgboost as xgb
-
-    d = xgb.DMatrix(X, label=y, missing=np.nan)
-    best = None
-    for md in (2, 3, 4):
-        for mcw in (1, 5, 10):
-            p = {"objective": "binary:logistic", "eval_metric": "logloss", "eta": 0.03,
-                 "max_depth": md, "min_child_weight": mcw, "subsample": 0.8,
-                 "colsample_bytree": 0.8, "lambda": 1.0, "seed": seed, "nthread": 2}
-            cv = xgb.cv(p, d, num_boost_round=3000, nfold=5, stratified=True, seed=seed,
-                        early_stopping_rounds=100, verbose_eval=False)
-            score = cv["test-logloss-mean"].iloc[-1]
-            if best is None or score < best[0]:
-                best = (score, p, len(cv))
-    booster = xgb.train(best[1], d, num_boost_round=best[2])
-
-    class _Wrap:
-        def __init__(self, b):
-            self.b = b
-
-        def predict_proba(self, Xn):
-            p = self.b.predict(xgb.DMatrix(Xn, missing=np.nan))
-            return np.column_stack([1 - p, p])
-
-    return _Wrap(booster)
 
 
 # ------------------------------------------------------------------------------- explanations
@@ -252,10 +194,10 @@ def run(base: pd.DataFrame, out_private, quick: bool = False) -> dict:
             # temporal validation
             m_dev = fit_lgbm(X_dev, y_dev, params, rounds)
             preds = {"LightGBM": m_dev.predict(X_test)}
-            for name, fit in (("Logistic regression", fit_logreg), ("Logistic regression (splines)", fit_spline_logreg),
-                              ("XGBoost", fit_xgb), ("MLP", fit_mlp)):
-                mdl = fit(X_dev, y_dev, seed)
+            used = {"LightGBM": lgbm_settings(best, rounds, cv_ll, trials)}
+            for name, mdl in comparator_models(X_dev, y_dev, seed, trials).items():
                 preds[name] = mdl.predict_proba(X_test)[:, 1]
+                used[name] = jsonable(mdl.settings)
             preds.update(benchmark_predictions(dev, test, stage, target, seed))
             temporal = {k: M.summary(y_test, v) for k, v in preds.items()}
             ci = M.bootstrap_ci(y_test, preds, n_boot=n_boot, seed=seed, ref="LightGBM")
@@ -307,7 +249,7 @@ def run(base: pd.DataFrame, out_private, quick: bool = False) -> dict:
             explain = shap_summary(m_all, X_all, stage, min_cell)
 
             results["stages"][stage]["targets"][target] = {
-                "params": best, "rounds_dev": rounds, "tuning_cv_logloss": cv_ll,
+                "params": best, "rounds_dev": rounds, "tuning_cv_logloss": cv_ll, "settings": used,
                 "internal": internal, "temporal": temporal, "curves": curves,
                 "recalibration": recal, "deployed": deployed, "explain": explain,
                 "seconds": round(time.time() - t0, 1),

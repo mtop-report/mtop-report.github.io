@@ -28,10 +28,10 @@ from .clean import TICI_LABEL, clean_registry, load_raw
 from .cohort import flow, split_temporal, stage_cohort
 from .config import features, settings, stage_ids
 from .features import design_matrix, monotone_vector
-from .lr import export_logreg, fit_logreg
+from .lr import export_logreg, fit_logreg, fit_logreg_fixed
 from .paths import PRIVATE, PUBLIC, SYNTHETIC
 from .scores import PANEL, POINT_SCORES, REFIT_TERMS, apply_points_map, design, fit_points_map
-from .splines import export_spline_logreg, fit_spline_logreg
+from .splines import export_spline_logreg, fit_spline_logreg, fit_spline_logreg_fixed
 from .train import _params, fit_lgbm, oof_lgbm
 
 UW_MRS = [1.0, 0.91, 0.76, 0.65, 0.33, 0.0, 0.0]  # utility-weighted mRS (Chaisinanunkul et al., Stroke 2015)
@@ -103,17 +103,19 @@ def generalized_c(score_better, mrs):
 
 
 # ------------------------------------------------------------------------------ helpers
-def _oof_logreg(Xd, y, seed):
+# Out-of-fold predictions for the recent-era shift use the setting chosen on all patients (as the
+# deployed LightGBM does), so the search is not repeated inside every fold.
+def _oof_logreg(Xd, y, seed, C):
     p = np.zeros(len(y))
     for tr, va in StratifiedKFold(5, shuffle=True, random_state=seed).split(Xd, y):
-        p[va] = fit_logreg(Xd.iloc[tr], y[tr], seed).predict_proba(Xd.iloc[va])[:, 1]
+        p[va] = fit_logreg_fixed(Xd.iloc[tr], y[tr], C).predict_proba(Xd.iloc[va])[:, 1]
     return p
 
 
-def _oof_spline(X, y, seed):
+def _oof_spline(X, y, seed, k, C):
     p = np.zeros(len(y))
     for tr, va in StratifiedKFold(5, shuffle=True, random_state=seed).split(X, y):
-        p[va] = fit_spline_logreg(X.iloc[tr], y[tr], seed).predict_proba(X.iloc[va])[:, 1]
+        p[va] = fit_spline_logreg_fixed(X.iloc[tr], y[tr], k, C).predict_proba(X.iloc[va])[:, 1]
     return p
 
 
@@ -140,10 +142,10 @@ def stage_comparators(stage: str, d: pd.DataFrame, X: pd.DataFrame, yg: np.ndarr
     comp = {}
     lrm = fit_logreg(X, yg, seed)
     comp["Logistic regression"] = {"kind": "lr", "spec": export_logreg(
-        lrm, list(X.columns), _citl(yg[recent], _oof_logreg(X, yg, seed)[recent]))}
+        lrm, list(X.columns), _citl(yg[recent], _oof_logreg(X, yg, seed, lrm.settings["C"])[recent]))}
     slr = fit_spline_logreg(X, yg, seed)
     comp["Logistic regression (splines)"] = {"kind": "spline", "spec": export_spline_logreg(
-        slr, _citl(yg[recent], _oof_spline(X, yg, seed)[recent]))}
+        slr, _citl(yg[recent], _oof_spline(X, yg, seed, slr.settings["knots"], slr.settings["C"])[recent]))}
     for name in PANEL[stage]:
         if name in POINT_SCORES:
             sc = POINT_SCORES[name](d)
@@ -154,7 +156,7 @@ def stage_comparators(stage: str, d: pd.DataFrame, X: pd.DataFrame, yg: np.ndarr
             terms = REFIT_TERMS[name]
             Xd = design(d, terms)
             mdl = fit_logreg(Xd, yg, seed)
-            sh = _citl(yg[recent], _oof_logreg(Xd, yg, seed)[recent])
+            sh = _citl(yg[recent], _oof_logreg(Xd, yg, seed, mdl.settings["C"])[recent])
             comp[name] = {"kind": "refit", "terms": [list(t) for t in terms],
                           "spec": export_logreg(mdl, list(Xd.columns), sh)}
     return comp
