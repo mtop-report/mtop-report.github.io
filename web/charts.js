@@ -44,7 +44,7 @@
   function ticks(lo, hi, n) {
     const st = niceStep(hi - lo, n);
     const out = [];
-    for (let v = Math.ceil(lo / st - 1e-9) * st; v <= hi + 1e-9; v += st) out.push(+v.toFixed(10));
+    for (let v = Math.ceil(lo / st - 1e-9) * st; v <= hi + 1e-9; v += st) { const r = +v.toFixed(10); out.push(r === 0 ? 0 : r); }
     return out;
   }
 
@@ -176,10 +176,13 @@
       // x ticks
       if (cat) {
         const every = Math.max(1, Math.ceil(n / Math.max(2, Math.floor(iw / 46))));
-        o.x.cats.forEach((c, i) => {
-          if (i % every !== 0 && i !== n - 1) return;
-          txt(g, xs(i), m.t + ih + 16, c, { "text-anchor": "middle" });
-        });
+        const shown = [];
+        for (let i = 0; i < n; i += every) shown.push(i);
+        if (shown[shown.length - 1] !== n - 1) {
+          if (n - 1 - shown[shown.length - 1] < Math.max(1, every * 0.75)) shown.pop();
+          shown.push(n - 1);
+        }
+        for (const i of shown) txt(g, xs(i), m.t + ih + 16, o.x.cats[i], { "text-anchor": "middle" });
       } else {
         const xt = o.x.ticks || ticks(o.x.domain[0], o.x.domain[1], Math.max(2, Math.floor(iw / 70)));
         for (const v of xt) txt(g, xs(v), m.t + ih + 16, o.x.fmt ? o.x.fmt(v) : String(v), { "text-anchor": "middle" });
@@ -369,5 +372,130 @@
     return `M${x},${y}H${x + w - r}Q${x + w},${y} ${x + w},${y + r}V${y + hgt - r}Q${x + w},${y + hgt} ${x + w - r},${y + hgt}H${x}Z`;
   }
 
-  root.MTOPCharts = { h, s, figure, dataTable, lineChart, grotta, hbars, tip, ticks, linear };
+  // ------------------------------------------------------------------ forest plot
+  /**
+   * forest(body, { rows:[{label, sub, est, lo, hi, weight, display}], pooled:{label, est, lo, hi, piLo, piHi, display},
+   *               domain:[a,b], ticks, fmt, refLabel })
+   */
+  function forest(body, o) {
+    responsive(body, (W) => {
+      body.replaceChildren();
+      const narrow = W < 560;
+      const rowH = narrow ? 40 : 28;
+      const labelW = narrow ? 0 : Math.min(220, Math.round(W * 0.32));
+      const valW = narrow ? 0 : 150;
+      const top = 6, axisH = 30;
+      const nRows = o.rows.length + (o.pooled ? 1 : 0);
+      const H = top + nRows * rowH + (o.pooled ? 8 : 0) + axisH;
+      const svg = s("svg", { width: W, height: H, viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": o.aria || "" }, body);
+      const x0 = labelW + (labelW ? 12 : 4), x1 = W - valW - 8;
+      const xs = linear(o.domain[0], o.domain[1], x0, x1);
+      const yEnd = top + nRows * rowH + (o.pooled ? 8 : 0);
+      const tk = o.ticks || ticks(o.domain[0], o.domain[1], 5);
+      for (const v of tk) {
+        s("line", { class: "grid", x1: xs(v), x2: xs(v), y1: top, y2: yEnd }, svg);
+        txt(svg, xs(v), yEnd + 16, o.fmt ? o.fmt(v) : String(v), { "text-anchor": "middle" });
+      }
+      if (o.pooled) s("line", { x1: xs(o.pooled.est), x2: xs(o.pooled.est), y1: top, y2: yEnd, style: "stroke: var(--accent); stroke-width:1; opacity:0.6" }, svg);
+      const maxW = Math.max(...o.rows.map((r) => r.weight || 0), 0.0001);
+      const show = (r, cx, cy) => tip.show(r.label, [{ label: r.sub || "", value: r.display }], cx, cy);
+      o.rows.forEach((r, i) => {
+        const yMid = top + i * rowH + (narrow ? 26 : rowH / 2);
+        if (narrow) txt(svg, 4, top + i * rowH + 11, `${r.label} · ${r.display}`, { class: "lbl" });
+        else {
+          txt(svg, 0, yMid + 4, r.label, { class: "lbl" });
+          if (r.sub) txt(svg, labelW, yMid + 4, r.sub, { "text-anchor": "end" });
+          txt(svg, W, yMid + 4, r.display, { "text-anchor": "end", class: "lbl" });
+        }
+        if (r.est === null || r.est === undefined) return;
+        s("line", { x1: xs(Math.max(o.domain[0], r.lo)), x2: xs(Math.min(o.domain[1], r.hi)), y1: yMid, y2: yMid, style: `stroke:${r.color || "var(--ink-2)"}; stroke-width:1.5` }, svg);
+        const side = 6 + 8 * Math.sqrt((r.weight || maxW) / maxW);
+        const sq = s("rect", { x: xs(r.est) - side / 2, y: yMid - side / 2, width: side, height: side, rx: 1.5, tabindex: 0,
+          style: `fill:${r.color || "var(--c1)"}; stroke: var(--surface); stroke-width: 2` }, svg);
+        sq.addEventListener("pointermove", (ev) => show(r, ev.clientX, ev.clientY));
+        sq.addEventListener("pointerleave", () => tip.hide());
+        sq.addEventListener("focus", () => { const b = sq.getBoundingClientRect(); show(r, b.right, b.top); });
+        sq.addEventListener("blur", () => tip.hide());
+      });
+      if (o.pooled) {
+        const p = o.pooled;
+        const yMid = top + o.rows.length * rowH + 8 + (narrow ? 26 : rowH / 2);
+        s("line", { x1: x0, x2: x1, y1: yMid - rowH / 2 - 2, y2: yMid - rowH / 2 - 2, class: "axis" }, svg);
+        if (p.piLo !== undefined) s("line", { x1: xs(Math.max(o.domain[0], p.piLo)), x2: xs(Math.min(o.domain[1], p.piHi)), y1: yMid, y2: yMid, style: "stroke: var(--accent); stroke-width:1.5; opacity:0.55" }, svg);
+        const d = `M${xs(p.lo)},${yMid}L${xs(p.est)},${yMid - 7}L${xs(p.hi)},${yMid}L${xs(p.est)},${yMid + 7}Z`;
+        s("path", { d, style: "fill: var(--accent)" }, svg);
+        if (narrow) txt(svg, 4, top + o.rows.length * rowH + 8 + 11, `${p.label} · ${p.display}`, { class: "lbl-strong" });
+        else {
+          txt(svg, 0, yMid + 4, p.label, { class: "lbl-strong" });
+          txt(svg, W, yMid + 4, p.display, { "text-anchor": "end", class: "lbl-strong" });
+        }
+      }
+    });
+  }
+
+  // ------------------------------------------------------------------ icon array (100 people)
+  /** iconArray(body, { counts:[ints summing to 100], colors:[css], labels:[str] }) */
+  function iconArray(body, o) {
+    responsive(body, (W) => {
+      body.replaceChildren();
+      const cols = 20, rows = 5;
+      const cell = Math.max(12, Math.min(26, Math.floor(W / cols)));
+      const Wd = cell * cols, Hd = cell * rows * 1.55;
+      const svg = s("svg", { width: Wd, height: Hd, viewBox: `0 0 ${Wd} ${Hd}`, role: "img", "aria-label": o.aria || "" }, body);
+      let k = 0;
+      const groups = [];
+      o.counts.forEach((c, g) => { for (let i = 0; i < c; i++) groups.push(g); });
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          const g = groups[k++];
+          if (g === undefined) continue;
+          const cx = c * cell + cell / 2, cy = r * cell * 1.55 + cell * 0.32;
+          const col = o.colors[g];
+          const grp = s("g", { tabindex: -1 }, svg);
+          s("circle", { cx, cy, r: cell * 0.2, style: `fill:${col}` }, grp);
+          const bw = cell * 0.56, bh = cell * 0.78, bx = cx - bw / 2, by = cy + cell * 0.25;
+          s("path", { d: `M${bx},${by + bh}V${by + bw / 2}A${bw / 2},${bw / 2} 0 0 1 ${bx + bw},${by + bw / 2}V${by + bh}Z`, style: `fill:${col}` }, grp);
+          grp.addEventListener("pointermove", (ev) => tip.show(o.labels[g], [{ label: "", value: `${o.counts[g]} / 100` }], ev.clientX, ev.clientY));
+          grp.addEventListener("pointerleave", () => tip.hide());
+        }
+      }
+    });
+  }
+
+  // ------------------------------------------------------------------ heat grid (single hue, opacity ramp)
+  /** heat(body, { rows:[{label, values:[0..100|null]}], cols:[labels], fmt }) */
+  function heat(body, o) {
+    responsive(body, (W) => {
+      body.replaceChildren();
+      const labelW = Math.min(150, Math.round(W * 0.3));
+      const n = o.cols.length;
+      const cw = Math.max(10, (W - labelW - 4) / n);
+      const rh = 24, top = 4, axisH = 40;
+      const H = top + o.rows.length * rh + axisH;
+      const svg = s("svg", { width: W, height: H, viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": o.aria || "" }, body);
+      o.rows.forEach((r, i) => {
+        const y = top + i * rh;
+        txt(svg, labelW - 8, y + rh / 2 + 4, r.label, { "text-anchor": "end", class: "lbl" });
+        r.values.forEach((v, j) => {
+          const x = labelW + j * cw;
+          const rect = s("rect", { x: x + 1, y: y + 1, width: Math.max(1, cw - 2), height: rh - 2, rx: 2,
+            style: v === null ? "fill: var(--surface-2)" : `fill: var(--accent); fill-opacity:${(0.08 + 0.92 * (v / 100)).toFixed(3)}` }, svg);
+          rect.addEventListener("pointermove", (ev) => tip.show(`${r.label} · ${o.cols[j]}`, [{ label: o.valueLabel || "", value: v === null ? "–" : o.fmt(v) }], ev.clientX, ev.clientY));
+          rect.addEventListener("pointerleave", () => tip.hide());
+          if (cw >= 30 && v !== null) {
+            txt(svg, x + cw / 2, y + rh / 2 + 4, String(Math.round(v)), { "text-anchor": "middle", style: `font-size:10.5px; pointer-events:none; fill:${v > 55 ? "#ffffff" : "var(--ink-2)"}` });
+          }
+        });
+      });
+      const every = Math.max(1, Math.ceil(n / Math.max(2, Math.floor((W - labelW) / 44))));
+      o.cols.forEach((c, j) => {
+        if (j % every !== 0 && j !== n - 1) return;
+        const x = labelW + j * cw + cw / 2;
+        const tt = txt(svg, x, top + o.rows.length * rh + 14, c, { "text-anchor": "end", transform: `rotate(-35 ${x} ${top + o.rows.length * rh + 14})` });
+        tt.setAttribute("dy", "0");
+      });
+    });
+  }
+
+  root.MTOPCharts = { h, s, figure, dataTable, lineChart, grotta, hbars, tip, ticks, linear, forest, iconArray, heat };
 })(typeof globalThis !== "undefined" ? globalThis : this);

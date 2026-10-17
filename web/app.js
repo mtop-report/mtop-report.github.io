@@ -6,7 +6,9 @@
   const V = DATA.validation;
   const E = DATA.explorer;
   const SITE = DATA.site || {};
+  const X = DATA.extras || {};
   const M = window.MTOPModel;
+  const XE = window.MTOPExtra;
   const C = window.MTOPCharts;
   const I18N = window.MTOP_I18N;
   const { h } = C;
@@ -21,6 +23,7 @@
   if (!I18N[lang]) lang = "en";
   const t = () => I18N[lang];
   const L = (o) => (o && typeof o === "object" ? o[lang] || o.en : o);
+  const tx = (en, cs) => (lang === "cs" ? cs : en);
 
   const STAGES = B.stages.map((s) => s.id);
   const STAGE = Object.fromEntries(B.stages.map((s) => [s.id, s]));
@@ -47,6 +50,7 @@
     valTarget: "good_outcome",
     valStage: "admission",
     regDim: "era",
+    distView: "bar",
   };
   const idx = (s) => STAGES.indexOf(s);
 
@@ -152,6 +156,22 @@
   const $ = (sel, el) => (el || document).querySelector(sel);
   const app = $("#app");
 
+  const VIEW_ORDER = ["calc", "registry", "validation", "adaptive", "network", "roadmap", "about"];
+  const VIEWS = {
+    calc: { label: () => t().tabCalc, render: () => renderCalc() },
+    registry: { label: () => t().tabRegistry, render: () => renderRegistry() },
+    validation: { label: () => t().tabValidation, render: () => renderValidation() },
+    about: { label: () => t().tabAbout, render: () => renderAbout() },
+  };
+  function registerView(id, label, renderFn) { VIEWS[id] = { label, render: renderFn }; }
+  const viewIds = () => VIEW_ORDER.filter((id) => VIEWS[id]);
+  function goTo(id) {
+    S.view = id;
+    try { history.replaceState(null, "", `#${id}`); } catch (e) { /* sandboxed frame */ }
+    render();
+    window.scrollTo(0, 0);
+  }
+
   function render() {
     document.documentElement.lang = lang;
     app.replaceChildren(header(), mainEl(), footer());
@@ -159,12 +179,11 @@
   }
 
   function header() {
-    const tabs = [["calc", t().tabCalc], ["registry", t().tabRegistry], ["validation", t().tabValidation], ["about", t().tabAbout]];
     const nav = h("nav", { class: "tabs", role: "tablist", "aria-label": "MTOP" },
-      tabs.map(([id, label]) => h("button", {
+      viewIds().map((id) => h("button", {
         class: "tab", role: "tab", type: "button", id: `tab-${id}`, "aria-selected": String(S.view === id), "aria-controls": `view-${id}`,
-        onclick: () => { S.view = id; try { history.replaceState(null, "", `#${id}`); } catch (e) { /* sandboxed frame */ } render(); window.scrollTo(0, 0); },
-      }, label)));
+        onclick: () => goTo(id),
+      }, VIEWS[id].label())));
     const langSw = h("div", { class: "lang", role: "group", "aria-label": "Language" },
       [["en", "EN"], ["cs", "CZ"]].map(([code, lbl]) => h("button", {
         type: "button", "aria-pressed": String(lang === code), onclick: () => { lang = code; store.set("mtop.lang", code); render(); },
@@ -176,10 +195,7 @@
 
   function mainEl() {
     return h("main", { class: "wrap", id: "main" },
-      h("section", { class: "view", id: "view-calc", role: "tabpanel", "aria-labelledby": "tab-calc", hidden: S.view !== "calc" }),
-      h("section", { class: "view", id: "view-registry", role: "tabpanel", "aria-labelledby": "tab-registry", hidden: S.view !== "registry" }),
-      h("section", { class: "view", id: "view-validation", role: "tabpanel", "aria-labelledby": "tab-validation", hidden: S.view !== "validation" }),
-      h("section", { class: "view", id: "view-about", role: "tabpanel", "aria-labelledby": "tab-about", hidden: S.view !== "about" }));
+      viewIds().map((id) => h("section", { class: "view", id: `view-${id}`, role: "tabpanel", "aria-labelledby": `tab-${id}`, hidden: S.view !== id })));
   }
 
   function footer() {
@@ -189,10 +205,8 @@
   }
 
   function renderView() {
-    if (S.view === "calc") renderCalc();
-    if (S.view === "registry") renderRegistry();
-    if (S.view === "validation") renderValidation();
-    if (S.view === "about") renderAbout();
+    const v = VIEWS[S.view] || VIEWS.calc;
+    v.render($(`#view-${S.view}`));
   }
 
   // ================================================================== calculator
@@ -249,11 +263,62 @@
       if (FEAT[key]) body.appendChild(field(FEAT[key]));
     }
     if (st === "admission") body.appendChild(historyField());
+    body.appendChild(previewBlock(st));
     card.appendChild(body);
     card.appendChild(h("div", { class: "stage-locked-note" },
       h("span", { text: t().lockedNote }),
       h("button", { class: "btn btn-primary", type: "button", onclick: () => setCurrent(st) }, `${t().addStage}: ${stageLabel(st)}`)));
     return card;
+  }
+
+  const PREVIEW = {
+    admission: [
+      { label: ["CT perfusion core volume", "Objem jádra infarktu (CT perfuze)"], unit: "mL", status: "candidate" },
+      { label: ["CTA collateral score (0–3)", "Skóre kolaterál na CTA (0–3)"], unit: "", status: "candidate" },
+    ],
+    procedure: [
+      { label: ["Number of device passes", "Počet průchodů"], unit: "", status: "candidate" },
+      { label: ["eTICI 2c / 3 distinction", "Rozlišení eTICI 2c / 3"], unit: "", status: "candidate" },
+    ],
+    h24: [
+      { label: ["Serum GFAP", "Sérový GFAP"], unit: "pg/mL", status: "collecting" },
+      { label: ["Serum neurofilament light (NfL)", "Sérový neurofilament (NfL)"], unit: "pg/mL", status: "candidate" },
+    ],
+    d7: [
+      { label: ["Follow-up infarct volume", "Kontrolní objem infarktu"], unit: "mL", status: "candidate" },
+    ],
+  };
+  const STATUS = {
+    live: () => ({ cls: "st-live", text: tx("Live", "Funguje") }),
+    beta: () => ({ cls: "st-beta", text: tx("New · beta", "Nové · beta") }),
+    progress: () => ({ cls: "st-progress", text: tx("In progress", "Probíhá") }),
+    collecting: () => ({ cls: "st-progress", text: tx("Being collected", "Sbírá se") }),
+    planned: () => ({ cls: "st-planned", text: tx("Planned", "Plánováno") }),
+    candidate: () => ({ cls: "st-planned", text: tx("Candidate", "Kandidát") }),
+    proposed: () => ({ cls: "st-planned", text: tx("Proposed", "Navrženo") }),
+  };
+
+  function statusChip(kind) {
+    const st = STATUS[kind]();
+    return h("span", { class: `status ${st.cls}` }, h("i", { "aria-hidden": "true" }), st.text);
+  }
+
+  function previewBlock(st) {
+    const items = PREVIEW[st] || [];
+    const det = h("details", { class: "preview field wide" });
+    det.appendChild(h("summary", null, h("span", { text: tx("Preview: predictors for future versions", "Náhled: prediktory budoucích verzí") }), h("span", { class: "preview-note", text: tx("not used by the model", "model je nepoužívá") })));
+    const grid = h("div", { class: "preview-grid" });
+    items.forEach((it, i) => {
+      const id = `pv-${st}-${i}`;
+      grid.appendChild(h("div", { class: "preview-item" },
+        h("label", { for: id, text: tx(it.label[0], it.label[1]) }),
+        h("div", { class: "preview-row" }, h("input", { id, type: "text", disabled: true, placeholder: it.unit || "–" }), statusChip(it.status))));
+    });
+    det.appendChild(grid);
+    det.appendChild(h("p", { class: "help", text: st === "h24"
+      ? tx("GFAP is being collected prospectively at FNO. It will enter the model once enough patients with known 90-day outcome are available, after its added value has been tested.", "GFAP se ve FNO prospektivně sbírá. Do modelu vstoupí, až bude dost pacientů se známým výsledkem za 90 dní a jeho přínos bude ověřen.")
+      : tx("Not recorded in the registry yet. Shown to illustrate how later versions could use it.", "Registr je zatím neeviduje. Zobrazeno pro ilustraci, jak by je mohly využít další verze.") }));
+    return det;
   }
 
   function setCurrent(st) {
@@ -389,7 +454,7 @@
     if (idx(S.viewed) > idx(S.current)) S.viewed = S.current;
     const vs = S.viewed;
     const pv = preds[vs];
-    readoutEl.replaceChildren(headlineCard(vs, pv), trajectoryCard(preds), explainCard(vs, pv), whatifCard(vs, x));
+    readoutEl.replaceChildren(...[headlineCard(vs, pv), distributionCard(vs, pv), trajectoryCard(preds), explainCard(vs, pv), othersCard(vs, x, pv), whatifCard(vs, x)].filter(Boolean));
     if (stickyEl) $(".inner", stickyEl).replaceChildren(
       h("span", { html: t().sticky(pct(pv.good.p), pct(pv.death.p)) }),
       h("span", { class: "delta", text: stageLabel(vs) }));
@@ -404,9 +469,146 @@
         h("div", null, h("div", { class: "eyebrow", text: t().estimateAt(stageLabel(st)) }), big, h("div", { class: "big-label", text: t().headline })),
         h("div", { class: "side-stat" }, h("div", { class: "v", text: pct(d) }), h("div", { class: "l", text: t().deathLabel }),
           st === "d7" ? h("div", { class: "l", style: "color:var(--muted)", text: t().lateDeaths }) : null)));
+    const unc = XE.uncertainty(((X.uncertainty || {})[st] || {}).good_outcome, g);
+    if (unc) {
+      card.querySelector(".big-label").after(h("div", { class: "range-note" },
+        tx("95% range across 100 model refits: ", "95% rozpětí ze 100 přetrénování modelu: "), h("b", { text: `${num(unc[0] * 100)}–${pct(unc[1])}` })));
+    }
     if (bin) {
       card.appendChild(h("div", { class: "reality", html: t().reality(pct(bin.lo), pct(bin.hi), pct(bin.obs), bin.n) }));
     }
+    return card;
+  }
+
+  // ------------------------------------------------------------------ full mRS distribution
+  const MRS_GROUP_COLORS = [0, 1, 2, 3, 4, 5, 6].map((k) => `var(--mrs${k})`);
+  const MRS_TEXT = [
+    ["no symptoms", "bez příznaků"], ["no significant disability", "bez významného postižení"], ["slight disability", "lehké postižení"],
+    ["moderate disability", "středně těžké postižení"], ["moderately severe", "středně těžké až těžké"], ["severe disability", "těžké postižení"], ["dead", "úmrtí"],
+  ];
+
+  function roundTo100(ps) {
+    const raw = ps.map((p) => p * 100);
+    const base = raw.map(Math.floor);
+    let left = 100 - base.reduce((a, b) => a + b, 0);
+    const order = raw.map((v, i) => [v - Math.floor(v), i]).sort((a, b) => b[0] - a[0]);
+    for (let k = 0; k < left; k++) base[order[k % order.length][1]] += 1;
+    return base;
+  }
+
+  function patientDistribution(st, pv) {
+    const ord = (X.ordinal || {})[st];
+    if (!ord) return null;
+    const zg = pv.good.logit - (pv.good.spec.intercept_recent || 0);
+    const zd = pv.death.logit - (pv.death.spec.intercept_recent || 0);
+    return XE.fullDistribution(pv.good.p, pv.death.p, XE.ordinalProbs(zg, zd, ord));
+  }
+
+  function distributionCard(st, pv) {
+    const dist = patientDistribution(st, pv);
+    if (!dist) return null;
+    // round the three bands first so the people count matches the headline, then split each band
+    const band = roundTo100([dist[0] + dist[1] + dist[2], dist[3] + dist[4] + dist[5], dist[6]]);
+    const split = (lo, hi, n) => {
+      const part = dist.slice(lo, hi), tot = part.reduce((a, b) => a + b, 0) || 1;
+      const raw = part.map((p) => (p / tot) * n), base = raw.map(Math.floor);
+      const order = raw.map((v, i) => [v - Math.floor(v), i]).sort((a, b) => b[0] - a[0]);
+      for (let k = 0; k < n - base.reduce((a, b) => a + b, 0); k++) base[order[k][1]] += 1;
+      return base;
+    };
+    const counts = split(0, 3, band[0]).concat(split(3, 6, band[1]), [band[2]]);
+    const uw = dist.reduce((a, p, k) => a + p * (X.uw_mrs || [])[k], 0);
+    const card = h("div", { class: "card card-pad" });
+    const seg = h("div", { class: "mini-seg", role: "group", "aria-label": tx("View", "Zobrazení") },
+      [["bar", tx("mRS grades", "Stupně mRS")], ["people", tx("100 patients", "100 pacientů")]].map(([k, lbl]) => h("button", {
+        type: "button", "aria-pressed": String(S.distView === k), onclick: () => { S.distView = k; updateReadout(); },
+      }, lbl)));
+    card.appendChild(h("div", { class: "chart-head" },
+      h("div", null, h("div", { class: "chart-title", text: tx("Predicted 90-day mRS", "Předpokládané mRS za 90 dní") }),
+        h("div", { class: "chart-sub", text: tx(`Full distribution at ${stageLabel(st)}`, `Celé rozložení · ${stageLabel(st)}`) })),
+      seg));
+    if (S.distView === "people") {
+      const body = h("div", { class: "chart-body icon-array" });
+      card.appendChild(body);
+      C.iconArray(body, { counts, colors: MRS_GROUP_COLORS, labels: [0, 1, 2, 3, 4, 5, 6].map((k) => `mRS ${k} · ${tx(MRS_TEXT[k][0], MRS_TEXT[k][1])}`),
+        aria: tx("100 patients by predicted mRS", "100 pacientů podle předpokládaného mRS") });
+    } else {
+      const bar = h("div", { class: "mrsbar", role: "img", "aria-label": dist.map((p, k) => `mRS ${k}: ${pct(p)}`).join(", ") });
+      dist.forEach((p, k) => {
+        const segEl = h("span", { style: `width:${(p * 100).toFixed(2)}%; background:${MRS_GROUP_COLORS[k]}` });
+        if (p >= 0.07) segEl.appendChild(h("b", { style: `color:var(--mrs${k}-ink)`, text: String(counts[k]) }));
+        segEl.addEventListener("pointermove", (ev) => C.tip.show(`mRS ${k}`, [{ label: tx(MRS_TEXT[k][0], MRS_TEXT[k][1]), color: MRS_GROUP_COLORS[k], value: pct(p) }], ev.clientX, ev.clientY));
+        segEl.addEventListener("pointerleave", () => C.tip.hide());
+        bar.appendChild(segEl);
+      });
+      card.appendChild(bar);
+      card.appendChild(h("div", { class: "mrs-scale" }, [0, 1, 2, 3, 4, 5, 6].map((k) => h("span", { class: "key" }, h("i", { style: `background:${MRS_GROUP_COLORS[k]}` }), `${k}`))));
+    }
+    const g = counts[0] + counts[1] + counts[2], dd = counts[6], dep = 100 - g - dd;
+    card.appendChild(h("p", { class: "plain", html: tx(
+      `Of 100 patients like this, about <b>${g}</b> would live independently at 3 months, <b>${dep}</b> would need help in daily life and <b>${dd}</b> would die.`,
+      `Ze 100 takových pacientů by přibližně <b>${g}</b> za 3 měsíce žilo samostatně, <b>${dep}</b> by potřebovalo pomoc v běžném životě a <b>${dd}</b> by zemřelo.`) }));
+    card.appendChild(h("p", { class: "note", text: tx(
+      `Utility-weighted mRS ${num(uw, 2)} (1 = no symptoms, 0 = severe disability or death). The split into single grades comes from an ordinal layer on the two models; its validation is on the Validation tab.`,
+      `Užitkově vážené mRS ${num(uw, 2)} (1 = bez příznaků, 0 = těžké postižení nebo úmrtí). Rozdělení na jednotlivé stupně pochází z ordinální vrstvy nad oběma modely; její validace je na kartě Validace.`) }));
+    return card;
+  }
+
+  // ------------------------------------------------------------------ other models for this patient
+  function aucFor(st, name) {
+    for (const s2 of [st, "admission", "h24"]) {
+      const r = ((V.stages[s2] || {}).targets || {}).good_outcome;
+      if (r && r.temporal[name]) return { auc: r.temporal[name].auroc, stage: s2 };
+    }
+    return null;
+  }
+
+  function pointsText(name, v) {
+    if (v === null || v === undefined || Number.isNaN(v)) return "";
+    if (name === "SPAN-100") return v ? tx("positive", "pozitivní") : tx("negative", "negativní");
+    if (name === "PRE") return `${v > 0 ? "+" : ""}${num(v)}`;
+    if (name.startsWith("NIHSS")) return `NIHSS ${num(v)}`;
+    return tx(`${num(v)} points`, `${num(v)} b.`);
+  }
+
+  function othersCard(st, x, pv) {
+    const comps = (X.comparators || {})[st];
+    if (!comps) return null;
+    const xs = samples(pv.good.spec, x);
+    const rows = [{ name: tx("MTOP (LightGBM)", "MTOP (LightGBM)"), p: pv.good.p, auc: aucFor(st, "LightGBM"), main: true }];
+    for (const [name, comp] of Object.entries(comps)) {
+      let sum = 0, ok = 0, pts = null;
+      for (const xi of xs) {
+        let v;
+        if (comp.kind === "points") {
+          const sc = XE.POINTS[name](xi);
+          v = XE.pointsProb(comp.map, sc);
+          if (xs.length === 1) pts = sc;
+        } else v = XE.comparatorProb(comp, xi, B.features, M.buildRow);
+        if (v !== null && !Number.isNaN(v)) { sum += v; ok++; }
+      }
+      rows.push({ name: mname(name), detail: pointsText(name, pts), p: ok ? sum / ok : null, auc: aucFor(st, name) });
+    }
+    const card = h("div", { class: "card card-pad" });
+    card.appendChild(h("div", { class: "chart-head" }, h("div", null,
+      h("div", { class: "chart-title", text: tx("Other models for this patient", "Další modely pro tohoto pacienta") }),
+      h("div", { class: "chart-sub", text: tx(`Chance of mRS 0–2 at ${stageLabel(st)}; AUROC from 2021–2025 validation`, `Šance na mRS 0–2 · ${stageLabel(st)}; AUROC z validace 2021–2025`) }))));
+    const list = h("div", { class: "others" });
+    for (const r of rows) {
+      const track = h("div", { class: "track", "aria-hidden": "true" });
+      if (r.p !== null) track.appendChild(h("i", { style: `left:${(r.p * 100).toFixed(1)}%` }));
+      const aucTxt = r.auc ? `${num(r.auc.auc, 2)}${r.auc.stage !== st ? "*" : ""}` : "–";
+      list.appendChild(h("div", { class: `orow${r.main ? " main" : ""}` },
+        h("div", { class: "nm" }, h("b", { text: r.name }), r.detail ? h("span", { text: ` · ${r.detail}` }) : null),
+        track,
+        h("div", { class: "pv", text: r.p === null ? "–" : pct(r.p) }),
+        h("div", { class: "au", text: aucTxt })));
+    }
+    list.appendChild(h("div", { class: "orow ohead" }, h("div"), h("div", { class: "scale" }, h("span", { text: "0%" }), h("span", { text: "50%" }), h("span", { text: "100%" })), h("div"), h("div", { class: "au", text: "AUROC" })));
+    card.appendChild(list);
+    card.appendChild(h("p", { class: "note", text: tx(
+      "Published scores are mapped to probabilities with a logistic recalibration on the FNO registry; THRIVE-c and MR PREDICTS@24H are their predictor sets refitted on the registry (MR PREDICTS@24H without collateral score, which the registry does not record). * AUROC measured at an earlier stage.",
+      "Publikovaná skóre jsou převedena na pravděpodobnosti logistickou rekalibrací na registru FNO; THRIVE-c a MR PREDICTS@24H jsou jejich sady prediktorů přepočtené na registru (MR PREDICTS@24H bez skóre kolaterál, které registr neeviduje). * AUROC změřené v dřívější fázi.") }));
     return card;
   }
 
@@ -711,7 +913,12 @@
     "SPAN-100": { en: "SPAN-100", cs: "SPAN-100" },
     "NIHSS 24 h": { en: "NIHSS at 24 h alone", cs: "Samotné NIHSS za 24 h" },
     "NIHSS day 7": { en: "NIHSS on day 7 alone", cs: "Samotné NIHSS 7. den" },
+    "THRIVE-c": { en: "THRIVE-c predictors (refit)", cs: "Prediktory THRIVE-c (přepočteno)" },
+    "HIAT2": { en: "HIAT2 score", cs: "Skóre HIAT2" },
+    "PRE": { en: "PRE score", cs: "Skóre PRE" },
+    "MR PREDICTS@24H": { en: "MR PREDICTS@24H predictors (refit)", cs: "Prediktory MR PREDICTS@24H (přepočteno)" },
   };
+  const LEARNERS = ["LightGBM", "Logistic regression", "XGBoost", "MLP"];
   const MODEL_COLORS = ["var(--c1)", "var(--c2)", "var(--c3)", "var(--c4)", "var(--c5)", "var(--c6)"];
   const mname = (k) => L(MODEL_NAMES[k] || { en: k, cs: k });
   const signed = (v, d = 2) => (v === null || v === undefined ? "–" : `${v > 0 ? "+" : v < 0 ? "−" : ""}${num(Math.abs(v), d)}`);
@@ -782,8 +989,13 @@
     // ROC + calibration
     const row2 = h("div", { class: "grid-2 block" });
     const rCard = h("div", { class: "card card-pad" });
-    const rSeries = modelKeys.map((k, i) => ({ label: mname(k), color: MODEL_COLORS[i % MODEL_COLORS.length], width: k === "LightGBM" ? 2.5 : 1.5, points: vt.curves.roc[k].map((p) => ({ x: p.fpr, y: p.tpr })) }));
-    const fr = C.figure(rCard, { title: t().rocTitle, sub: L(STAGE[S.valStage].title), legend: rSeries.map((s) => ({ label: s.label, color: s.color, type: "line" })),
+    const rSeries = modelKeys.map((k) => {
+      const li = LEARNERS.indexOf(k);
+      return { label: mname(k), color: li >= 0 ? MODEL_COLORS[li] : "var(--muted)", width: k === "LightGBM" ? 2.5 : li >= 0 ? 1.5 : 1.1, points: vt.curves.roc[k].map((p) => ({ x: p.fpr, y: p.tpr })) };
+    });
+    const rLegend = rSeries.filter((s2) => LEARNERS.map(mname).includes(s2.label)).map((s2) => ({ label: s2.label, color: s2.color, type: "line" }));
+    if (rSeries.length > rLegend.length) rLegend.push({ label: tx("Published scores (grey)", "Publikovaná skóre (šedě)"), color: "var(--muted)", type: "line" });
+    const fr = C.figure(rCard, { title: t().rocTitle, sub: L(STAGE[S.valStage].title), legend: rLegend,
       table: { columns: [t().fpr].concat(rSeries.map((s) => s.label)), rows: vt.curves.roc.LightGBM.filter((_, i) => i % 5 === 0).map((p, j) => [num(p.fpr, 2)].concat(modelKeys.map((k) => num(vt.curves.roc[k][j * 5].tpr, 2)))) },
       labels: { table: t().showTable, chart: t().showChart } });
     C.lineChart(fr.body, { height: 240, x: { type: "lin", domain: [0, 1], fmt: (v) => num(v, 1), title: t().fpr }, y: { domain: [0, 1], fmt: (v) => num(v, 1), title: t().tpr, ticks: [0, 0.25, 0.5, 0.75, 1] }, series: rSeries, diagonal: true,
@@ -802,6 +1014,12 @@
     row2.appendChild(kCard);
     row2.appendChild(subgroupCard(tg, S.valStage));
     root.appendChild(row2);
+    const rowX = h("div", { class: "grid-2 block" });
+    const oc = ordinalCard(S.valStage);
+    const sc = stabilityCard(S.valStage, tg);
+    if (oc) rowX.appendChild(oc);
+    if (sc) rowX.appendChild(sc);
+    if (oc || sc) root.appendChild(rowX);
 
     // drift
     const lg = temporal.LightGBM;
@@ -839,6 +1057,44 @@
       tipFmt: (v) => num(v, 3), tipHead: (xv) => `${t().threshold} ${pct(xv)}`, aria: t().dcaTitle });
     row3.appendChild(dcCard);
     root.appendChild(row3);
+  }
+
+  function ordinalCard(st) {
+    const ov = (X.ordinal_validation || {})[st];
+    if (!ov) return null;
+    const card = h("div", { class: "card card-pad" });
+    const legend = [0, 1, 2, 3, 4, 5, 6].map((m) => ({ label: `mRS ${m}`, color: `var(--mrs${m})` }));
+    const rows = [
+      { label: tx("Observed 2021–2025", "Pozorováno 2021–2025"), n: ov.n, segs: ov.observed.map((v) => v * 100) },
+      { label: tx("Predicted", "Predikováno"), n: ov.n, segs: ov.predicted.map((v) => v * 100) },
+    ];
+    const f = C.figure(card, { title: tx("Full mRS distribution (ordinal)", "Celé rozložení mRS (ordinální)"),
+      sub: tx(`Development models applied to 2021–2025 · ordinal c-index ${num(ov.c_ordinal, 3)}`, `Vývojové modely použité na 2021–2025 · ordinální c-index ${num(ov.c_ordinal, 3)}`),
+      legend, table: { columns: ["", "n"].concat(legend.map((l) => l.label)), rows: rows.map((r) => [r.label, r.n].concat(r.segs.map((v) => pct100(v, 1)))) },
+      labels: { table: t().showTable, chart: t().showChart } });
+    C.grotta(f.body, { rows, colors: MRS_COLORS, segLabels: legend.map((l) => l.label), fmt: (v) => pct100(v, 1), nLabel: "n", aria: "mRS distribution" });
+    card.appendChild(h("p", { class: "note", text: tx(
+      `AUROC for each cut point: ${ov.cum_auroc.map((a, k) => `mRS ≤${k} ${a === null ? "–" : num(a, 2)}`).join(", ")}. Mean utility-weighted mRS observed ${num(ov.uw_obs, 2)} vs predicted ${num(ov.uw_pred, 2)} before recalibration.`,
+      `AUROC pro jednotlivé hranice: ${ov.cum_auroc.map((a, k) => `mRS ≤${k} ${a === null ? "–" : num(a, 2)}`).join(", ")}. Průměrné užitkově vážené mRS pozorováno ${num(ov.uw_obs, 2)}, predikováno ${num(ov.uw_pred, 2)} před rekalibrací.`) }));
+    return card;
+  }
+
+  function stabilityCard(st, tg) {
+    const bins = ((X.uncertainty || {})[st] || {})[tg];
+    const stab = ((X.stability || {})[st] || {})[tg];
+    if (!bins || !stab) return null;
+    const card = h("div", { class: "card card-pad" });
+    const f = C.figure(card, { title: tx("Prediction stability", "Stabilita predikce"),
+      sub: tx(`${stab.n_boot} bootstrap refits of the published model · typical 95% range by predicted risk`, `${stab.n_boot} přetrénování publikovaného modelu na bootstrap vzorcích · typické 95% rozpětí podle predikovaného rizika`),
+      table: { columns: [tx("Predicted", "Predikováno"), tx("95% range", "95% rozpětí"), "n"], rows: bins.map((b) => [pct(b.p), `${pct(b.p_lo)}–${pct(b.p_hi)}`, b.n]) },
+      labels: { table: t().showTable, chart: t().showChart } });
+    C.lineChart(f.body, { height: 230, x: { type: "lin", domain: [0, 1], fmt: (v) => pct(v), title: tx("Estimate", "Odhad") }, y: { domain: [0, 1], fmt: (v) => pct(v), title: tx("Range across refits", "Rozpětí přes přetrénování") }, diagonal: true,
+      series: [{ label: tx("95% range", "95% rozpětí"), color: "var(--c1)", dots: true, noLine: true, points: bins.map((b) => ({ x: b.p, y: b.p, lo: b.p_lo, hi: b.p_hi, n: b.n })) }],
+      tipFmt: (v, p) => `${pct(p.lo)}–${pct(p.hi)} · n ${p.n}`, tipHead: (xv) => `${tx("Estimate", "Odhad")} ${pct(xv)}`, aria: "stability" });
+    card.appendChild(h("p", { class: "note", text: tx(
+      `Mean absolute difference between a refitted and the published estimate: ${num(stab.mape * 100, 1)} percentage points (Riley & Collins 2023). The calculator shows this range under the headline.`,
+      `Průměrný absolutní rozdíl mezi odhadem přetrénovaného a publikovaného modelu: ${num(stab.mape * 100, 1)} procentního bodu (Riley & Collins 2023). Kalkulačka toto rozpětí ukazuje pod hlavním odhadem.`) }));
+    return card;
   }
 
   function subgroupCard(tg, st) {
@@ -883,8 +1139,8 @@
         : `Modely vycházejí z prospektivního registru trombektomií Fakultní nemocnice Ostrava (FNO). Z ${num(E.flow[0].n)} záznamů registru bylo analyzováno ${num(nAll)} dospělých pacientů po endovaskulární léčbě se známým mRS za 90 dní (${E.period[0]}–${E.period[1]}). Diagnostická angiografie bez léčby byla vyřazena. NIHSS 43 v registru označuje úmrtí a 99 „nehodnotitelné“; tyto kódy se nikdy nepoužívají jako skóre.`),
       h("h3", { text: en ? "Models" : "Modely" }),
       P(en
-        ? `Each stage has its own gradient-boosted tree model (LightGBM) with monotone constraints, so that, for example, a longer time to puncture or a higher NIHSS can never raise the predicted chance of independence. Hyperparameters were tuned by cross-validation on the development cohort only. Logistic regression, XGBoost, a multilayer perceptron and published scores (THRIVE, SPAN-100, NIHSS alone) serve as comparators. Explanations are exact TreeSHAP values computed in your browser.`
-        : `Každá fáze má vlastní model gradientně boostovaných stromů (LightGBM) s monotónními omezeními, takže například delší čas do punkce nebo vyšší NIHSS nikdy nezvýší predikovanou šanci na nezávislost. Hyperparametry byly laděny křížovou validací pouze na vývojové kohortě. Jako srovnání slouží logistická regrese, XGBoost, vícevrstvý perceptron a publikovaná skóre (THRIVE, SPAN-100, samotné NIHSS). Vysvětlení jsou přesné hodnoty TreeSHAP počítané ve vašem prohlížeči.`),
+        ? `Each stage has its own gradient-boosted tree model (LightGBM) with monotone constraints, so that, for example, a longer time to puncture or a higher NIHSS can never raise the predicted chance of independence. Hyperparameters were tuned by cross-validation on the development cohort only. Logistic regression, XGBoost, a multilayer perceptron, published scores (THRIVE, SPAN-100, HIAT2, PRE, NIHSS alone) and refitted published predictor sets (THRIVE-c, MR PREDICTS@24H) serve as comparators. Explanations are exact TreeSHAP values computed in your browser.`
+        : `Každá fáze má vlastní model gradientně boostovaných stromů (LightGBM) s monotónními omezeními, takže například delší čas do punkce nebo vyšší NIHSS nikdy nezvýší predikovanou šanci na nezávislost. Hyperparametry byly laděny křížovou validací pouze na vývojové kohortě. Jako srovnání slouží logistická regrese, XGBoost, vícevrstvý perceptron, publikovaná skóre (THRIVE, SPAN-100, HIAT2, PRE, samotné NIHSS) a přepočtené publikované sady prediktorů (THRIVE-c, MR PREDICTS@24H). Vysvětlení jsou přesné hodnoty TreeSHAP počítané ve vašem prohlížeči.`),
       h("h3", { text: en ? "Validation" : "Validace" }),
       P(en
         ? `Temporal validation on patients treated in 2021–2025 gave an AUROC for mRS 0–2 of ${auc("admission")} before thrombectomy, ${auc("procedure")} at the end of the procedure, ${auc("h24")} at 24 hours and ${auc("d7")} on day 7. Outcomes in recent years were worse than the development data predicted, so the published models are refitted on all years and their intercepts shifted to the 2021–2025 outcome level.`
@@ -915,13 +1171,27 @@
     if (SITE.funding) add(en ? "Funding" : "Financování", h("span", { text: L(SITE.funding) }));
     if (SITE.contact) add(en ? "Contact" : "Kontakt", h("span", { class: "copyable", text: SITE.contact }));
     add(en ? "Version" : "Verze", h("span", { text: `${B.version} · ${B.generated}` }));
+    if (B.fingerprint) add(en ? "Model fingerprint (SHA-256)" : "Otisk modelu (SHA-256)", h("span", { class: "copyable", title: B.fingerprint, text: `${B.fingerprint.slice(0, 16)}…` }));
     if (SITE.repo_url) add(en ? "Code" : "Kód", h("a", { href: SITE.repo_url, target: "_blank", rel: "noopener", text: SITE.repo_url.replace(/^https?:\/\//, "") }));
     add(en ? "Intended use" : "Určení", h("span", { text: en ? "Research and teaching. Not a medical device; not for individual treatment decisions." : "Výzkum a výuka. Není zdravotnickým prostředkem; není určeno k rozhodování o léčbě jednotlivce." }));
-    root.appendChild(h("div", { class: "about-grid" }, prose, h("aside", { class: "card card-pad" }, meta)));
+    const aside = h("aside", { class: "about-side" }, h("div", { class: "card card-pad" }, meta));
+    if (DATA.qr_svg && SITE.site_url) {
+      const qr = h("div", { class: "qr", html: DATA.qr_svg, role: "img", "aria-label": `QR: ${SITE.site_url}` });
+      aside.appendChild(h("div", { class: "card card-pad qr-card" }, qr,
+        h("div", null, h("div", { class: "chart-title", text: en ? "Open on your phone" : "Otevřít v telefonu" }), h("div", { class: "copyable", text: SITE.site_url.replace(/^https?:\/\//, "") }))));
+    }
+    root.appendChild(h("div", { class: "about-grid" }, prose, aside));
   }
 
-  // ------------------------------------------------------------------ boot
-  const hash = (location.hash || "").replace("#", "");
-  if (["calc", "registry", "validation", "about"].includes(hash)) S.view = hash;
-  render();
+  // ------------------------------------------------------------------ shared API for the other views
+  window.MTOPApp = {
+    DATA, B, V, E, X, SITE, M, XE, C, h, S, STAGES, STAGE, FEAT, TARGETS, MODEL_NAMES, LEARNERS, MRS_COLORS,
+    t, L, tx, lang: () => lang, num, pct, pct100, signed, stageLabel, idx, mname, statusChip,
+    predictStage, modelInputs, samples, threeBand, registerView, render, renderView, goTo, store,
+    boot() {
+      const hash = (location.hash || "").replace("#", "");
+      if (VIEWS[hash]) S.view = hash;
+      render();
+    },
+  };
 })();

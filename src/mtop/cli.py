@@ -3,6 +3,8 @@
   clean     raw Excel -> data/processed/clean.parquet + reports/data_quality.xlsx
   train     tune, validate and fit all stage models (artifacts/private)
   export    browser model + validation summary (artifacts/public)
+  extras    calculator extras: comparators, mRS distribution layer, bootstrap uncertainty
+  adaptive  model-updating experiments, drift monitor, era validation (artifacts/public)
   explorer  suppressed aggregate statistics for the cohort explorer (artifacts/public)
   report    Table 1, figures and a validation summary for the manuscript (reports/)
   site      build the self-contained web app (site/index.html)
@@ -62,6 +64,18 @@ def cmd_export(args):
     export_all()
 
 
+def cmd_extras(args):
+    from .extras import build_extras
+
+    build_extras(_load_clean(), n_boot=20 if getattr(args, "quick", False) else 100)
+
+
+def cmd_adaptive(args):
+    from .adaptive import build_adaptive
+
+    build_adaptive(_load_clean())
+
+
 def cmd_explorer(args):
     from .explorer import build_explorer
 
@@ -93,6 +107,8 @@ def cmd_all(args):
     cmd_clean(args)
     cmd_train(args)
     cmd_export(args)
+    cmd_extras(args)
+    cmd_adaptive(args)
     cmd_explorer(args)
     cmd_report(args)
     cmd_site(args)
@@ -105,14 +121,15 @@ def main(argv=None):
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     for name, fn in [("clean", cmd_clean), ("train", cmd_train), ("export", cmd_export),
+                     ("extras", cmd_extras), ("adaptive", cmd_adaptive),
                      ("explorer", cmd_explorer), ("report", cmd_report), ("site", cmd_site),
                      ("all", cmd_all), ("synth", cmd_synth)]:
         p = sub.add_parser(name)
         p.set_defaults(fn=fn)
         if name in ("clean", "all"):
             p.add_argument("--input", help="registry Excel file (default: data/raw/mt_patients_master.xlsx)")
-        if name in ("train", "all"):
-            p.add_argument("--quick", action="store_true", help="few tuning trials, for testing")
+        if name in ("train", "extras", "all"):
+            p.add_argument("--quick", action="store_true", help="fewer tuning trials / bootstrap refits, for testing")
         if name == "synth":
             p.add_argument("--n", type=int, default=600)
             p.add_argument("--seed", type=int, default=1)

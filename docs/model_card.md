@@ -75,6 +75,29 @@ and to severity (SBP or onset time missing in sicker patients).
   ch. 20).
 - Browser implementation verified against LightGBM (predictions and TreeSHAP to 1e-6).
 
+## 7a. Additions in v1.1 (beta, same deployed models)
+
+- **Comparators for the calculator:** penalised logistic regression on the MTOP predictors;
+  THRIVE, SPAN-100, HIAT2 and PRE mapped to probabilities by logistic recalibration on the
+  registry; THRIVE-c and MR PREDICTS@24H predictor sets refitted on the registry (published
+  coefficients not used; MR PREDICTS@24H without the CTA collateral score, not recorded). All are
+  shifted to the 2021–2025 outcome level. Browser arithmetic verified against Python
+  (`tests/test_extras_parity.py`).
+- **Full 90-day mRS distribution:** a cumulative-logit layer on the two LightGBM scores (mRS 0–2
+  and death), fitted on out-of-fold scores with thresholds re-estimated on 2021–2025. It only
+  splits the independent and dependent bands into grades, so headline probabilities are those of
+  the binary models. Temporal validation (development models applied to 2021–2025): ordinal
+  c-index and AUROC at every mRS cut point, reported on the Validation tab.
+- **Uncertainty:** 100 bootstrap refits of each deployed model (Riley & Collins, BMJ 2023);
+  the calculator shows the median 95 % range for the estimate's risk bin; mean absolute
+  prediction error is reported per stage.
+- **Adaptive updating experiment:** rolling-origin evaluation 2018–2025 of six update strategies
+  with fixed generic hyperparameters, a drift monitor for a model frozen in 2015, and
+  leave-one-era-out internal–external validation pooled by random-effects meta-analysis.
+- **In-browser validation for partner centres:** the page computes AUROC (bootstrap CI),
+  Brier score, calibration intercept and slope and grouped calibration on a partner's file
+  without uploading it, and exports aggregate results for pooling.
+
 ## 8. Limitations
 
 - Single centre, retrospective use of a registry; external validation is needed.
@@ -84,6 +107,10 @@ and to severity (SBP or onset time missing in sicker patients).
 - Imaging (core volume, collaterals), number of passes and door-to-needle data are not in the
   registry.
 - Observational associations (for example anaesthesia type) are not causal effects.
+- The adaptive experiment uses generic hyperparameters for every strategy, so its absolute
+  performance differs slightly from the tuned deployed models; it is a comparison of strategies.
+- Previews of candidate predictors in the calculator are illustrations and do not affect any
+  estimate.
 
 ## 9. Privacy
 

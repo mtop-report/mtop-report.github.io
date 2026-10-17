@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import copy
 import datetime as dt
+import hashlib
 import json
 
 import lightgbm as lgb
@@ -172,6 +173,8 @@ def export_all() -> None:
             v["rounds_dev"] = tres["rounds_dev"]
             validation["stages"][stage]["targets"][target] = v
 
+    canon = json.dumps(bundle["models"], sort_keys=True, separators=(",", ":")).encode("utf-8")
+    bundle["fingerprint"] = hashlib.sha256(canon).hexdigest()
     with open(PUBLIC / "model_bundle.json", "w", encoding="utf-8") as fh:
         json.dump(bundle, fh, ensure_ascii=False, separators=(",", ":"))
     with open(PUBLIC / "validation.json", "w", encoding="utf-8") as fh:

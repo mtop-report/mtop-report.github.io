@@ -18,8 +18,8 @@ browser: no server, no patient data, nothing typed in is sent anywhere.
 
 > **Research tool, not a medical device.** Do not use it on its own to decide treatment.
 
-**Live app:** https://viktorgajdosik.github.io/mt/ (published by GitHub Actions on every push to `main`;
-enable once under Settings → Pages → Source: GitHub Actions)
+**Live app:** https://viktorgajdosik.github.io/mt/ (published by GitHub Actions on every push to `main`).
+It can be installed on a phone or laptop and works offline.
 
 ## What the app contains
 
@@ -28,13 +28,25 @@ enable once under Settings → Pages → Source: GitHub Actions)
   TreeSHAP, computed in the browser), a what-if curve for any numeric input, and a reality check
   ("of recent registry patients with a similar estimate, X % reached mRS 0–2"). Unknown inputs
   are averaged over the registry's values. English and Czech.
+  *New in v1.1 (beta):* the full predicted 90-day mRS distribution with a 100-patient view,
+  a bootstrap uncertainty range, the same patient scored by logistic regression and six published
+  scores or predictor sets, and clearly marked previews of candidate predictors (GFAP, imaging).
 - **Registry.** 90-day mRS distributions (Grotta bars) by 13 subgroups, outcome by time to
   puncture, two decades of trends (volume, age, reperfusion, technique, anaesthesia), data
   completeness by year, and Table 1. Aggregates only; groups under 10 patients are hidden.
 - **Validation.** Temporal validation of every stage against logistic regression, XGBoost, an
   MLP and published scores, with ROC, calibration, decision curves, subgroup performance and an
   explanation of the post-2020 outcome drift.
-- **About.** Methods, limits, privacy, authors.
+- **Adaptive** *(v1.1 beta).* How the model is kept up to date: six update strategies compared year
+  by year 2018–2025 (frozen, intercept or logistic recalibration, refit, refit + recalibration,
+  sliding window), a drift monitor with control limits, data availability by year, a draft update
+  policy and the model version history with its SHA-256 fingerprint.
+- **Multicentre** *(v1.1 beta).* Any centre can validate MTOP on its own registry export inside the
+  browser (CSV or Excel; nothing is uploaded) and export a results file with aggregate metrics
+  only. Results from several sites are pooled in a random-effects meta-analysis (forest plot);
+  until partners join, the four FNO treatment eras (internal–external validation) stand in.
+- **Roadmap** *(v1.1).* What is live, what is new, what is in progress and what is proposed.
+- **About.** Methods, limits, privacy, authors, QR code.
 
 ## Results (temporal validation, patients treated 2021–2025)
 
@@ -59,6 +71,11 @@ enable once under Settings → Pages → Source: GitHub Actions)
 The day-7 mortality model rests on 7 deaths in the validation years; treat it as indicative only.
 
 Calibration of the development model in 2021–2025 (mRS 0–2): 1 · Admission: intercept −0.51, slope 1.24, deployed shift −0.26; 2 · End of MT: intercept −0.60, slope 1.09, deployed shift −0.32; 3 · 24 h: intercept −0.74, slope 0.89, deployed shift −0.45; 4 · Day 7: intercept −0.75, slope 1.15, deployed shift −0.54.
+
+**Keeping the model up to date** (admission stage, mRS 0–2, test years 2018–2025, models trained
+only on earlier years): a model frozen in 2015 drifted (first signal 2019, 3σ alarm 2023) with
+calibration-in-the-large −0.59 and AUROC 0.733; refitting on all earlier years and shifting the
+intercept to the last two years (the policy used for v1.0) gave −0.03 and 0.768. See the Adaptive tab.
 
 Full tables (Brier, calibration, ΔAUROC with paired-bootstrap CIs, subgroups) are produced by
 `python -m mtop report` in `reports/validation_summary.md`.
@@ -113,7 +130,7 @@ open site/index.html          # the app; works offline from the file
 python -m mtop all --input data/synthetic/registry_synthetic.xlsx --quick
 ```
 
-Individual steps: `python -m mtop clean | train [--quick] | export | explorer | report | site | synth`.
+Individual steps: `python -m mtop clean | train [--quick] | export | extras [--quick] | adaptive | explorer | report | site | synth`.
 
 ## Updating with new patients
 
@@ -126,8 +143,9 @@ Individual steps: `python -m mtop clean | train [--quick] | export | explorer | 
 
 ```
 config/            features.yaml (predictors, stages, UI labels EN/CZ), settings.yaml
-src/mtop/          clean · cohort · features · train · metrics · scores · export · explorer · report · site · synth · cli
-web/               index.html template, styles.css, app.js, charts.js, model.js (trees + TreeSHAP), i18n.js
+src/mtop/          clean · cohort · features · train · lr · metrics · scores · export · extras · adaptive · explorer · report · site · synth · cli
+web/               index.html template, styles.css, app.js + view_*.js, charts.js, model.js (trees + TreeSHAP),
+                   models_extra.js (comparators, mRS layer), metrics.js (in-browser validation), i18n.js, assets/
 artifacts/public/  published model bundle, validation and explorer aggregates (committed)
 data/synthetic/    synthetic registry for CI and demos (committed)
 tests/             cleaning rules, JS↔LightGBM parity, privacy rules, end-to-end synthetic run

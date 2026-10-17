@@ -23,7 +23,6 @@ import numpy as np
 import optuna
 import pandas as pd
 from sklearn.impute import SimpleImputer
-from sklearn.linear_model import LogisticRegressionCV
 from sklearn.model_selection import GridSearchCV, RepeatedStratifiedKFold, StratifiedKFold
 from sklearn.neural_network import MLPClassifier
 from sklearn.pipeline import make_pipeline
@@ -33,7 +32,8 @@ from . import metrics as M
 from .cohort import split_temporal, stage_cohort
 from .config import settings, stage_ids, targets
 from .features import column_to_feature, design_matrix, monotone_vector
-from .scores import benchmark_scores
+from .lr import fit_logreg
+from .scores import benchmark_predictions
 
 log = logging.getLogger("mtop.train")
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -111,21 +111,6 @@ def oof_lgbm(X, y, params, rounds, seed, folds=5, repeats=1):
 
 
 # ------------------------------------------------------------------------------- comparators
-def fit_logreg(X, y, seed):
-    import inspect
-
-    kw = dict(Cs=np.logspace(-3, 1, 12), cv=5, scoring="neg_log_loss", max_iter=5000, random_state=seed)
-    accepted = inspect.signature(LogisticRegressionCV).parameters
-    if "use_legacy_attributes" in accepted:      # scikit-learn >= 1.9: silence the transition warning
-        kw.update(use_legacy_attributes=False, l1_ratios=(0.0,))
-    model = make_pipeline(
-        SimpleImputer(strategy="median", add_indicator=True, keep_empty_features=True),
-        StandardScaler(),
-        LogisticRegressionCV(**kw),
-    )
-    return model.fit(X, y)
-
-
 def fit_mlp(X, y, seed):
     """MLP comparator: small grid search, then a 5-seed average of the best setting (stabler)."""
     from sklearn.base import clone
@@ -177,17 +162,6 @@ def fit_xgb(X, y, seed):
             return np.column_stack([1 - p, p])
 
     return _Wrap(booster)
-
-
-def _score_to_prob(train_score, y_train, test_score):
-    """Map a benchmark score to probabilities with a logistic fit on the development cohort."""
-    s_tr = np.asarray(train_score, float)
-    keep = ~np.isnan(s_tr)
-    a, b = M._fit_logistic(s_tr[keep], y_train[keep])
-    s_te = np.asarray(test_score, float)
-    fill = np.nanmedian(s_tr)
-    s_te = np.where(np.isnan(s_te), fill, s_te)
-    return M.expit(a + b * s_te)
 
 
 # ------------------------------------------------------------------------------- explanations
@@ -279,10 +253,7 @@ def run(base: pd.DataFrame, out_private, quick: bool = False) -> dict:
             for name, fit in (("Logistic regression", fit_logreg), ("XGBoost", fit_xgb), ("MLP", fit_mlp)):
                 mdl = fit(X_dev, y_dev, seed)
                 preds[name] = mdl.predict_proba(X_test)[:, 1]
-            bench_dev = benchmark_scores(dev, stage, target)
-            bench_test = benchmark_scores(test, stage, target)
-            for name in bench_dev:
-                preds[name] = _score_to_prob(bench_dev[name], y_dev, bench_test[name])
+            preds.update(benchmark_predictions(dev, test, stage, target, seed))
             temporal = {k: M.summary(y_test, v) for k, v in preds.items()}
             ci = M.bootstrap_ci(y_test, preds, n_boot=n_boot, seed=seed, ref="LightGBM")
             for k in temporal:

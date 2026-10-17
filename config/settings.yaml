@@ -64,6 +64,7 @@ stages:
 site:
   title: "MTOP Outcome Explorer"
   repo_url: "https://github.com/viktorgajdosik/mt"
+  site_url: "https://viktorgajdosik.github.io/mt/"
   contact: "viktor.gajdosik@fno.cz"
   authors:
     - name: "Viktor Gajdošík"

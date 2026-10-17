@@ -16,6 +16,7 @@ reports/*
 *.sav
 *.dta
 !data/synthetic/registry_synthetic.xlsx
+!artifacts/public/demo_synthetic.csv
 
 # build output (GitHub Actions builds the site)
 site/

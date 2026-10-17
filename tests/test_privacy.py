@@ -16,7 +16,7 @@ import pytest
 from mtop.config import settings
 from mtop.paths import PUBLIC
 
-FILES = ["model_bundle.json", "validation.json", "explorer.json"]
+FILES = ["model_bundle.json", "validation.json", "explorer.json", "extras.json", "adaptive.json", "subgroups.json"]
 
 
 def _load(name):
@@ -108,3 +108,44 @@ def test_tree_leaves_are_large():
                     if f == -1:
                         assert c >= min_leaf
             assert "feature_infos" not in json.dumps(spec)
+
+
+def test_adaptive_outputs_are_aggregates():
+    a = _load("adaptive.json")
+    k = int(settings()["privacy"]["min_cell"])
+    me = int(a["settings"]["min_events"])
+    for per_target in a["results"].values():
+        for r in per_target.values():
+            for yr in r["years"]:
+                assert yr["n"] >= k
+                for m in yr["by"].values():
+                    if m["auroc"] is not None:
+                        assert yr["events"] >= me and yr["n"] - yr["events"] >= me
+            for m in r["monitor"]:
+                assert m["n"] >= k
+    for per_target in a["iecv"].values():
+        for r in per_target.values():
+            for e in r["eras"]:
+                if not e.get("suppressed"):
+                    assert e["n"] >= 30 and e["events"] >= me
+    assert all(n >= k for n in a["availability"]["n"])
+
+
+def test_extras_are_aggregates():
+    x = _load("extras.json")
+    k = int(settings()["privacy"]["min_cell"])
+    for per_target in x["uncertainty"].values():
+        for bins in per_target.values():
+            for b in bins:
+                assert b["n"] >= k
+    for ov in x["ordinal_validation"].values():
+        assert ov["n"] >= 3 * k
+
+
+def test_demo_csv_is_synthetic_template():
+    from mtop.extras import template_columns
+
+    f = PUBLIC / "demo_synthetic.csv"
+    if not f.exists():
+        pytest.skip("demo not built")
+    assert f.read_text(encoding="utf-8").splitlines()[0].split(",") == template_columns()
