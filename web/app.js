@@ -343,7 +343,7 @@
     });
     det.appendChild(grid);
     det.appendChild(h("p", { class: "help", text: st === "h24"
-      ? tx("GFAP is being collected prospectively at FNO. It will enter the model once enough patients with known 90-day outcome are available, after its added value has been tested.", "GFAP se ve FNO prospektivně sbírá. Do modelu vstoupí, až bude dost pacientů se známým výsledkem za 90 dní a jeho přínos bude ověřen.")
+      ? tx("GFAP is being collected at FNO. It will enter the model once enough patients with known 90-day outcome are available, after its added value has been tested.", "GFAP se ve FNO sbírá. Do modelu vstoupí, až bude dost pacientů se známým výsledkem za 90 dní a jeho přínos bude ověřen.")
       : tx("Not recorded in the registry yet. Shown to illustrate how later versions could use it.", "Registr je zatím neeviduje. Zobrazeno pro ilustraci, jak by je mohly využít další verze.") }));
     return det;
   }
@@ -369,7 +369,7 @@
 
   function field(f) {
     const wrap = h("div", { class: `field${WIDE.has(f.key) ? " wide" : ""}`, id: `field-${f.key}` });
-    const lblText = f.key === "aspects" && POSTERIOR.has(S.inputs.occlusion) ? t().pcAspects : L(f.label);
+    const lblText = L(f.label);
     const valSpan = h("span", { class: "val" });
     const lab = h("div", { class: "field-label" }, h("span", { class: "lbl", id: `lbl-${f.key}`, text: lblText }), valSpan);
     wrap.appendChild(lab);
@@ -418,6 +418,10 @@
         const b = h("button", { type: "button", class: extraClass || "", "data-v": val === null ? "" : String(val) }, label);
         b.addEventListener("click", () => {
           const v = val === null ? null : isCat ? String(val) : Number(val);
+          const before = S.inputs[f.key];
+          // ASPECTS scores the MCA territory: for posterior-circulation strokes the registry
+          // records 10 in most patients, so switching to a posterior occlusion sets it to 10.
+          if (f.key === "occlusion" && POSTERIOR.has(v) && !POSTERIOR.has(before) && S.inputs.aspects !== null && S.inputs.aspects !== undefined) S.inputs.aspects = 10;
           setInput(f.key, v);
           paint();
           if (f.key === "occlusion") { renderCalcKeepScroll(); }
@@ -445,7 +449,11 @@
         buttons.forEach((b) => (b.disabled = true));
       }
     }
-    if (f.help) wrap.appendChild(h("div", { class: "help", text: L(f.help) }));
+    if (f.key === "aspects" && POSTERIOR.has(S.inputs.occlusion)) {
+      wrap.appendChild(h("div", { class: "help", text: tx(
+        "Posterior-circulation stroke: ASPECTS scores the middle cerebral artery territory. The registry records 10 for most posterior strokes and has no pc-ASPECTS, so 10 is set here. Change it only if the CT shows changes in the MCA territory.",
+        "CMP v zadním povodí: ASPECTS hodnotí povodí arteria cerebri media. Registr u většiny CMP v zadním povodí eviduje 10 a pc-ASPECTS neobsahuje, proto je zde nastaveno 10. Změňte jen tehdy, ukazuje-li CT změny v povodí ACM.") }));
+    } else if (f.help) wrap.appendChild(h("div", { class: "help", text: L(f.help) }));
     return wrap;
   }
 
@@ -1162,9 +1170,12 @@
     const t1 = E.table1;
     const t1Card = h("div", { class: "card card-pad block" });
     t1Card.appendChild(h("div", { class: "chart-head" }, h("div", null, h("div", { class: "chart-title", text: t().table1Title }), h("div", { class: "chart-sub", text: t().t1Note }))));
-    const cols = ["all", "dev", "test", "good", "poor"];
-    const head = [t().variable, `${t().t1All} (n ${num(t1.n.all)})`, `${t().t1Dev} (n ${num(t1.n.dev)})`, `${t().t1Test} (n ${num(t1.n.test)})`, `${t().t1Good} (n ${num(t1.n.good)})`, `${t().t1Poor} (n ${num(t1.n.poor)})`];
+    const cols = ["all", "dev", "test", "smd", "good", "poor"];
+    const hasSmd = t1.rows.some((r) => r.smd !== undefined);
+    const head = [t().variable, `${t().t1All} (n ${num(t1.n.all)})`, `${t().t1Dev} (n ${num(t1.n.dev)})`, `${t().t1Test} (n ${num(t1.n.test)})`, "SMD", `${t().t1Good} (n ${num(t1.n.good)})`, `${t().t1Poor} (n ${num(t1.n.poor)})`]
+      .filter((x, i) => hasSmd || i !== 4);
     const cell = (r, c) => {
+      if (c === "smd") return r.smd === null || r.smd === undefined ? "–" : signed(r.smd, 2);
       if (r.var === "good" && (c === "good" || c === "poor")) return "–";
       const v = r[c];
       if (!v) return "–";
@@ -1172,10 +1183,14 @@
       if (v.small) return `<${E.min_cell}`;
       return pct100(v.pct, 1);
     };
-    const table = h("table", { class: "data" },
+    const table = h("table", { class: "data t1" },
       h("thead", null, h("tr", null, head.map((x) => h("th", { scope: "col", text: x })))),
-      h("tbody", null, t1.rows.map((r) => h("tr", null, h("th", { scope: "row", text: L(r.label) }), cols.map((c) => h("td", { text: cell(r, c) }))))));
+      h("tbody", null, t1.rows.map((r) => h("tr", null, h("th", { scope: "row", text: L(r.label) }),
+        cols.filter((c) => hasSmd || c !== "smd").map((c) => h("td", { class: c === "smd" && r.smd !== null && Math.abs(r.smd) > 0.1 ? "smd hi" : c === "smd" ? "smd" : null, text: cell(r, c) }))))));
     t1Card.appendChild(h("div", { class: "table-scroll" }, table));
+    if (hasSmd) t1Card.appendChild(h("p", { class: "note", text: tx(
+      "SMD: standardised mean difference between the development (to 2020) and validation (2021–2025) patients. Values beyond ±0.1 (bold) mark a relevant change in case mix or care; the models were validated across this change.",
+      "SMD: standardizovaný rozdíl průměrů mezi vývojovými (do 2020) a validačními (2021–2025) pacienty. Hodnoty za ±0,1 (tučně) značí podstatnou změnu skladby pacientů nebo péče; modely byly validovány přes tuto změnu.") }));
     root.appendChild(t1Card);
   }
 
@@ -1345,10 +1360,47 @@
     C.lineChart(fd.body, { height: 240, x: { type: "lin", domain: [0.05, 0.8], fmt: (v) => pct(v), title: t().threshold, ticks: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8] }, y: { domain: [lo, hi], fmt: (v) => num(v, 2), title: t().netBenefit },
       series: dSeries.map((s) => ({ ...s, points: s.points.map((p) => ({ x: p.x, y: Math.max(p.y, lo) })) })), zeroLine: true,
       tipFmt: (v) => num(v, 3), tipHead: (xv) => `${t().threshold} ${pct(xv)}`, aria: t().dcaTitle });
+    // where the model adds net benefit over treating everyone and no one
+    const useful = dca.filter((r) => r.model > Math.max(r.all, 0) + 1e-4).map((r) => r.t);
+    if (useful.length) {
+      const tmin = Math.min(...useful), tmax = Math.max(...useful);
+      const steps = dca.map((r) => r.t).filter((x) => x >= tmin - 1e-9 && x <= tmax + 1e-9).length;
+      const gaps = steps > useful.length;
+      dcCard.appendChild(h("p", { class: "note", text: tx(
+        `LightGBM adds net benefit over treating everyone and no one at risk thresholds from ${pct(tmin)} to ${pct(tmax)}${gaps ? " (with gaps)" : ""}. A threshold is the estimate at which a clinician would act; the curve shows for which thresholds the model would help that decision.`,
+        `LightGBM přináší čistý přínos oproti léčbě všech i nikoho při prazích rizika od ${pct(tmin)} do ${pct(tmax)}${gaps ? " (s přerušeními)" : ""}. Práh je odhad, při kterém by lékař jednal; křivka ukazuje, pro které prahy by model rozhodnutí pomohl.`) }));
+    }
     row3.appendChild(dcCard);
     root.appendChild(row3);
+    const thr = thresholdCard(vt, tg);
+    if (thr) root.appendChild(thr);
     const recon = reconciliationCard();
     if (recon) root.appendChild(recon);
+  }
+
+  // Classification at fixed risk thresholds (development model, 2021–2025 patients)
+  function thresholdCard(vt, tg) {
+    const rows = vt.thresholds;
+    if (!rows || !rows.length) return null;
+    const good = tg === "good_outcome";
+    const card = h("div", { class: "card card-pad block" });
+    card.appendChild(h("div", { class: "chart-head" }, h("div", null,
+      h("div", { class: "chart-title", text: tx("Sensitivity, specificity and predictive values at risk thresholds", "Senzitivita, specificita a prediktivní hodnoty při prazích rizika") }),
+      h("div", { class: "chart-sub", text: good
+        ? tx("A patient counts as “expected independent” when the estimate of mRS 0–2 reaches the threshold. Patients treated 2021–2025.", "Pacient se počítá jako „očekávaně soběstačný“, když odhad mRS 0–2 dosáhne prahu. Pacienti léčení 2021–2025.")
+        : tx("A patient counts as “high risk of death” when the estimate of death reaches the threshold. Patients treated 2021–2025.", "Pacient se počítá jako „vysoké riziko úmrtí“, když odhad úmrtí dosáhne prahu. Pacienti léčení 2021–2025.") }))));
+    const head = [tx("Threshold", "Práh"), tx("At or above", "Na prahu či výše"), tx("Sensitivity", "Senzitivita"), tx("Specificity", "Specificita"), "PPV", "NPV"];
+    const tbl = h("table", { class: "data" },
+      h("thead", null, h("tr", null, head.map((x) => h("th", { scope: "col", text: x })))),
+      h("tbody", null, rows.map((r) => h("tr", null, h("th", { scope: "row", text: pct(r.t) }),
+        ...(r.suppressed ? [h("td", { colspan: 5, class: "muted", text: tx(`not shown: a cell of the 2×2 table has fewer than ${E.min_cell} patients`, `nezobrazeno: buňka tabulky 2×2 má méně než ${E.min_cell} pacientů`) })]
+          : [pct(r.pos), pct(r.sens), pct(r.spec), pct(r.ppv), pct(r.npv)].map((x) => h("td", { text: x })))))));
+    card.appendChild(h("div", { class: "table-scroll" }, tbl));
+    const citl = vt.temporal.LightGBM.citl;
+    card.appendChild(h("p", { class: "note", text: tx(
+      `PPV: share of patients at or above the threshold who ${good ? "reached mRS 0–2" : "died"}; NPV: share below it who ${good ? "did not" : "survived"}. These are the development model's estimates applied unchanged to 2021–2025, when they ran ${citl < 0 ? "high" : "low"} (calibration intercept ${signed(citl)}); the calculator shifts its estimates to the 2021–2025 level, so these cut-offs illustrate the trade-off and are not recommended decision thresholds.`,
+      `PPV: podíl pacientů na prahu či výše, kteří ${good ? "dosáhli mRS 0–2" : "zemřeli"}; NPV: podíl pod prahem, kteří ${good ? "ho nedosáhli" : "přežili"}. Jde o odhady vývojového modelu použité beze změny na roky 2021–2025, kdy byly ${citl < 0 ? "příliš vysoké" : "příliš nízké"} (kalibrační intercept ${signed(citl)}); kalkulačka své odhady posouvá na úroveň let 2021–2025, proto tyto hranice ilustrují kompromis a nejsou doporučenými rozhodovacími prahy.`) }));
+    return card;
   }
 
   // How each learner was tuned: the same budget for all, and the settings chosen for this stage and outcome
@@ -1550,8 +1602,8 @@
         : `MTOP odhaduje šanci, že pacient po mechanické trombektomii pro akutní ischemickou CMP bude za 90 dní funkčně nezávislý (modifikovaná Rankinova škála 0–2), a riziko úmrtí. Odhad se aktualizuje ve čtyřech okamžicích péče: před výkonem, na jeho konci, po 24 hodinách a 7. den. Každá aktualizace používá jen údaje známé v daném okamžiku.`),
       h("h3", { text: en ? "Data" : "Data" }),
       P(en
-        ? `The models were built from the prospective thrombectomy registry of University Hospital Ostrava (FNO). Of ${num(E.flow[0].n)} registry entries, ${num(nAll)} adults who received endovascular treatment and have a recorded 90-day mRS were analysed (${E.period[0]}–${E.period[1]}). Diagnostic angiography without treatment was excluded. In the registry, an NIHSS of 43 marks death and 99 marks "not assessable"; these codes are never used as scores.`
-        : `Modely vycházejí z prospektivního registru trombektomií Fakultní nemocnice Ostrava (FNO). Z ${num(E.flow[0].n)} záznamů registru bylo analyzováno ${num(nAll)} dospělých pacientů po endovaskulární léčbě se známým mRS za 90 dní (${E.period[0]}–${E.period[1]}). Diagnostická angiografie bez léčby byla vyřazena. NIHSS 43 v registru označuje úmrtí a 99 „nehodnotitelné“; tyto kódy se nikdy nepoužívají jako skóre.`),
+        ? `The models were built from the thrombectomy registry of University Hospital Ostrava (FNO). Of ${num(E.flow[0].n)} registry entries, ${num(nAll)} adults who received endovascular treatment and have a recorded 90-day mRS were analysed (${E.period[0]}–${E.period[1]}). Diagnostic angiography without treatment was excluded. An NIHSS of 43 is read as death and 99 as "not assessable" (70 of the 71 patients coded 43 on day 7 had died by 90 days); these codes are never used as scores.`
+        : `Modely vycházejí z registru trombektomií Fakultní nemocnice Ostrava (FNO). Z ${num(E.flow[0].n)} záznamů registru bylo analyzováno ${num(nAll)} dospělých pacientů po endovaskulární léčbě se známým mRS za 90 dní (${E.period[0]}–${E.period[1]}). Diagnostická angiografie bez léčby byla vyřazena. NIHSS 43 je chápáno jako úmrtí a 99 jako „nehodnotitelné“ (70 ze 71 pacientů s kódem 43 v 7. dni do 90 dní zemřelo); tyto kódy se nikdy nepoužívají jako skóre.`),
       h("h3", { text: en ? "Models" : "Modely" }),
       P(en
         ? `Each stage has its own gradient-boosted tree model (LightGBM) with monotone constraints, so that, for example, a longer time to puncture or a higher NIHSS can never raise the predicted chance of independence. Hyperparameters were tuned by cross-validation on the development cohort only. Logistic regression (linear and with restricted cubic splines), XGBoost, a multilayer perceptron, the 7-item FNO bedside score from the earlier registry analysis, published scores (THRIVE, SPAN-100, HIAT2, PRE, NIHSS alone) and refitted published predictor sets (THRIVE-c, MR PREDICTS@24H) serve as comparators; every learner was tuned with the same budget (50 candidate settings on the same cross-validation folds). Explanations are exact TreeSHAP values computed in your browser.`

@@ -12,7 +12,7 @@
     sex_male: [[["Male", "Muž"], "Muž"], [["Female", "Žena"], "Žena"]],
     mrs_pre: [["0–5, one option per grade", "0–5, jedna volba na stupeň"], "mRS before"],
     nihss_adm: [["0–42", "0–42"], "Admission NIHSS"],
-    aspects: [["0–10; recorded from 2016 (pc-ASPECTS in posterior circulation)", "0–10; evidováno od 2016 (v zadním povodí pc-ASPECTS)"], "ASPECTS"],
+    aspects: [["0–10, middle cerebral artery territory; recorded from 2016. Posterior-circulation strokes mostly have 10 (105 of 125 recorded); the registry has no pc-ASPECTS", "0–10, povodí arteria cerebri media; evidováno od 2016. CMP v zadním povodí mají většinou 10 (105 ze 125 zaznamenaných); registr pc-ASPECTS neobsahuje"], "ASPECTS"],
     occlusion: [
       [["Intracranial ICA / carotid T", "Intrakraniální ACI / karotické T"], "ACI-Intracranial, ACI+ACM"],
       [["MCA M1", "ACM M1"], "M1-ACM"],
@@ -69,15 +69,56 @@
     ["Decompression surgery", ["Happens after the prediction moments.", "Probíhá až po okamžicích predikce."]],
   ];
 
+  // Codings that are our reading of registry values the export does not document: to be confirmed
+  // with the registry team.
+  const ASSUMED = {
+    occlusion: ["“Rekanalizace” read as: the artery was already open at angiography, so the occlusion site is unknown.",
+      "„Rekanalizace“ chápána tak, že tepna byla při angiografii již otevřená, místo okluze je tedy neznámé."],
+    transfer: ["“FNO” and “žádné” read as direct admission to FNO.", "„FNO“ a „žádné“ chápány jako přímý příjem do FNO."],
+    anticoag: ["LMWH counted as anticoagulation; the dose (prophylactic or therapeutic) is not recorded.",
+      "LMWH počítáno jako antikoagulace; dávka (profylaktická či terapeutická) není evidována."],
+    tici: ["“2” read as mTICI 2 recorded without a subgrade.", "„2“ chápáno jako mTICI 2 zapsané bez podstupně."],
+    technique: ["Technique taken from the device when the procedure label does not state it (for example PENUMBRA = aspiration); “PAG” read as diagnostic angiography only.",
+      "Technika určena podle zařízení, pokud ji neuvádí označení výkonu (např. PENUMBRA = aspirace); „PAG“ chápáno jako pouze diagnostická angiografie."],
+    anesthesia: ["“bez ARO” (without the anaesthesia team) read as local anaesthesia only.", "„bez ARO“ (bez anesteziologického týmu) chápáno jako pouze lokální anestezie."],
+    nihss_24h: ["43 read as died and 99 as not assessable; 70 of the 71 patients coded 43 on day 7 had died by 90 days.",
+      "43 chápáno jako úmrtí a 99 jako nehodnotitelné; 70 ze 71 pacientů s kódem 43 v 7. dni do 90 dní zemřelo."],
+    nihss_7d: ["43 and 99 read as for NIHSS at 24 h.", "43 a 99 chápány jako u NIHSS za 24 h."],
+  };
+
   function codingCell(key) {
     const c = CODING[key];
     if (!c) return h("td");
+    const note = ASSUMED[key] ? h("div", { class: "dd-assumed" }, h("b", { text: tx("Our reading", "Náš výklad") }), " ", tx(ASSUMED[key][0], ASSUMED[key][1])) : null;
     if (Array.isArray(c[0]) && typeof c[0][0] === "string" && typeof c[1] === "string" && c.length === 2) {
       // [description (en, cs), registry column]
-      return h("td", null, h("div", { text: tx(c[0][0], c[0][1]) }), h("div", { class: "dd-src", text: c[1] }));
+      return h("td", null, h("div", { text: tx(c[0][0], c[0][1]) }), h("div", { class: "dd-src", text: c[1] }), note);
     }
     return h("td", null, h("ul", { class: "dd-map" }, c.map(([lbl, src]) =>
-      h("li", null, h("b", { text: tx(lbl[0], lbl[1]) }), h("span", { class: "dd-src", text: `← ${src}` })))));
+      h("li", null, h("b", { text: tx(lbl[0], lbl[1]) }), h("span", { class: "dd-src", text: `← ${src}` })))), note);
+  }
+
+  // How the data were cleaned and checked (counts from data_checks.json; no patient-level data)
+  function checksBlock() {
+    const D = A.DATA.data_checks;
+    if (!D || !D.checks || !D.checks.length) return null;
+    const KIND = {
+      repaired: tx("Repaired", "Opraveno"), missing: tx("Set to missing", "Nastaveno jako chybějící"),
+      kept: tx("Kept, not modelled", "Ponecháno, mimo modely"), flag: tx("Kept, listed for review", "Ponecháno, k ověření"),
+    };
+    const wrap = h("div");
+    wrap.appendChild(h("h3", { class: "dd-h", text: tx("How the data were cleaned and checked", "Jak byla data vyčištěna a zkontrolována") }));
+    wrap.appendChild(h("p", { class: "note", text: tx(
+      `Every rule below ran on all ${A.num(D.records)} registry records. Nothing is changed silently: each change and each flag is listed with the patient ID in a local report (reports/data_quality.xlsx) that stays at FNO, so the source can be corrected. Flagged values are kept as recorded. Counts under ${D.min_cell} are shown as <${D.min_cell}.`,
+      `Každé pravidlo níže proběhlo na všech ${A.num(D.records)} záznamech registru. Nic se nemění potichu: každá změna i upozornění je s ID pacienta v místním přehledu (reports/data_quality.xlsx), který zůstává ve FNO, aby bylo možné opravit zdroj. Označené hodnoty zůstávají, jak byly zapsány. Počty pod ${D.min_cell} jsou uvedeny jako <${D.min_cell}.`) }));
+    const tbl = h("table", { class: "data dd dd-checks" });
+    tbl.appendChild(h("thead", null, h("tr", null, [tx("Check", "Kontrola"), tx("Records", "Záznamy"), tx("Action", "Postup")].map((c) => h("th", { scope: "col", text: c })))));
+    tbl.appendChild(h("tbody", null, D.checks.map((r) => h("tr", null,
+      h("th", { scope: "row", text: L(r.label) }),
+      h("td", { class: "num", "data-l": tx("Records", "Záznamy"), text: r.small ? `<${D.min_cell}` : A.num(r.n) }),
+      h("td", { "data-l": tx("Action", "Postup") }, h("span", { class: `chk chk-${r.kind}`, text: KIND[r.kind] || r.kind }))))));
+    wrap.appendChild(h("div", { class: "table-scroll" }, tbl));
+    return wrap;
   }
 
   const RAW = {
@@ -96,6 +137,9 @@
     det.appendChild(h("p", { class: "note", text: tx(
       "Options with several values enter the model as one yes/no column each (one-hot coding); if the value is missing, all of them are missing and the trees learn where such patients belong. Ordered values (pre-stroke mRS, mTICI) stay single numbers so their order is used. Several registry values were grouped into one option where they mean the same for prognosis or are too rare to stand alone.",
       "Volby s více hodnotami vstupují do modelu jako samostatné sloupce ano/ne (one-hot kódování); chybí-li hodnota, chybí všechny a stromy se naučí, kam tito pacienti patří. Uspořádané hodnoty (mRS před CMP, mTICI) zůstávají jedním číslem, aby se využilo jejich pořadí. Několik hodnot registru bylo sloučeno do jedné volby tam, kde pro prognózu znamenají totéž nebo jsou příliš vzácné na samostatnou kategorii.") }));
+    det.appendChild(h("p", { class: "note", text: tx(
+      "Rows marked “Our reading” are interpretations of registry values that the export itself does not document. They should be confirmed with the registry team.",
+      "Řádky označené „Náš výklad“ jsou výklady hodnot registru, které samotný export nedokumentuje. Je třeba je ověřit s týmem registru.") }));
     const tbl = h("table", { class: "data dd dd-main" });
     tbl.appendChild(h("thead", null, h("tr", null, [tx("Predictor", "Prediktor"), tx("Used from", "Použito od"), tx("Registry column", "Sloupec registru"),
       tx("In the model ← registry values", "V modelu ← hodnoty registru")].map((c) => h("th", { scope: "col", text: c })))));
@@ -115,6 +159,8 @@
     t2.appendChild(h("thead", null, h("tr", null, h("th", { scope: "col", text: tx("Registry column", "Sloupec registru") }), h("th", { scope: "col", text: tx("Why", "Proč") }))));
     t2.appendChild(h("tbody", null, UNUSED.map(([col, why]) => h("tr", null, h("th", { scope: "row", class: "dd-src", text: col }), h("td", { text: tx(why[0], why[1]) })))));
     det.appendChild(h("div", { class: "table-scroll" }, t2));
+    const checks = checksBlock();
+    if (checks) det.appendChild(checks);
     return det;
   };
 })();

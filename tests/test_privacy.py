@@ -17,7 +17,7 @@ from mtop.config import settings
 from mtop.paths import PUBLIC
 
 FILES = ["model_bundle.json", "validation.json", "explorer.json", "extras.json", "adaptive.json", "subgroups.json",
-         "reconciliation.json", "federated.json", "associations.json"]
+         "reconciliation.json", "federated.json", "associations.json", "data_checks.json"]
 
 
 def _load(name):
@@ -111,6 +111,8 @@ def test_validation_bins_and_no_extremes():
                     assert "lo" not in r and "hi" not in r
             for curve in tv["curves"]["roc"].values():
                 assert len(curve) == 51  # fixed FPR grid, not raw operating points
+            for r in tv.get("thresholds", []):   # rates only; thresholds with a small 2x2 cell are suppressed
+                assert set(r) in ({"t", "suppressed"}, {"t", "sens", "spec", "ppv", "npv", "pos"})
 
 
 def test_tree_leaves_are_large():
@@ -193,6 +195,15 @@ def test_associations_are_aggregates():
         for r in res["terms"].values():
             assert r["unadjusted"]["n"] >= 10 * k
             assert set(r["adjusted"]) == {"or", "lo", "hi"}
+
+
+def test_data_checks_are_counts_only():
+    """The cleaning summary lists how many records each check touched; small counts are hidden."""
+    d = _load("data_checks.json")
+    k = int(settings()["privacy"]["min_cell"])
+    for r in d["checks"]:
+        assert set(r) == {"kind", "label", "n", "small"}
+        assert (r["n"] is None and r["small"]) or (r["n"] >= k and not r["small"])
 
 
 def test_reconciliation_is_aggregate():

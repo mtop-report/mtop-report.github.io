@@ -100,6 +100,7 @@ def build_site():
         "validation": _load("validation.json"),
         "explorer": _load("explorer.json"),
         "associations": _load("associations.json"),
+        "data_checks": _load("data_checks.json"),
         "extras": _load("extras.json", {}),
         "adaptive": _load("adaptive.json"),
         "subgroups": _load("subgroups.json", []),

@@ -65,8 +65,8 @@ features:
     default: 9
     optional: true
     label: {en: "ASPECTS", cs: "ASPECTS"}
-    help: {en: "Non-contrast CT. For posterior circulation the registry records pc-ASPECTS.",
-           cs: "Nativní CT. U zadního povodí registr eviduje pc-ASPECTS."}
+    help: {en: "Non-contrast CT, middle cerebral artery territory. Recorded in the registry from 2016.",
+           cs: "Nativní CT, povodí arteria cerebri media. V registru evidováno od roku 2016."}
 
   - key: occlusion
     stage: admission

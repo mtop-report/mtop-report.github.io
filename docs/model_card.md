@@ -17,13 +17,21 @@ Structured after TRIPOD+AI (Collins et al., BMJ 2024). Numbers are filled from
 
 ## 2. Data
 
-- Source: prospective mechanical-thrombectomy registry, University Hospital Ostrava (FNO),
-  patients 2005–2025 (one export, October 2025).
+- Source: mechanical-thrombectomy registry, University Hospital Ostrava (FNO), patients
+  2005–2025 (one registry export).
 - Inclusion: age ≥ 18, endovascular treatment performed (diagnostic angiography "PAG" excluded),
   90-day mRS recorded. Flow: 1,577 registry rows → 1,565 adults → 1,475 treated → 1,361 analysed.
 - Stage cohorts: stage 2 requires a final mTICI; stage 3 an assessed 24-h NIHSS; stage 4 an
   assessed day-7 NIHSS. Patients who died earlier leave the later cohorts.
 - Outcome assessment: 90-day mRS as recorded in the registry (assessor and method not recorded).
+- Data checks: range checks, logged numeric conversion, onset-year repair and cross-field checks
+  (IVT, occlusion site against hemisphere, ASPECTS in posterior strokes, recanalisation against
+  the end of the procedure, 90-day against pre-stroke mRS); flagged values are kept and listed for
+  review. Codes the export does not document are listed as "our reading" in
+  [data_dictionary.md](data_dictionary.md). ASPECTS scores the MCA territory; the registry has no
+  pc-ASPECTS and records 10 for most posterior-circulation strokes.
+- Unlike an earlier internal pipeline that removed patients with NIHSS above 42, MTOP keeps them:
+  43 marks death, so removing them would drop early deaths from the cohort.
 
 ## 3. Predictors
 

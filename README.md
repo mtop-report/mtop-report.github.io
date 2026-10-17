@@ -104,10 +104,16 @@ Full tables (Brier, calibration, ΔAUROC with paired-bootstrap CIs, subgroups) a
 
 1. **Cleaning** (`src/mtop/clean.py`). Czech registry coding is mapped to standard variables.
    Every change is logged with the patient ID in `reports/data_quality.xlsx` so the source file
-   can be corrected. Implausible values become missing (with a suggested correction, never applied
-   silently). The only automatic repair is an isolated ±1-year typo in the onset date, detected
-   from neighbouring patient IDs. **NIHSS 43 is the registry's code for death and 99 for "not
-   assessable"**; they are never used as scores, because doing so would leak the outcome.
+   can be corrected. Implausible values and text in numeric fields become missing (with a
+   suggested correction, never applied silently). The only automatic repair is an isolated ±1-year
+   typo in the onset date, detected from neighbouring patient IDs. Cross-field checks (IVT against
+   its place, time and agent; occlusion site against hemisphere; ASPECTS in posterior strokes;
+   recanalisation against the end of the procedure; 90-day against pre-stroke mRS) list records
+   for review without changing them. The app's About tab shows the counts per check. **NIHSS 43
+   is read as death and 99 as "not assessable"** (70 of the 71 patients coded 43 on day 7 had died
+   by 90 days); they are never used as scores, because doing so would leak the outcome. Codings
+   that the export itself does not document are marked "our reading" in the
+   [data dictionary](docs/data_dictionary.md), to be confirmed with the registry team.
 2. **Cohort.** Adults with endovascular treatment (diagnostic angiography only is excluded) and a
    known 90-day mRS. Stage 3 includes patients alive and assessable at 24 h, stage 4 at day 7, so
    later estimates are conditional on reaching that point.

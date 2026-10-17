@@ -64,7 +64,7 @@ DIMENSIONS = {
     "dm": ("Diabetes", "Diabetes"),
     "anticoag": ("Anticoagulated before stroke", "Antikoagulace před CMP"),
     "occlusion": ("Occlusion site", "Místo okluze"),
-    "aspects_group": ("ASPECTS (2016+)", "ASPECTS (od 2016)"),
+    "aspects_group": ("ASPECTS (anterior circulation, 2016+)", "ASPECTS (přední povodí, od 2016)"),
     "otp_group": ("Onset to puncture", "Od vzniku do punkce"),
     "ivt": ("IV thrombolysis", "IV trombolýza"),
     "transfer": ("Admission route", "Způsob přijetí"),
@@ -80,7 +80,8 @@ DIMENSIONS = {
 DIM_NOTES = {
     "nihss_change": ("Patients with an assessed NIHSS at 24 h only (alive and assessable), so deaths within the first day are not included.",
                      "Jen pacienti s hodnoceným NIHSS za 24 h (žijící a hodnotitelní), úmrtí během prvního dne proto nejsou zahrnuta."),
-    "aspects_group": ("ASPECTS is recorded from 2016.", "ASPECTS se eviduje od roku 2016."),
+    "aspects_group": ("ASPECTS is recorded from 2016 and scores the middle cerebral artery territory, so posterior-circulation strokes are left out here.",
+                      "ASPECTS se eviduje od roku 2016 a hodnotí povodí arteria cerebri media, proto zde CMP v zadním povodí nejsou."),
     "proc_group": ("From groin puncture to recanalisation or the end of the procedure.", "Od punkce do rekanalizace nebo ukončení výkonu."),
 }
 
@@ -121,7 +122,8 @@ def _derive(d: pd.DataFrame) -> pd.DataFrame:
     d["era"] = pd.cut(d["year"], [0, 2014, 2017, 2020, 3000], labels=["2005–2014", "2015–2017", "2018–2020", "2021–2025"])
     d["age_group"] = pd.cut(d["age"], [0, 59.999, 69.999, 79.999, 200], labels=["<60", "60–69", "70–79", "≥80"])
     d["nihss_group"] = pd.cut(d["nihss_adm"], [-1, 9, 15, 20, 99], labels=["0–9", "10–15", "16–20", "≥21"])
-    d["aspects_group"] = pd.cut(d["aspects"].where(d["year"] >= 2016), [-1, 5, 7, 10], labels=["0–5", "6–7", "8–10"])
+    anterior = ~d["occlusion"].isin(["basilar", "other_posterior"])
+    d["aspects_group"] = pd.cut(d["aspects"].where((d["year"] >= 2016) & anterior), [-1, 5, 7, 10], labels=["0–5", "6–7", "8–10"])
     d["otp_group"] = pd.cut(d["onset_to_puncture"], [0, 150, 240, 360, 720, 1e9],
                             labels=["≤150 min", "151–240", "241–360", "361–720", ">720"])
     d["tici_group"] = d["tici"].map({0.0: "0–1", 1.0: "0–1", 2.0: "2a", 2.5: "2", 3.0: "2b", 4.0: "3"})
@@ -216,18 +218,38 @@ def _time_curve(d: pd.DataFrame, min_cell: int, reperfused_only: bool) -> list[d
     return rows
 
 
+def _smd_cont(a: pd.Series, b: pd.Series):
+    a, b = a.dropna(), b.dropna()
+    if len(a) < 2 or len(b) < 2:
+        return None
+    sd = float(np.sqrt((a.var() + b.var()) / 2))
+    return None if sd == 0 else round(float((b.mean() - a.mean()) / sd), 2)
+
+
+def _smd_prop(a: pd.Series, b: pd.Series):
+    a, b = a.dropna(), b.dropna()
+    if not len(a) or not len(b):
+        return None
+    p, q = float(a.mean()), float(b.mean())
+    sd = float(np.sqrt((p * (1 - p) + q * (1 - q)) / 2))
+    return None if sd == 0 else round((q - p) / sd, 2)
+
+
 def _table1(base: pd.DataFrame, min_cell: int) -> dict:
+    """Table 1 with the standardised mean difference (SMD) between the development (<= 2020) and
+    validation (2021+) cohorts; |SMD| > 0.1 is the usual mark of a relevant shift in case mix."""
+    base = base.assign(aspects_anterior=base["aspects"].where(~base["occlusion"].isin(["basilar", "other_posterior"])))
     dev, test = split_temporal(base)
     groups = {"all": base, "dev": dev, "test": test,
               "good": base[base["good_outcome"] == 1], "poor": base[base["good_outcome"] == 0]}
 
     def cont(name, en, cs, col, digits=0):
-        return {"var": name, "label": {"en": en, "cs": cs}, "kind": "median",
+        return {"var": name, "label": {"en": en, "cs": cs}, "kind": "median", "smd": _smd_cont(dev[col], test[col]),
                 **{k: {"median": _med(g[col]), "iqr": _iqr(g[col]), "missing": _pct(g[col].isna().mean())}
                    for k, g in groups.items()}}
 
     def prop(name, en, cs, mask_fn):
-        out = {"var": name, "label": {"en": en, "cs": cs}, "kind": "pct"}
+        out = {"var": name, "label": {"en": en, "cs": cs}, "kind": "pct", "smd": _smd_prop(mask_fn(dev), mask_fn(test))}
         for k, g in groups.items():
             m = mask_fn(g)
             known = m.notna()
@@ -242,7 +264,7 @@ def _table1(base: pd.DataFrame, min_cell: int) -> dict:
         cont("age", "Age, years", "Věk, roky", "age"),
         prop("male", "Men", "Muži", yn("sex_male")),
         cont("nihss", "NIHSS on admission", "NIHSS při přijetí", "nihss_adm"),
-        cont("aspects", "ASPECTS", "ASPECTS", "aspects"),
+        cont("aspects", "ASPECTS (anterior circulation)", "ASPECTS (přední povodí)", "aspects_anterior"),
         prop("premrs01", "Pre-stroke mRS 0–1", "mRS před CMP 0–1", lambda g: (g["mrs_pre"] <= 1).astype(float).where(g["mrs_pre"].notna())),
         prop("htn", "Hypertension", "Hypertenze", yn("htn")),
         prop("dm", "Diabetes mellitus", "Diabetes mellitus", yn("dm")),

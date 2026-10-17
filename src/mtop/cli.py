@@ -38,8 +38,11 @@ def _load_clean() -> pd.DataFrame:
 
 
 def cmd_clean(args):
-    from .clean import clean_registry, load_raw
+    import json
+
+    from .clean import check_summary, clean_registry, load_raw
     from .cohort import flow
+    from .config import settings
 
     src = Path(args.input) if args.input else paths.DEFAULT_RAW_FILE
     if not src.exists():
@@ -51,6 +54,8 @@ def cmd_clean(args):
         summary = issues.groupby(["column", "action"]).size().rename("n").reset_index()
         summary.to_excel(xw, sheet_name="summary", index=False)
         issues.to_excel(xw, sheet_name="issues", index=False)
+    checks = check_summary(issues, len(clean), int(settings()["privacy"]["min_cell"]))
+    (paths.PUBLIC / "data_checks.json").write_text(json.dumps(checks, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
     _, steps = flow(clean)
     print(f"clean: {len(clean)} rows, {len(issues)} logged issues")
     for s in steps:

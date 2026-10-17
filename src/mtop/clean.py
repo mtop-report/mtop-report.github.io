@@ -12,9 +12,15 @@ Design rules
   log so it can be fixed in the source file, but it is not applied.
 * The only automatic repair is an obvious one-year typo in the onset date,
   detected from the date sequence of neighbouring patient IDs.
-* NIHSS 43 is the registry's code for "died"; 99 means "not assessable".
-  Both are converted to NaN in the score and kept in a separate status field,
-  because using them as scores would leak the outcome into the model.
+* NIHSS 43 is read as the registry's code for "died" and 99 as "not assessable" (our
+  reading: 70 of the 71 patients coded 43 on day 7 had died by 90 days). Both become NaN in the
+  score and are kept in a separate status field, because using them as scores would leak the
+  outcome into the model.
+* Cross-field checks (IVT against its location, time and agent; occlusion site against
+  hemisphere; ASPECTS in posterior-circulation strokes; recanalisation against the end of the
+  procedure; 90-day against pre-stroke mRS) are logged as "flag only": the value is kept and the
+  record is listed for review at the source.
+* `check_summary` turns the log into public counts (no IDs; counts under 10 shown as "<10").
 """
 from __future__ import annotations
 
@@ -114,8 +120,8 @@ ETIOLOGY = {
 
 ANESTHESIA = {"Celková anestezie": "general", "Analgosedace": "sedation", "bez ARO": "local"}
 
-TICI = {"0": 0.0, "1": 1.0, "2a": 2.0, "2": 2.5, "2b": 3.0, "3": 4.0}
-TICI_LABEL = {0.0: "0", 1.0: "1", 2.0: "2a", 2.5: "2 (not subgraded)", 3.0: "2b", 4.0: "3"}
+TICI = {"0": 0.0, "1": 1.0, "2a": 2.0, "2": 2.5, "2b": 3.0, "2c": 3.5, "3": 4.0}   # 2c: not in the current export
+TICI_LABEL = {0.0: "0", 1.0: "1", 2.0: "2a", 2.5: "2 (not subgraded)", 3.0: "2b", 3.5: "2c", 4.0: "3"}
 
 # plausible ranges (inclusive) — outside -> NaN and logged
 RANGES = {
@@ -197,8 +203,14 @@ def _yes_no(raw: pd.Series, name: str, ids: pd.Series, log: IssueLog) -> pd.Seri
     return pd.Series(out, index=raw.index, dtype="float64")
 
 
-def _num(raw: pd.Series) -> pd.Series:
-    return pd.to_numeric(raw, errors="coerce").astype("float64")
+def _num(raw: pd.Series, name: str | None = None, ids: pd.Series | None = None, log: IssueLog | None = None) -> pd.Series:
+    """Numeric conversion; with a log, text that is not a number is listed instead of vanishing."""
+    out = pd.to_numeric(raw, errors="coerce").astype("float64")
+    if log is not None:
+        for idx in raw.index[raw.notna() & out.isna()]:
+            if _s(raw.at[idx]) is not None:
+                log.add(ids.at[idx], name, _s(raw.at[idx]), "not a number -> missing")
+    return out
 
 
 def _range(series: pd.Series, name: str, ids: pd.Series, log: IssueLog, suggest=None) -> pd.Series:
@@ -280,7 +292,7 @@ def repair_onset_years(ids: pd.Series, dates: pd.Series, log: IssueLog) -> pd.Se
 
 
 def _nihss_followup(raw: pd.Series, name: str, ids: pd.Series, log: IssueLog):
-    score = _num(raw)
+    score = _num(raw, name, ids, log)
     status = pd.Series("assessed", index=raw.index, dtype="object")
     status[score.isna()] = "missing"
     died = score == NIHSS_DIED
@@ -292,6 +304,91 @@ def _nihss_followup(raw: pd.Series, name: str, ids: pd.Series, log: IssueLog):
         log.add(ids.at[idx], name, score.at[idx], "outside 0-42 -> missing")
     score = score.where(~(died | na | other))
     return score, status
+
+
+POSTERIOR_OCCLUSIONS = ("basilar", "other_posterior")
+ANTERIOR_OCCLUSIONS = ("M1", "ICA", "distal", "cervical_ICA")
+
+
+def consistency_flags(c: pd.DataFrame, ids: pd.Series, log: IssueLog) -> None:
+    """Cross-field checks. Values are kept; each record is listed for review at the source."""
+    def flag(mask, column, raw_fn, text, note_fn=lambda i: ""):
+        for idx in c.index[mask.fillna(False)]:
+            log.add(ids.at[idx], column, raw_fn(idx), f"flag only: {text}", None, note_fn(idx))
+
+    loc = c["ivt_location"]
+    flag((c["ivt"] == 0) & loc.notna() & (loc != "žádné"), "ivt", lambda i: "NE",
+         "IVT = no, but a place of IVT is recorded", lambda i: f"IVT in different hospital: {loc.at[i]}")
+    flag((c["ivt"] == 1) & (loc == "žádné"), "ivt", lambda i: "ANO",
+         "IVT = yes, but the place of IVT is 'žádné' (none)")
+    flag((c["ivt"] == 0) & c["onset_to_ivt"].notna(), "ivt", lambda i: "NE",
+         "IVT = no, but an onset-to-IVT time is recorded", lambda i: f"{c.at[i, 'onset_to_ivt']:g} min")
+    flag((c["ivt"] == 0) & c["agent"].isin(["alteplase", "tenecteplase"]) & (c["ia_lysis"] != 1), "ivt", lambda i: "NE",
+         "IVT = no and no intra-arterial lysis, but a thrombolytic is recorded", lambda i: str(c.at[i, "agent"]))
+    flag((c["occlusion"] == "basilar") & c["side"].isin(["left", "right"]), "side", lambda i: c.at[i, "side"],
+         "basilar occlusion recorded with a lateral hemisphere")
+    flag(c["occlusion"].isin(ANTERIOR_OCCLUSIONS) & (c["side"] == "posterior"), "side", lambda i: "posterior",
+         "anterior-circulation occlusion recorded as posterior circulation", lambda i: f"occlusion {c.at[i, 'occlusion_raw']}")
+    flag(c["occlusion"].isin(POSTERIOR_OCCLUSIONS) & (c["aspects"] < 10), "aspects", lambda i: c.at[i, "aspects"],
+         "ASPECTS below 10 in a posterior-circulation stroke (check whether pc-ASPECTS was entered)",
+         lambda i: f"occlusion {c.at[i, 'occlusion_raw']}")
+    late = (c["onset_to_recan"] - c["onset_to_puncture"]) - c["procedure_min"]
+    flag(late > 30, "onset_to_recan", lambda i: c.at[i, "onset_to_recan"],
+         "recanalisation recorded more than 30 min after the end of the procedure",
+         lambda i: f"puncture {c.at[i, 'onset_to_puncture']:g} min, procedure {c.at[i, 'procedure_min']:g} min")
+    flag(c["mrs90"] <= c["mrs_pre"] - 2, "mrs90", lambda i: c.at[i, "mrs90"],
+         "90-day mRS at least 2 points better than pre-stroke mRS", lambda i: f"pre-stroke mRS {c.at[i, 'mrs_pre']:g}")
+
+
+# Public summary of the cleaning log: what was checked and how many records were affected.
+CHECK_GROUPS = [
+    # (match on the log action, kind, en, cs)
+    ("year typo repaired", "repaired", "Onset-date year typos repaired from the neighbouring patient IDs",
+     "Překlepy v roce vzniku opraveny podle sousedních ID pacientů"),
+    ("outside ", "missing", "Values outside a plausible range set to missing",
+     "Hodnoty mimo věrohodný rozsah nastaveny jako chybějící"),
+    ("not a number", "missing", "Text in a numeric field set to missing", "Text v číselném poli nastaven jako chybějící"),
+    ("unknown category", "missing", "Unrecognised category set to missing", "Nerozpoznaná kategorie nastavena jako chybějící"),
+    ("not ANO/NE", "missing", "Yes/no field with another value set to missing", "Pole ano/ne s jinou hodnotou nastaveno jako chybějící"),
+    ("recanalisation before puncture", "missing", "Recanalisation time before puncture set to missing",
+     "Čas rekanalizace před punkcí nastaven jako chybějící"),
+    ("systolic <= diastolic", "missing", "Systolic pressure not above diastolic: both set to missing",
+     "Systolický tlak nepřevyšuje diastolický: oba nastaveny jako chybějící"),
+    ("unparseable/unknown time", "missing", "Unreadable onset time set to missing", "Nečitelný čas vzniku nastaven jako chybějící"),
+    ("paediatric", "kept", "Patients under 18 (kept in the registry, not in the models)",
+     "Pacienti mladší 18 let (ponecháni v registru, ne v modelech)"),
+    ("flag only: IVT = no, but a place", "flag", "IVT = no, but a place of IVT is recorded", "IVT = ne, ale je uvedeno místo IVT"),
+    ("flag only: IVT = yes, but the place", "flag", "IVT = yes, but the place of IVT is 'none'", "IVT = ano, ale místo IVT je „žádné“"),
+    ("flag only: IVT = no, but an onset", "flag", "IVT = no, but an onset-to-IVT time is recorded", "IVT = ne, ale je uveden čas do IVT"),
+    ("flag only: IVT = no and no intra", "flag", "IVT = no and no intra-arterial lysis, but a thrombolytic is recorded",
+     "IVT = ne a bez intraarteriální lýzy, ale je uvedeno trombolytikum"),
+    ("flag only: IVT >30", "flag", "IVT recorded more than 30 min after groin puncture", "IVT zaznamenána více než 30 min po punkci"),
+    ("flag only: puncture > 24 h", "flag", "Groin puncture more than 24 h after onset", "Punkce více než 24 h od vzniku"),
+    ("flag only: basilar", "flag", "Basilar occlusion recorded with a lateral hemisphere", "Uzávěr a. basilaris se stranou hemisféry"),
+    ("flag only: anterior-circulation", "flag", "Anterior-circulation occlusion recorded as posterior circulation",
+     "Uzávěr v předním povodí zapsaný jako zadní povodí"),
+    ("flag only: ASPECTS below 10", "flag", "ASPECTS below 10 in a posterior-circulation stroke",
+     "ASPECTS pod 10 u CMP v zadním povodí"),
+    ("flag only: recanalisation recorded", "flag", "Recanalisation recorded more than 30 min after the end of the procedure",
+     "Rekanalizace zapsaná více než 30 min po konci výkonu"),
+    ("flag only: coded as died", "flag", "Coded as died by day 7 (NIHSS 43), but 90-day mRS is not 6",
+     "Kódováno jako úmrtí do 7. dne (NIHSS 43), ale mRS za 90 dní není 6"),
+    ("flag only: 90-day mRS", "flag", "90-day mRS at least 2 points better than pre-stroke mRS",
+     "mRS za 90 dní nejméně o 2 body lepší než před CMP"),
+]
+
+
+def check_summary(issues: pd.DataFrame, n_records: int, min_cell: int = 10) -> dict:
+    """Counts per check for publication: no patient IDs, counts under min_cell shown as '<min_cell'."""
+    rows = []
+    for key, kind, en, cs in CHECK_GROUPS:
+        sub = issues[issues["action"].str.contains(key, regex=False)]
+        n = int(sub["patient_id"].nunique())
+        if n == 0:
+            continue
+        rows.append({"kind": kind, "label": {"en": en, "cs": cs}, "n": n if n >= min_cell else None,
+                     "small": bool(n < min_cell)})
+    return {"records": int(n_records), "min_cell": int(min_cell), "checks": rows}
 
 
 def clean_registry(raw: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -321,17 +418,17 @@ def clean_registry(raw: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     c["onset_hour"] = onset_hour.astype("float64")
 
     # --- demographics, baseline ------------------------------------------------------------
-    c["age"] = _range(_num(raw["Age"]), "age", ids, log)
+    c["age"] = _range(_num(raw["Age"], "age", ids, log), "age", ids, log)
     for idx in c.index[c["age"] < 18]:
         log.add(ids.at[idx], "age", c.at[idx, "age"], "paediatric patient (kept; excluded from models)")
     sex = _map(raw["Sex"], {"Muž": "male", "Žena": "female"}, "sex", ids, log)
     c["sex_male"] = sex.map({"male": 1.0, "female": 0.0}).astype("float64")
-    c["mrs_pre"] = _range(_num(raw["mRS before"]), "mrs_pre", ids, log)
-    c["mrs90"] = _range(_num(raw["90-day mRS"]), "mrs90", ids, log)
+    c["mrs_pre"] = _range(_num(raw["mRS before"], "mrs_pre", ids, log), "mrs_pre", ids, log)
+    c["mrs90"] = _range(_num(raw["90-day mRS"], "mrs90", ids, log), "mrs90", ids, log)
 
     # --- admission status and imaging ------------------------------------------------------
-    c["nihss_adm"] = _range(_num(raw["Admission NIHSS"]), "nihss_adm", ids, log)
-    c["aspects"] = _range(_num(raw["ASPECTS"]), "aspects", ids, log)
+    c["nihss_adm"] = _range(_num(raw["Admission NIHSS"], "nihss_adm", ids, log), "nihss_adm", ids, log)
+    c["aspects"] = _range(_num(raw["ASPECTS"], "aspects", ids, log), "aspects", ids, log)
     c["occlusion"] = _map(raw["Occlusion site"], OCCLUSION, "occlusion", ids, log)
     c["occlusion_raw"] = raw["Occlusion site"].map(_s)
     c["recanalised_at_angio"] = (raw["Occlusion site"].map(_s) == "Rekanalizace").astype("float64")
@@ -361,18 +458,18 @@ def clean_registry(raw: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
         lambda v: np.nan if _null(v) else float(v in ("valve", "cardiomyopathy", "laa_thrombus"))
     ).astype("float64")
 
-    bmi = _num(raw["BMI"])
+    bmi = _num(raw["BMI"], "bmi", ids, log)
     c["bmi"] = _range(bmi, "bmi", ids, log, suggest=lambda v: _suggest_decimal(v, 12, 70))
-    c["sbp"] = _range(_num(raw["Systolic BP"]), "sbp", ids, log, suggest=lambda v: _suggest_decimal(v, 60, 300))
-    c["dbp"] = _range(_num(raw["Diastolic BP"]), "dbp", ids, log)
+    c["sbp"] = _range(_num(raw["Systolic BP"], "sbp", ids, log), "sbp", ids, log, suggest=lambda v: _suggest_decimal(v, 60, 300))
+    c["dbp"] = _range(_num(raw["Diastolic BP"], "dbp", ids, log), "dbp", ids, log)
     bad_bp = c["sbp"].notna() & c["dbp"].notna() & (c["sbp"] <= c["dbp"])
     for idx in c.index[bad_bp]:
         log.add(ids.at[idx], "sbp/dbp", f"{c.at[idx, 'sbp']:g}/{c.at[idx, 'dbp']:g}",
                 "systolic <= diastolic -> both missing")
     c.loc[bad_bp, ["sbp", "dbp"]] = np.nan
-    c["glucose"] = _range(_num(raw["Glycemia"]), "glucose", ids, log,
+    c["glucose"] = _range(_num(raw["Glycemia"], "glucose", ids, log), "glucose", ids, log,
                           suggest=lambda v: _suggest_decimal(v, 1.5, 40))
-    c["cholesterol"] = _range(_num(raw["Cholesterol"]), "cholesterol", ids, log,
+    c["cholesterol"] = _range(_num(raw["Cholesterol"], "cholesterol", ids, log), "cholesterol", ids, log,
                               suggest=lambda v: _suggest_decimal(v, 1.0, 20))
 
     # --- pathway / treatment -------------------------------------------------------------------
@@ -413,7 +510,7 @@ def clean_registry(raw: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     c.loc[c["iat"].isna() & c["ia_lysis_proc"].isna(), "ia_lysis"] = np.nan
 
     c["anesthesia"] = _map(raw["Anesthesia"], ANESTHESIA, "anesthesia", ids, log)
-    c["procedure_min"] = _range(_num(raw["Procedure duration"]), "procedure_min", ids, log)
+    c["procedure_min"] = _range(_num(raw["Procedure duration"], "procedure_min", ids, log), "procedure_min", ids, log)
 
     tici_s = raw["TICI"].map(lambda v: None if _s(v) is None else _s(v).lower())
     c["tici"] = _map(tici_s, TICI, "tici", ids, log).astype("float64")
@@ -421,9 +518,9 @@ def clean_registry(raw: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     c["reperfusion_2b3"] = c["tici"].map(lambda t: np.nan if np.isnan(t) or t == 2.5 else float(t >= 3))
 
     # --- times -----------------------------------------------------------------------------------
-    c["onset_to_ivt"] = _range(_num(raw["Stroke onset to IVT (min)"]), "onset_to_ivt", ids, log)
-    c["onset_to_puncture"] = _range(_num(raw["Stroke onset to puncture (min)"]), "onset_to_puncture", ids, log)
-    c["onset_to_recan"] = _range(_num(raw["Stroke onset to recanalization (min)"]), "onset_to_recan", ids, log)
+    c["onset_to_ivt"] = _range(_num(raw["Stroke onset to IVT (min)"], "onset_to_ivt", ids, log), "onset_to_ivt", ids, log)
+    c["onset_to_puncture"] = _range(_num(raw["Stroke onset to puncture (min)"], "onset_to_puncture", ids, log), "onset_to_puncture", ids, log)
+    c["onset_to_recan"] = _range(_num(raw["Stroke onset to recanalization (min)"], "onset_to_recan", ids, log), "onset_to_recan", ids, log)
     bad_t = c["onset_to_recan"].notna() & c["onset_to_puncture"].notna() & (c["onset_to_recan"] < c["onset_to_puncture"])
     for idx in c.index[bad_t]:
         log.add(ids.at[idx], "onset_to_recan", c.at[idx, "onset_to_recan"],
@@ -447,6 +544,9 @@ def clean_registry(raw: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
                 None, f"90-day mRS {c.at[idx, 'mrs90']:g}")
     c["nihss_change_24h"] = c["nihss_24h"] - c["nihss_adm"]
     c["etiology"] = _map(raw["Etiology"], ETIOLOGY, "etiology", ids, log)
+    c["ivt_location"] = raw["IVT in different hospital"].map(_s)
+    consistency_flags(c, ids, log)
+    c = c.drop(columns=["ivt_location"])
 
     # --- outcomes -------------------------------------------------------------------------------------
     c["good_outcome"] = (c["mrs90"] <= 2).astype("float64").where(c["mrs90"].notna())

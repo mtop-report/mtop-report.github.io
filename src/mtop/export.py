@@ -118,12 +118,37 @@ def imputation_values(base, k: int = IMPUTE_K) -> dict:
     return out
 
 
+THRESHOLDS = (0.2, 0.3, 0.4, 0.5, 0.6, 0.7)
+
+
+def threshold_table(y, p, min_cell: int) -> list[dict]:
+    """Sensitivity, specificity, PPV and NPV at fixed risk thresholds (positive = estimate >= t).
+    A threshold is published only if every cell of its 2x2 table holds >= min_cell patients, so
+    no count can be recovered for a small group."""
+    y = np.asarray(y, float)
+    p = np.asarray(p, float)
+    rows = []
+    for t in THRESHOLDS:
+        pos = p >= t
+        tp, fp = int(((y == 1) & pos).sum()), int(((y == 0) & pos).sum())
+        fn, tn = int(((y == 1) & ~pos).sum()), int(((y == 0) & ~pos).sum())
+        if min(tp, fp, fn, tn) < min_cell:
+            rows.append({"t": t, "suppressed": True})
+            continue
+        rows.append({"t": t, "sens": round(tp / (tp + fn), 3), "spec": round(tn / (tn + fp), 3),
+                     "ppv": round(tp / (tp + fp), 3), "npv": round(tn / (tn + fn), 3), "pos": round((tp + fp) / len(y), 3)})
+    return rows
+
+
 def export_all() -> None:
     PUBLIC.mkdir(parents=True, exist_ok=True)
     with open(PRIVATE / "train_results.json") as fh:
         res = json.load(fh)
     cfg = settings()
     min_leaf = int(cfg["privacy"]["min_leaf"])
+    min_cell = int(cfg["privacy"]["min_cell"])
+    pred_file = PRIVATE / "temporal_predictions.parquet"
+    temporal_preds = pd.read_parquet(pred_file) if pred_file.exists() else None
 
     bundle = {
         "app": "MTOP",
@@ -173,6 +198,11 @@ def export_all() -> None:
             v["rounds_dev"] = tres["rounds_dev"]
             if "settings" in tres:
                 v["settings"] = tres["settings"]
+            if temporal_preds is not None:
+                tp = temporal_preds[(temporal_preds["stage"] == stage) & (temporal_preds["target"] == target)
+                                    & (temporal_preds["model"] == "LightGBM")]
+                if len(tp):
+                    v["thresholds"] = threshold_table(tp["y"].to_numpy(), tp["p"].to_numpy(), min_cell)
             validation["stages"][stage]["targets"][target] = v
 
     canon = json.dumps(bundle["models"], sort_keys=True, separators=(",", ":")).encode("utf-8")
