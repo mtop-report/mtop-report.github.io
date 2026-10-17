@@ -446,19 +446,34 @@
   }
 
   function federatedCard() {
+    const FD = A.DATA.federated;
     const card = h("div", { class: "card card-pad block" });
     card.appendChild(h("div", { class: "chart-head" },
-      h("div", null, h("div", { class: "chart-title", text: tx("Next: learning together without sharing data", "Dále: společné učení bez sdílení dat") }),
+      h("div", null, h("div", { class: "chart-title", text: tx("Next step: learning together without sharing data", "Další krok: společné učení bez sdílení dat") }),
         h("div", { class: "chart-sub", text: tx("Federated learning across stroke centres", "Federované učení napříč iktovými centry") })),
-      A.statusChip("proposed")));
+      A.statusChip(FD ? "beta" : "proposed")));
     card.appendChild(h("div", { class: "fed" },
-      h("div", { class: "fed-sites" }, ["A", "B", "C"].map((c) => h("div", { class: "fed-node" }, h("b", { text: tx(`Centre ${c}`, `Centrum ${c}`) }), h("span", { text: tx("trains on its own patients", "učí se na vlastních pacientech") })))),
+      h("div", { class: "fed-sites" }, ["A", "B", "C"].map((c) => h("div", { class: "fed-node" }, h("b", { text: tx(`Centre ${c}`, `Centrum ${c}`) }), h("span", { text: tx("answers with masked sums", "odpovídá maskovanými součty") })))),
       h("div", { class: "fed-arrow", "aria-hidden": "true", text: "⇅" }),
-      h("div", { class: "fed-node hub" }, h("b", { text: tx("Coordinator (e.g. HPC at IT4Innovations)", "Koordinátor (např. HPC v IT4Innovations)") }), h("span", { text: tx("combines model updates, never sees patient data", "slučuje aktualizace modelu, data pacientů nevidí") }))));
-    card.appendChild(h("p", { class: "note", text: tx(
-      "Validation results pooled above show whether one model transfers; federated training would let several centres build a shared model. Both depend on partner centres agreeing a common data dictionary, which the upload template above already defines.",
-      "Výše sloučené validační výsledky ukazují, zda se model přenáší; federované učení by umožnilo více centrům vytvořit společný model. Obojí vyžaduje shodu partnerských center na společném datovém slovníku, který šablona výše již definuje.") }));
-    if (A.SITE.contact) card.appendChild(h("p", { class: "note", text: tx(`Centres interested in validating MTOP can share their results file with the study team: ${A.SITE.contact}`, `Centra se zájmem o validaci MTOP mohou soubor výsledků zaslat řešitelskému týmu: ${A.SITE.contact}`) }));
+      h("div", { class: "fed-node hub" }, h("b", { text: tx("Coordinator", "Koordinátor") }), h("span", { text: tx("adds them up, never sees patient data", "sčítá je, data pacientů nevidí") }))));
+    let text;
+    if (FD && FD.outcomes) {
+      const res = FD.outcomes.death90;
+      const gain = Math.max(res.mean.network, res.mean.adapted) - res.mean.alone;
+      const everywhere = res.per_centre.every((e) => Math.max(e.network.auroc, e.adapted.auroc) > e.alone.auroc);
+      text = tx(`Validation above tests whether one model transfers; a federated network trains a shared model. It now works: in a demo on four virtual centres, the shared model is identical to pooled training and improves the prediction of 90-day death ${everywhere ? "at every centre" : "on average"} (AUROC ${A.signed(gain, 2)} on average, each centre scoring its own patients). Both rely on the upload template above as the common data dictionary.`,
+        `Validace výše ověřuje, zda se model přenáší; federovaná síť trénuje společný model. Ta už funguje: v ukázce na čtyřech virtuálních centrech je společný model shodný s trénováním na sloučených datech a zlepšuje predikci úmrtí do 90 dní ${everywhere ? "v každém centru" : "v průměru"} (AUROC v průměru ${A.signed(gain, 2)}, každé centrum hodnotí vlastní pacienty). Obojí stojí na šabloně výše jako společném datovém slovníku.`);
+    } else {
+      text = tx("Validation results pooled above show whether one model transfers; federated training would let several centres build a shared model. Both depend on partner centres agreeing a common data dictionary, which the upload template above already defines.",
+        "Výše sloučené validační výsledky ukazují, zda se model přenáší; federované učení by umožnilo více centrům vytvořit společný model. Obojí vyžaduje shodu partnerských center na společném datovém slovníku, který šablona výše již definuje.");
+    }
+    card.appendChild(h("p", { class: "note", text }));
+    if (FD) {
+      const b = h("button", { class: "btn btn-primary", type: "button", style: "margin-top:12px" }, tx("See the network at work", "Ukázka sítě při práci"));
+      b.addEventListener("click", () => A.goTo("federated"));
+      card.appendChild(b);
+    }
+    if (A.SITE.contact) card.appendChild(h("p", { class: "note", text: tx(`Centres interested in validating MTOP or joining the network: ${A.SITE.contact}`, `Centra se zájmem o validaci MTOP nebo zapojení do sítě: ${A.SITE.contact}`) }));
     return card;
   }
 

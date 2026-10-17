@@ -46,6 +46,11 @@ with its typeface bundled, so opening it contacts no third-party server.
   browser (CSV or Excel; nothing is uploaded) and export a results file with aggregate metrics
   only. Results from several sites are pooled in a random-effects meta-analysis (forest plot);
   until partners join, the four FNO treatment eras (internal–external validation) stand in.
+- **Federated** *(beta).* A working federated network: hospitals train and validate a shared
+  model without moving patient data (secure aggregation; the result equals pooled training bit for
+  bit). Demonstrated on four virtual centres from the FNO registry: for 90-day death the network
+  raised the mean AUROC at the centres' own patients from 0.742 to 0.780, and a centre with only
+  50 patients went from 0.57 alone to 0.77. See [docs/federated.md](docs/federated.md).
 - **Roadmap** *(v1.1).* What is live, what is new, what is in progress and what is proposed.
 - **About.** Methods, limits, privacy, authors, QR code.
 
@@ -105,6 +110,20 @@ Full tables (Brier, calibration, ΔAUROC with paired-bootstrap CIs, subgroups) a
    LightGBM's decision rules and TreeSHAP exactly; `tests/test_parity.py` checks predictions and
    every SHAP value against LightGBM to 1e-6.
 
+## Federated network
+
+`python -m mtop.fed` runs the network itself (Python standard library plus `cryptography`):
+
+```bash
+pip install -e ".[federated]"
+python -m mtop.fed enrol A B C                    # tokens for three centres; network.yaml keeps hashes only
+python -m mtop.fed coordinator --network network.yaml --wait 3          # dashboard on :8750
+python -m mtop.fed site --coordinator http://HOST:8750 --site-id A --token-file A.token --data a.csv
+python -m mtop fed-demo                          # the four-centre demonstration behind the Federated tab
+```
+
+How it works, what leaves a hospital, its limits and how a centre joins: [docs/federated.md](docs/federated.md).
+
 ## Data protection
 
 - Patient-level files never enter git: `data/raw/`, `data/processed/`, `artifacts/private/` and
@@ -117,6 +136,9 @@ Full tables (Brier, calibration, ΔAUROC with paired-bootstrap CIs, subgroups) a
   calculator stay in the browser. The only exception is the multicentre tool, which loads the
   SheetJS library from cdnjs when a partner opens an Excel file (CSV needs nothing); the file
   itself is still read locally.
+- The federated network never moves patient rows: centres send only masked sums, and the
+  coordinator can read only network-wide totals (`docs/federated.md` lists exactly what it sees).
+  `federated.json` holds aggregates for groups of at least 10 patients and 10 events.
 - Before making the repository or the page public, confirm with the FNO ethics committee / data
   protection officer that publishing the trained model and aggregate results is covered.
 
@@ -135,7 +157,7 @@ open site/index.html          # the app; works offline from the file
 python -m mtop all --input data/synthetic/registry_synthetic.xlsx --quick
 ```
 
-Individual steps: `python -m mtop clean | train [--quick] | export | extras [--quick] | adaptive | explorer | report | site | synth`.
+Individual steps: `python -m mtop clean | train [--quick] | export | extras [--quick] | compare | reconcile | adaptive | fed-demo | explorer | report | site | synth`.
 
 ## Updating with new patients
 
@@ -147,16 +169,18 @@ Individual steps: `python -m mtop clean | train [--quick] | export | extras [--q
 ## Repository layout
 
 ```
-config/            features.yaml (predictors, stages, UI labels EN/CZ), settings.yaml
-src/mtop/          clean · cohort · features · train · lr · metrics · scores · export · extras · adaptive · explorer · report · site · synth · cli
+config/            features.yaml (predictors, stages, UI labels EN/CZ), settings.yaml, federated.yaml
+src/mtop/          clean · cohort · features · train · lr · splines · metrics · scores · export · extras · compare ·
+                   reconcile · adaptive · explorer · report · site · synth · cli
+src/mtop/fed/      federated network: schema · bins · secagg · gbdt · logreg · site · coordinator · server · client · demo
 web/               index.html template, styles.css, app.js + view_*.js, charts.js, model.js (trees + TreeSHAP),
                    models_extra.js (comparators, mRS layer), metrics.js (in-browser validation), i18n.js,
                    assets/ (logo, app icons, bundled Instrument Sans font)
 scripts/           check_no_patient_data.sh (CI guard), make_brand.py (regenerates logo and icons)
 artifacts/public/  published model bundle, validation and explorer aggregates (committed)
 data/synthetic/    synthetic registry for CI and demos (committed)
-tests/             cleaning rules, JS↔LightGBM parity, privacy rules, end-to-end synthetic run
-docs/              model card (TRIPOD+AI)
+tests/             cleaning rules, JS↔LightGBM parity, privacy rules, federated network, end-to-end synthetic run
+docs/              model card (TRIPOD+AI), federated network
 .github/workflows/ ci.yml (tests), pages.yml (build and deploy the app)
 ```
 

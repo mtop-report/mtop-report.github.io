@@ -16,7 +16,8 @@ import pytest
 from mtop.config import settings
 from mtop.paths import PUBLIC
 
-FILES = ["model_bundle.json", "validation.json", "explorer.json", "extras.json", "adaptive.json", "subgroups.json"]
+FILES = ["model_bundle.json", "validation.json", "explorer.json", "extras.json", "adaptive.json", "subgroups.json",
+         "reconciliation.json", "federated.json"]
 
 
 def _load(name):
@@ -140,6 +141,32 @@ def test_extras_are_aggregates():
                 assert b["n"] >= k
     for ov in x["ordinal_validation"].values():
         assert ov["n"] >= 3 * k
+
+
+def test_federated_outputs_are_aggregates():
+    f = _load("federated.json")
+    k = int(settings()["privacy"]["min_cell"])
+    groups = [c[t] for c in f["centres"] for t in ("good_outcome", "death90")]
+    for res in f["outcomes"].values():
+        groups += res["per_centre"] + res["loso"]
+    for st in f["stages"]:
+        groups += st["per_centre"]
+    for g in groups:
+        assert g["n"] >= k and g["events"] >= k and g["n"] - g["events"] >= k
+    raw = json.dumps(f)
+    for key in ('"nodes"', '"thr"', '"miss_left"', '"edges"', '"beta"', '"calibration"'):
+        assert key not in raw, f"{key} should not be published (model internals or score-band counts)"
+    for path, k2, v in _walk(f):
+        if k2 == "trees":                       # tree counts and learning-curve positions only
+            assert isinstance(v, int) or all(isinstance(t, int) for t in v), path
+    assert f["equivalence"]["gbdt"]["min_leaf"] >= int(settings()["privacy"]["min_leaf"])
+
+
+def test_reconciliation_is_aggregate():
+    r = _load("reconciliation.json")
+    for setup in r["setups"].values():
+        assert setup["n_test"] >= 10 * 3 and setup["n_train"] >= 10 * 3
+    assert "patient" not in json.dumps(r).lower()
 
 
 def test_demo_csv_is_synthetic_template():

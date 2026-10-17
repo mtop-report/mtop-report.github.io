@@ -1,0 +1,53 @@
+# MTOP federated network: shared settings. Every centre and the coordinator run with this file.
+# Nothing here depends on any centre's data; all values are agreed in advance and public.
+
+protocol: mtop-fed/1
+
+network:
+  min_sites: 3             # secure aggregation needs at least three centres in every job
+  min_site_patients: 50    # a centre with fewer eligible patients declines the job
+  fixed_point_bits: 24     # numbers travel as integers round(x * 2^24), added modulo 2^64
+  round_timeout_s: 600     # a round fails if a centre has not answered by then
+
+# Default recipe for the shared boosted-tree model (same family as the MTOP model).
+gbdt:
+  trees: 100
+  learning_rate: 0.05
+  max_depth: 3
+  min_child: 25            # never below privacy.min_leaf in settings.yaml (20)
+  lambda: 1.0
+  colsample: 1.0
+
+# Penalised logistic regression with restricted cubic splines (the report's model family).
+logreg:
+  lambda: 1.0              # L2 penalty on standardised coefficients (not on the intercept)
+  iterations: 25
+  tolerance: 1.0e-6        # stop when no coefficient moves more than this (fixed-point noise is ~1e-7)
+  knots:                   # pre-agreed knots (round numbers near the usual 5/35/65/95 percentiles)
+    age: [45, 65, 75, 85]
+    nihss_adm: [4, 12, 18, 24]
+    onset_to_puncture: [90, 180, 270, 600]
+    glucose: [5.5, 6.5, 8, 12]
+    procedure_min: [20, 40, 70, 120]
+    nihss_24h: [1, 6, 12, 22]
+    nihss_7d: [0, 3, 8, 18]
+
+evaluation:
+  logit_bins: 200          # pooled AUROC and calibration from counts per narrow risk band
+  logit_range: [-7, 7]
+
+# Value bands for tree learning. A split can only fall on one of these edges: x <= edge goes left,
+# missing values go to whichever side helps more. Binary and one-hot columns split at 0.
+bands:
+  age: [35, 40, 45, 50, 55, 58, 61, 64, 67, 70, 73, 76, 79, 82, 85, 88, 91]
+  mrs_pre: [0, 1, 2, 3, 4]
+  nihss_adm: &nihss [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 26, 28, 30, 34]
+  aspects: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+  onset_to_puncture: [60, 90, 120, 150, 180, 210, 240, 270, 300, 360, 420, 480, 600, 720, 960]
+  glucose: [4.5, 5.0, 5.5, 6.0, 6.5, 7.0, 7.5, 8.0, 8.5, 9.0, 10.0, 11.0, 12.0, 14.0, 17.0, 20.0]
+  sbp: [100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200, 220]
+  tici: [0, 1, 2, 2.5, 3]
+  procedure_min: [15, 20, 25, 30, 35, 40, 45, 50, 60, 70, 80, 90, 105, 120, 150, 180]
+  nihss_24h: *nihss
+  nihss_7d: *nihss
+  nihss_change_24h: [-20, -15, -12, -10, -8, -6, -5, -4, -3, -2, -1, 0, 1, 2, 3, 5, 8, 12]

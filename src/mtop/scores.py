@@ -7,6 +7,11 @@ Point scores (higher = worse outcome):
   HIAT2    (Sarraj et al., Stroke 2013): age <=59: 0, 60-79: 2, >=80: 4; NIHSS <=10: 0,
            11-20: 1, >=21: 2; glucose >=150 mg/dL: 1; ASPECTS <=7: 3. 0-10.
   PRE      (Rangaraju et al., J NeuroIntervent Surg 2015): age + 2 x NIHSS - 10 x ASPECTS.
+  Bedside  7-item score from the earlier FNO analysis (report "Predikce výsledku trombektomie",
+           2026): age <60: 0, 60-79: 2, >=80: 5; NIHSS 0-9: 0, 10-14: 1, 15-19: 3, >=20: 5;
+           glucose <7.8: 0, 7.8-11.0: 2, >=11.1 mmol/L: 3; pre-stroke mRS >=1: 2; ASPECTS 0-5: 2;
+           onset to puncture 180-299 min: 1, >=300: 2; previous stroke: 1. 0-20 points; an item
+           that is not recorded scores 0.
   NIHSS at 24 h alone; NIHSS on day 7 alone.
 Each point score is mapped to a probability with a logistic fit (recalibration) on the
 development cohort, so discrimination is compared on equal terms.
@@ -64,11 +69,28 @@ def pre_score(df: pd.DataFrame) -> pd.Series:
     return df["age"] + 2 * df["nihss_adm"] - 10 * df["aspects"]
 
 
+def bedside(df: pd.DataFrame) -> pd.Series:
+    """FNO 7-item bedside score (0-20, higher = worse); missing items score 0."""
+    a, n, g = df["age"], df["nihss_adm"], df["glucose"]
+    otp, asp, pre = df["onset_to_puncture"], df["aspects"], df["mrs_pre"]
+    pts = (np.select([a < 60, a < 80], [0, 2], 5).astype(float)
+           + np.select([n <= 9, n <= 14, n <= 19], [0, 1, 3], 5).astype(float)
+           + np.where(g >= 11.1, 3.0, np.where(g >= 7.8, 2.0, 0.0))
+           + np.where(pre >= 1, 2.0, 0.0)
+           + np.where(asp <= 5, 2.0, 0.0)
+           + np.where(otp >= 300, 2.0, np.where(otp >= 180, 1.0, 0.0))
+           + np.where(df["stroke_prior"] == 1, 1.0, 0.0))
+    s = pd.Series(pts, index=df.index)
+    s[a.isna() | n.isna()] = np.nan      # age and NIHSS are required
+    return s
+
+
 POINT_SCORES = {
     "THRIVE": thrive,
     "SPAN-100": span100,
     "HIAT2": hiat2,
     "PRE": pre_score,
+    "Bedside score": bedside,
     "NIHSS 24 h": lambda d: d["nihss_24h"],
     "NIHSS day 7": lambda d: d["nihss_7d"],
 }
@@ -84,18 +106,18 @@ REFIT_TERMS = {
 }
 
 BENCHMARKS = {
-    "admission": ["THRIVE", "THRIVE-c", "SPAN-100", "HIAT2", "PRE"],
-    "procedure": ["THRIVE"],
+    "admission": ["THRIVE", "THRIVE-c", "SPAN-100", "HIAT2", "PRE", "Bedside score"],
+    "procedure": ["THRIVE", "Bedside score"],
     "h24": ["NIHSS 24 h", "MR PREDICTS@24H"],
     "d7": ["NIHSS day 7"],
 }
 
 # shown in the calculator's "other models" panel (pre-treatment scores stay visible later on)
 PANEL = {
-    "admission": ["THRIVE", "THRIVE-c", "SPAN-100", "HIAT2", "PRE"],
-    "procedure": ["THRIVE", "THRIVE-c", "SPAN-100", "HIAT2", "PRE"],
-    "h24": ["MR PREDICTS@24H", "NIHSS 24 h", "THRIVE", "HIAT2"],
-    "d7": ["NIHSS day 7", "MR PREDICTS@24H", "THRIVE"],
+    "admission": ["Bedside score", "THRIVE", "THRIVE-c", "SPAN-100", "HIAT2", "PRE"],
+    "procedure": ["Bedside score", "THRIVE", "THRIVE-c", "SPAN-100", "HIAT2", "PRE"],
+    "h24": ["MR PREDICTS@24H", "NIHSS 24 h", "Bedside score", "THRIVE", "HIAT2"],
+    "d7": ["NIHSS day 7", "MR PREDICTS@24H", "Bedside score", "THRIVE"],
 }
 
 

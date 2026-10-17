@@ -127,6 +127,47 @@ def _bins(p0, lo_off, hi_off, min_n):
 
 
 # ------------------------------------------------------------------------------ main
+def stage_comparators(stage: str, d: pd.DataFrame, X: pd.DataFrame, yg: np.ndarray, recent: np.ndarray, seed: int) -> dict:
+    """Comparators for the calculator's "other models" panel, each shifted to the recent era."""
+    comp = {}
+    lrm = fit_logreg(X, yg, seed)
+    comp["Logistic regression"] = {"kind": "lr", "spec": export_logreg(
+        lrm, list(X.columns), _citl(yg[recent], _oof_logreg(X, yg, seed)[recent]))}
+    for name in PANEL[stage]:
+        if name in POINT_SCORES:
+            sc = POINT_SCORES[name](d)
+            mp = fit_points_map(sc, yg)
+            mp["shift"] = _citl(yg[recent], apply_points_map(mp, sc[recent]))
+            comp[name] = {"kind": "points", "map": mp}
+        else:
+            terms = REFIT_TERMS[name]
+            Xd = design(d, terms)
+            mdl = fit_logreg(Xd, yg, seed)
+            sh = _citl(yg[recent], _oof_logreg(Xd, yg, seed)[recent])
+            comp[name] = {"kind": "refit", "terms": [list(t) for t in terms],
+                          "spec": export_logreg(mdl, list(Xd.columns), sh)}
+    return comp
+
+
+def update_comparators(clean: pd.DataFrame) -> dict:
+    """Rebuild only the comparator panel in extras.json (the slow parts stay as they are)."""
+    cfg = settings()
+    seed = int(cfg["seed"])
+    recent_from = int(cfg["split"]["recent_era_from_year"])
+    base, _ = flow(clean)
+    path = PUBLIC / "extras.json"
+    out = json.loads(path.read_text(encoding="utf-8"))
+    out["panel"] = PANEL
+    for stage in stage_ids():
+        d = stage_cohort(base, stage)
+        X = design_matrix(d, stage)
+        recent = (d["year"] >= recent_from).to_numpy()
+        out["comparators"][stage] = stage_comparators(stage, d, X, d["good_outcome"].to_numpy(float), recent, seed)
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(out, fh, ensure_ascii=False, separators=(",", ":"))
+    return out
+
+
 def build_extras(clean: pd.DataFrame, n_boot: int = N_BOOT) -> dict:
     cfg = settings()
     seed = int(cfg["seed"])
@@ -149,25 +190,7 @@ def build_extras(clean: pd.DataFrame, n_boot: int = N_BOOT) -> dict:
         rounds_all = {t: int(tr[t]["deployed"]["rounds"]) for t in y}
 
         # 1. comparators (primary outcome)
-        comp = {}
-        yg = y["good_outcome"]
-        lrm = fit_logreg(X, yg, seed)
-        comp["Logistic regression"] = {"kind": "lr", "spec": export_logreg(
-            lrm, list(X.columns), _citl(yg[recent], _oof_logreg(X, yg, seed)[recent]))}
-        for name in PANEL[stage]:
-            if name in POINT_SCORES:
-                sc = POINT_SCORES[name](d)
-                mp = fit_points_map(sc, yg)
-                mp["shift"] = _citl(yg[recent], apply_points_map(mp, sc[recent]))
-                comp[name] = {"kind": "points", "map": mp}
-            else:
-                terms = REFIT_TERMS[name]
-                Xd = design(d, terms)
-                mdl = fit_logreg(Xd, yg, seed)
-                sh = _citl(yg[recent], _oof_logreg(Xd, yg, seed)[recent])
-                comp[name] = {"kind": "refit", "terms": [list(t) for t in terms],
-                              "spec": export_logreg(mdl, list(Xd.columns), sh)}
-        out["comparators"][stage] = comp
+        out["comparators"][stage] = stage_comparators(stage, d, X, y["good_outcome"], recent, seed)
 
         # 2. ordinal layer on out-of-fold scores (same folds as the deployed recalibration)
         z = {}

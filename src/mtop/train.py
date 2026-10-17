@@ -5,7 +5,8 @@ For every stage x target:
      (onset <= 2020) with Optuna, minimising 5-fold cross-validated log-loss.
   2. Internal validation: repeated stratified CV on the development cohort.
   3. Temporal validation on 2021+ patients for LightGBM and comparators
-     (logistic regression, XGBoost, MLP) and published scores; bootstrap 95% CIs.
+     (logistic regression, linear and with splines, XGBoost, MLP) and published scores;
+     bootstrap 95% CIs and decision curves for every model.
   4. Recalibration analysis: does re-estimating the intercept on 2021-22 fix calibration
      in 2023+?
   5. Deployment model: refit on all years, then intercept-recalibrate to the recent era
@@ -34,6 +35,7 @@ from .config import settings, stage_ids, targets
 from .features import column_to_feature, design_matrix, monotone_vector
 from .lr import fit_logreg
 from .scores import benchmark_predictions
+from .splines import fit_spline_logreg
 
 log = logging.getLogger("mtop.train")
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -250,7 +252,8 @@ def run(base: pd.DataFrame, out_private, quick: bool = False) -> dict:
             # temporal validation
             m_dev = fit_lgbm(X_dev, y_dev, params, rounds)
             preds = {"LightGBM": m_dev.predict(X_test)}
-            for name, fit in (("Logistic regression", fit_logreg), ("XGBoost", fit_xgb), ("MLP", fit_mlp)):
+            for name, fit in (("Logistic regression", fit_logreg), ("Logistic regression (splines)", fit_spline_logreg),
+                              ("XGBoost", fit_xgb), ("MLP", fit_mlp)):
                 mdl = fit(X_dev, y_dev, seed)
                 preds[name] = mdl.predict_proba(X_test)[:, 1]
             preds.update(benchmark_predictions(dev, test, stage, target, seed))
@@ -264,6 +267,8 @@ def run(base: pd.DataFrame, out_private, quick: bool = False) -> dict:
                 "calibration": M.calibration_bins(y_test, preds["LightGBM"], n_bins=8 if len(y_test) < 250 else 10,
                                                   min_n=min_cell),
                 "dca": M.decision_curve(y_test, preds["LightGBM"]),
+                "dca_models": {k: [{"t": r["t"], "nb": r["model"]} for r in M.decision_curve(y_test, v)]
+                               for k, v in preds.items()},
             }
 
             # recalibration analysis inside the temporal window

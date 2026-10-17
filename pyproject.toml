@@ -26,7 +26,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+federated = ["cryptography>=41"]
+dev = ["pytest>=8", "cryptography>=41"]
 
 [project.scripts]
 mtop = "mtop.cli:main"

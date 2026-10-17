@@ -40,8 +40,14 @@ def _cohort(n=400, seed=0):
         "occlusion": rng.choice(["ICA", "M1", "distal", "cervical_ICA", "basilar", "other_posterior"], n),
         "tici": rng.choice([0.0, 1.0, 2.0, 2.5, 3.0, 4.0], n), "nihss_24h": rng.integers(0, 42, n).astype(float),
         "sich": rng.integers(0, 2, n).astype(float), "nihss_7d": rng.integers(0, 42, n).astype(float),
+        "onset_to_puncture": rng.integers(40, 900, n).astype(float), "stroke_prior": rng.integers(0, 2, n).astype(float),
     })
-    for col, frac in [("aspects", 0.2), ("glucose", 0.15), ("htn", 0.05), ("occlusion", 0.05), ("nihss_24h", 0.1)]:
+    # exact band edges of the bedside score
+    d.loc[:5, "glucose"] = [7.8, 11.0, 11.1, 7.79, 11.09, 3.0]
+    d.loc[:5, "onset_to_puncture"] = [179, 180, 299, 300, 60, 1440]
+    d.loc[:5, "age"] = [59, 60, 79, 80, 18, 100]
+    for col, frac in [("aspects", 0.2), ("glucose", 0.15), ("htn", 0.05), ("occlusion", 0.05), ("nihss_24h", 0.1),
+                      ("onset_to_puncture", 0.1), ("stroke_prior", 0.05), ("mrs_pre", 0.05)]:
         d.loc[rng.random(n) < frac, col] = np.nan if col != "occlusion" else None
     z = 1.5 - 0.04 * (d["age"] - 70) - 0.1 * d["nihss_adm"] + 0.15 * d["aspects"].fillna(7)
     y = (rng.random(n) < 1 / (1 + np.exp(-z))).astype(float)

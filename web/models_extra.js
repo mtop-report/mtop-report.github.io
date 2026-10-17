@@ -36,6 +36,23 @@
   }
 
   const num = (v) => (miss(v) ? NaN : Number(v));
+
+  /** Items of the FNO bedside score: bands (label, test) and the points of the band that applies. */
+  const band = (key, bands) => ({
+    key, bands,
+    match(x) { const v = num(x[key]); return Number.isNaN(v) ? -1 : bands.findIndex((b) => b.test(v)); },
+    points(x) { const i = this.match(x); return i < 0 ? 0 : bands[i].pts; },
+  });
+  const BEDSIDE = [
+    band("age", [{ label: "<60", pts: 0, test: (v) => v < 60 }, { label: "60–79", pts: 2, test: (v) => v < 80 }, { label: "≥80", pts: 5, test: () => true }]),
+    band("nihss_adm", [{ label: "0–9", pts: 0, test: (v) => v <= 9 }, { label: "10–14", pts: 1, test: (v) => v <= 14 }, { label: "15–19", pts: 3, test: (v) => v <= 19 }, { label: "≥20", pts: 5, test: () => true }]),
+    band("glucose", [{ label: "<7.8", pts: 0, test: (v) => v < 7.8 }, { label: "7.8–11.0", pts: 2, test: (v) => v < 11.1 }, { label: "≥11.1", pts: 3, test: () => true }]),
+    band("mrs_pre", [{ label: "0", pts: 0, test: (v) => v < 1 }, { label: "≥1", pts: 2, test: () => true }]),
+    band("aspects", [{ label: "6–10", pts: 0, test: (v) => v > 5 }, { label: "0–5", pts: 2, test: () => true }]),
+    band("onset_to_puncture", [{ label: "<180", pts: 0, test: (v) => v < 180 }, { label: "180–299", pts: 1, test: (v) => v < 300 }, { label: "≥300", pts: 2, test: () => true }]),
+    band("stroke_prior", [{ label: "no", pts: 0, test: (v) => v !== 1 }, { label: "yes", pts: 1, test: () => true }]),
+  ];
+
   const POINTS = {
     "THRIVE": (x) => {
       const n = num(x.nihss_adm), a = num(x.age);
@@ -54,6 +71,12 @@
       return (a <= 59 ? 0 : a <= 79 ? 2 : 4) + (n <= 10 ? 0 : n <= 20 ? 1 : 2) + (g >= GLU_150 ? 1 : 0) + (s <= 7 ? 3 : 0);
     },
     "PRE": (x) => num(x.age) + 2 * num(x.nihss_adm) - 10 * num(x.aspects),
+    // FNO 7-item bedside score (0-20, higher = worse); an item that is not recorded scores 0
+    "Bedside score": (x) => {
+      const a = num(x.age), n = num(x.nihss_adm);
+      if (Number.isNaN(a) || Number.isNaN(n)) return NaN;
+      return BEDSIDE.reduce((s, item) => s + item.points(x), 0);
+    },
     "NIHSS 24 h": (x) => num(x.nihss_24h),
     "NIHSS day 7": (x) => num(x.nihss_7d),
   };
@@ -105,7 +128,7 @@
     return [sig(z + best.off_lo), sig(z + best.off_hi)];
   }
 
-  const api = { sig, logit, lrPredict, termValues, POINTS, pointsProb, comparatorProb, ordinalProbs, fullDistribution, uncertainty, GLU_150 };
+  const api = { sig, logit, lrPredict, termValues, POINTS, BEDSIDE, pointsProb, comparatorProb, ordinalProbs, fullDistribution, uncertainty, GLU_150 };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   root.MTOPExtra = api;
 })(typeof globalThis !== "undefined" ? globalThis : this);

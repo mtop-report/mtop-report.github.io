@@ -4,7 +4,12 @@
   train     tune, validate and fit all stage models (artifacts/private)
   export    browser model + validation summary (artifacts/public)
   extras    calculator extras: comparators, mRS distribution layer, bootstrap uncertainty
+            (--comparators-only refreshes just the comparator panel)
+  compare   refresh comparators in the temporal validation without retraining LightGBM
+  reconcile rebuild the earlier HTML report's cohort and split and compare models on both set-ups
   adaptive  model-updating experiments, drift monitor, era validation (artifacts/public)
+  fed-demo  federated network demo: four virtual centres from the registry (artifacts/public)
+            (the network itself: python -m mtop.fed coordinator | site | template | check)
   explorer  suppressed aggregate statistics for the cohort explorer (artifacts/public)
   report    Table 1, figures and a validation summary for the manuscript (reports/)
   site      build the self-contained web app (site/index.html)
@@ -65,9 +70,27 @@ def cmd_export(args):
 
 
 def cmd_extras(args):
-    from .extras import build_extras
+    from .extras import build_extras, update_comparators
 
+    if getattr(args, "comparators_only", False):
+        update_comparators(_load_clean())
+        return
     build_extras(_load_clean(), n_boot=20 if getattr(args, "quick", False) else 100)
+
+
+def cmd_compare(args):
+    from .cohort import flow
+    from .compare import run
+
+    base, _ = flow(_load_clean())
+    run(base)
+
+
+def cmd_reconcile(args):
+    from .reconcile import run
+
+    run(_load_clean())
+    print(f"reconciliation: {paths.REPORTS / 'reconciliation.md'}, {paths.PUBLIC / 'reconciliation.json'}")
 
 
 def cmd_adaptive(args):
@@ -102,6 +125,16 @@ def cmd_synth(args):
     print(f"synthetic registry: {out}")
 
 
+def cmd_fed_demo(args):
+    from .fed.demo import run
+
+    out = run(http=not args.no_http, quick=args.quick)
+    for t, r in out["outcomes"].items():
+        print(f"fed-demo {t}: mean AUROC alone {r['mean']['alone']}, network {r['mean']['network']}, "
+              f"adapted {r['mean']['adapted']}")
+    print(f"fed-demo: federated trees identical to pooled: {out['equivalence']['gbdt']['identical']}")
+
+
 def cmd_all(args):
     t = time.time()
     cmd_clean(args)
@@ -121,15 +154,21 @@ def main(argv=None):
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     for name, fn in [("clean", cmd_clean), ("train", cmd_train), ("export", cmd_export),
-                     ("extras", cmd_extras), ("adaptive", cmd_adaptive),
+                     ("extras", cmd_extras), ("compare", cmd_compare), ("reconcile", cmd_reconcile),
+                     ("adaptive", cmd_adaptive), ("fed-demo", cmd_fed_demo),
                      ("explorer", cmd_explorer), ("report", cmd_report), ("site", cmd_site),
                      ("all", cmd_all), ("synth", cmd_synth)]:
         p = sub.add_parser(name)
         p.set_defaults(fn=fn)
         if name in ("clean", "all"):
             p.add_argument("--input", help="registry Excel file (default: data/raw/mt_patients_master.xlsx)")
-        if name in ("train", "extras", "all"):
+        if name in ("train", "extras", "all", "fed-demo"):
             p.add_argument("--quick", action="store_true", help="fewer tuning trials / bootstrap refits, for testing")
+        if name == "extras":
+            p.add_argument("--comparators-only", action="store_true",
+                           help="rebuild only the calculator's comparator panel in extras.json")
+        if name == "fed-demo":
+            p.add_argument("--no-http", action="store_true", help="skip the run over HTTP sockets")
         if name == "synth":
             p.add_argument("--n", type=int, default=600)
             p.add_argument("--seed", type=int, default=1)

@@ -1,7 +1,8 @@
 """Generate the MTOP logo and app icons from the bundled Instrument Sans font.
 
 The wordmark is drawn from real glyph outlines (so it does not depend on the font loading),
-with the O replaced by the MTOP mark: a ring with a centre point, an estimate inside its range.
+with the O replaced by the MTOP mark: a ring holding a filled lower half whose upper edge is a
+rising wave, like a curve on a chart (the outcome we estimate, read from data).
 
     pip install "fonttools[woff]" playwright
     python scripts/make_brand.py            # writes web/assets/{logo.svg, mark.svg, *.png}
@@ -11,6 +12,7 @@ Run it only when the brand changes; the outputs are committed.
 from __future__ import annotations
 
 import asyncio
+import math
 import pathlib
 
 from fontTools.pens.boundsPen import BoundsPen
@@ -27,7 +29,28 @@ INK = "#0f1a2f"
 BLUE = "#1565d7"
 WGHT, WDTH = 640, 100
 CAP, TOP = 720, 730          # cap height and round overshoot in font units
-RING_R, RING_W, DOT_R = 370, 112, 92    # outer radius, stroke, centre point (font units)
+RING_R, RING_W = 370, 112    # ring: outer radius and stroke (font units)
+FILL_R = 208                 # inner filled disc, leaving a clear gap inside the ring
+
+
+def wave(u: float) -> float:
+    """Upper edge of the fill across the disc (u from -1 to 1), in radii, positive = down.
+    A gentle wave that rises to the right."""
+    return 0.09 - 0.15 * u - 0.08 * math.sin(math.pi * (1.45 * u + 0.4))
+
+
+def fill_path(cx: float, cy: float, r: float, n: int = 96) -> str:
+    """The part of the disc (cx, cy, r) that lies below the wave, as one closed path."""
+    pts = []
+    for i in range(n + 1):
+        x = cx - r + 2 * r * i / n
+        half = math.sqrt(max(0.0, r * r - (x - cx) ** 2))
+        top = max(cy + wave((x - cx) / r) * r, cy - half)
+        if top < cy + half - 1e-6:
+            pts.append((x, top, cy + half))
+    d = "M%.1f,%.1f" % pts[0][:2] + "".join("L%.1f,%.1f" % (x, t) for x, t, _ in pts[1:])
+    d += "".join("L%.1f,%.1f" % (x, b) for x, _, b in reversed(pts))
+    return d + "Z"
 
 
 def glyphs():
@@ -49,10 +72,10 @@ def path_for(gs, glyph, dx):
     return pen.getCommands()
 
 
-def mark(cx, cy, r_out, width, dot, color, ring_color=None):
+def mark(cx, cy, r_out, width, fill_r, color):
     r = r_out - width / 2
-    return (f'<circle cx="{cx:g}" cy="{cy:g}" r="{r:g}" fill="none" stroke="{ring_color or color}" stroke-width="{width:g}"/>'
-            f'<circle cx="{cx:g}" cy="{cy:g}" r="{dot:g}" fill="{color}"/>')
+    return (f'<circle cx="{cx:g}" cy="{cy:g}" r="{r:g}" fill="none" stroke="{color}" stroke-width="{width:g}"/>'
+            f'<path fill="{color}" d="{fill_path(cx, cy, fill_r)}"/>')
 
 
 def wordmark():
@@ -66,7 +89,7 @@ def wordmark():
     parts.append(f'<path fill="{INK}" d="{path_for(gs, gt, x - bt[0])}"/>')
     x += bt[2] - bt[0] + gap_to
     cy = TOP - CAP / 2          # optical centre of the caps
-    parts.append(mark(x + RING_R, cy, RING_R, RING_W, DOT_R, BLUE))
+    parts.append(mark(x + RING_R, cy, RING_R, RING_W, FILL_R, BLUE))
     x += 2 * RING_R + gap_op
     parts.append(f'<path fill="{INK}" d="{path_for(gs, gp, x - bp[0])}"/>')
     x += bp[2] - bp[0]
@@ -85,11 +108,11 @@ def tile(size=512, shape="rounded"):
     c = size / 2
     r_out = size * (0.25 if shape == "maskable" else 0.31)
     w = r_out * (RING_W / RING_R)
-    dot = r_out * (DOT_R / RING_R)
+    fr = r_out * (FILL_R / RING_R)
     rx = f' rx="{size * 0.225:g}"' if shape == "rounded" else ""
     bg = f'<rect width="{size}" height="{size}"{rx} fill="{BLUE}"/>'
     return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {size} {size}">{bg}'
-            f'{mark(c, c, r_out, w, dot, "#ffffff")}</svg>\n')
+            f'{mark(c, c, r_out, w, fr, "#ffffff")}</svg>\n')
 
 
 async def rasterise(svg: str, out: pathlib.Path, px: int):

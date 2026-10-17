@@ -156,7 +156,7 @@
   const $ = (sel, el) => (el || document).querySelector(sel);
   const app = $("#app");
 
-  const VIEW_ORDER = ["calc", "registry", "validation", "adaptive", "network", "roadmap", "about"];
+  const VIEW_ORDER = ["calc", "registry", "validation", "adaptive", "network", "federated", "roadmap", "about"];
   const VIEWS = {
     calc: { label: () => t().tabCalc, render: () => renderCalc() },
     registry: { label: () => t().tabRegistry, render: () => renderRegistry() },
@@ -175,8 +175,28 @@
   function render() {
     document.documentElement.lang = lang;
     app.replaceChildren(header(), mainEl(), footer());
+    fitHeader();
     renderView();
   }
+
+  // One header row when brand, tabs and language switch fit; otherwise drop the subtitle, then move the
+  // tabs to their own scrolling row. Measured, because tab labels differ in length between languages.
+  function fitHeader() {
+    const top = $(".top");
+    if (!top) return;
+    const inner = top.firstElementChild;
+    top.classList.remove("no-sub", "compact");
+    const wrapped = () => inner.offsetHeight > 66;
+    if (wrapped()) top.classList.add("no-sub");
+    if (wrapped()) top.classList.add("compact");
+  }
+  let fitQueued = false;
+  window.addEventListener("resize", () => {
+    if (fitQueued) return;
+    fitQueued = true;
+    requestAnimationFrame(() => { fitQueued = false; fitHeader(); });
+  });
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(fitHeader);
 
   function header() {
     const nav = h("nav", { class: "tabs", role: "tablist", "aria-label": "MTOP" },
@@ -471,7 +491,7 @@
     if (idx(S.viewed) > idx(S.current)) S.viewed = S.current;
     const vs = S.viewed;
     const pv = preds[vs];
-    readoutEl.replaceChildren(...[headlineCard(vs, pv), distributionCard(vs, pv), trajectoryCard(preds), explainCard(vs, pv), othersCard(vs, x, pv), whatifCard(vs, x)].filter(Boolean));
+    readoutEl.replaceChildren(...[headlineCard(vs, pv), distributionCard(vs, pv), trajectoryCard(preds), explainCard(vs, pv), bedsideCard(vs, x), othersCard(vs, x, pv), whatifCard(vs, x)].filter(Boolean));
     if (stickyEl) $(".inner", stickyEl).replaceChildren(
       h("span", { html: t().sticky(pct(pv.good.p), pct(pv.death.p)) }),
       h("span", { class: "delta", text: stageLabel(vs) }));
@@ -621,6 +641,53 @@
     return tx(`${num(v)} points`, `${num(v)} b.`);
   }
 
+  // ------------------------------------------------------------------ FNO bedside score (7 items)
+  const BEDSIDE_LABELS = {
+    age: ["Age", "Věk"], nihss_adm: ["NIHSS on admission", "NIHSS při přijetí"], glucose: ["Glucose, mmol/L", "Glykémie, mmol/l"],
+    mrs_pre: ["Pre-stroke mRS", "mRS před CMP"], aspects: ["ASPECTS", "ASPECTS"],
+    onset_to_puncture: ["Onset to puncture, min", "Od vzniku do punkce, min"], stroke_prior: ["Previous stroke", "Předchozí CMP"],
+  };
+
+  function bedsideCard(st, x) {
+    const comp = ((X.comparators || {})[st] || {})["Bedside score"];
+    if (!comp || !XE.BEDSIDE) return null;
+    const total = XE.POINTS["Bedside score"](x);
+    const card = h("div", { class: "card card-pad bedside" });
+    card.appendChild(h("div", { class: "chart-head" },
+      h("div", null, h("div", { class: "chart-title", text: tx("Bedside score", "Bedside skóre") }),
+        h("div", { class: "chart-sub", text: tx("Seven items from the earlier FNO analysis. More points, worse outlook.", "Sedm položek z dřívější analýzy FNO. Více bodů, horší výhled.") })),
+      h("div", { class: "bs-total", "aria-label": tx("Total points", "Celkem bodů") },
+        h("b", { text: Number.isNaN(total) ? "–" : num(total) }), h("span", { text: tx("of 20", "z 20") }))));
+    const yesNo = (v) => (v === 1 ? tx("yes", "ano") : tx("no", "ne"));
+    const list = h("div", { class: "bs-list" });
+    for (const item of XE.BEDSIDE) {
+      const k = item.key;
+      const v = x[k];
+      const m = item.match(x);
+      const shown = v === null || v === undefined ? tx("not recorded", "nezadáno")
+        : k === "stroke_prior" ? yesNo(v) : k === "onset_to_puncture" ? t().hm(v) : num(v, k === "glucose" ? 1 : 0);
+      list.appendChild(h("div", { class: `bs-row${m < 0 ? " unknown" : ""}` },
+        h("div", { class: "bs-name" }, h("b", { text: tx(BEDSIDE_LABELS[k][0], BEDSIDE_LABELS[k][1]) }), h("span", { text: shown })),
+        h("div", { class: "bs-bands" }, item.bands.map((b, i) => h("span", { class: `bs-band${i === m ? " on" : ""}` },
+          b.label === "no" ? tx("no", "ne") : b.label === "yes" ? tx("yes", "ano") : b.label, h("i", { text: String(b.pts) })))),
+        h("div", { class: "bs-pts", text: m < 0 ? "0" : String(item.bands[m].pts) })));
+    }
+    card.appendChild(list);
+    if (!Number.isNaN(total)) {
+      const p = XE.pointsProb(comp.map, total);
+      card.appendChild(h("p", { class: "plain", html: tx(
+        `In recent registry patients, ${num(total)} points corresponds to a <b>${pct(p)}</b> chance of mRS 0–2.`,
+        `U nedávných pacientů registru odpovídá ${num(total)} bodů šanci na mRS 0–2 <b>${pct(p)}</b>.`) }));
+    }
+    const a = aucFor(st, "Bedside score");
+    const am = a ? aucFor(a.stage, "LightGBM") : null;
+    const at = a && a.stage !== st;
+    card.appendChild(h("p", { class: "note", text: tx(
+      `AUROC ${a ? num(a.auc, 2) : "–"} in 2021–2025 patients, against ${am ? num(am.auc, 2) : "–"} for MTOP${at ? " (both before thrombectomy)" : " at this stage"}; 0.774 on 2023–2025 patients in the earlier analysis. Items that are not recorded score 0.`,
+      `AUROC ${a ? num(a.auc, 2) : "–"} u pacientů 2021–2025, MTOP ${am ? num(am.auc, 2) : "–"}${at ? " (obojí před trombektomií)" : " ve stejné fázi"}; v dřívější analýze 0,774 u pacientů 2023–2025. Nezadané položky mají 0 bodů.`) }));
+    return card;
+  }
+
   function othersCard(st, x, pv) {
     const comps = (X.comparators || {})[st];
     if (!comps) return null;
@@ -628,12 +695,12 @@
     const rows = [{ name: tx("MTOP (LightGBM)", "MTOP (LightGBM)"), p: pv.good.p, auc: aucFor(st, "LightGBM"), main: true }];
     for (const [name, comp] of Object.entries(comps)) {
       let sum = 0, ok = 0, pts = null;
-      for (const xi of xs) {
+      for (const xi of name === "Bedside score" ? [x] : xs) {
         let v;
         if (comp.kind === "points") {
           const sc = XE.POINTS[name](xi);
           v = XE.pointsProb(comp.map, sc);
-          if (xs.length === 1) pts = sc;
+          if (xs.length === 1 || name === "Bedside score") pts = sc;
         } else v = XE.comparatorProb(comp, xi, B.features, M.buildRow);
         if (v !== null && !Number.isNaN(v)) { sum += v; ok++; }
       }
@@ -968,8 +1035,10 @@
     "HIAT2": { en: "HIAT2 score", cs: "Skóre HIAT2" },
     "PRE": { en: "PRE score", cs: "Skóre PRE" },
     "MR PREDICTS@24H": { en: "MR PREDICTS@24H predictors (refit)", cs: "Prediktory MR PREDICTS@24H (přepočteno)" },
+    "Logistic regression (splines)": { en: "Logistic regression with splines", cs: "Logistická regrese se splajny" },
+    "Bedside score": { en: "FNO bedside score (7 items)", cs: "Bedside skóre FNO (7 položek)" },
   };
-  const LEARNERS = ["LightGBM", "Logistic regression", "XGBoost", "MLP"];
+  const LEARNERS = ["LightGBM", "Logistic regression", "XGBoost", "MLP", "Logistic regression (splines)"];
   const MODEL_COLORS = ["var(--c1)", "var(--c2)", "var(--c3)", "var(--c4)", "var(--c5)", "var(--c6)"];
   const mname = (k) => L(MODEL_NAMES[k] || { en: k, cs: k });
   const signed = (v, d = 2) => (v === null || v === undefined ? "–" : `${v > 0 ? "+" : v < 0 ? "−" : ""}${num(Math.abs(v), d)}`);
@@ -995,9 +1064,9 @@
     const row1 = h("div", { class: "grid-2 block" });
     const rowTable = h("div", { class: "block" });
     const aCard = h("div", { class: "card card-pad" });
-    const learners = ["LightGBM", "Logistic regression", "XGBoost", "MLP"];
+    const learners = LEARNERS.filter((k) => V.stages[S.valStage].targets[tg].temporal[k]);
     const aSeries = learners.map((k, i) => ({
-      label: mname(k), color: MODEL_COLORS[i], dots: true, offset: (i - 1.5) * 6,
+      label: mname(k), color: MODEL_COLORS[LEARNERS.indexOf(k)], dots: true, offset: (i - (learners.length - 1) / 2) * 5,
       points: STAGES.map((st, j) => {
         const r = V.stages[st].targets[tg].temporal[k];
         return { x: j, y: r.auroc, lo: r.ci.auroc[0], hi: r.ci.auroc[1] };
@@ -1094,20 +1163,84 @@
 
     const dcCard = h("div", { class: "card card-pad" });
     const dca = vt.curves.dca;
-    const dSeries = [
-      { label: "LightGBM", color: "var(--c1)", points: dca.map((r) => ({ x: r.t, y: r.model })) },
-      { label: t().treatAll, color: "var(--ink-2)", width: 1.5, points: dca.map((r) => ({ x: r.t, y: r.all })) },
-    ];
+    const dm = vt.curves.dca_models || { LightGBM: dca.map((r) => ({ t: r.t, nb: r.model })) };
+    const dKeys = Object.keys(dm);
+    const modelSeries = dKeys.map((k) => {
+      const li = LEARNERS.indexOf(k);
+      return { label: mname(k), color: li >= 0 ? MODEL_COLORS[li] : "var(--faint)", width: k === "LightGBM" ? 2.5 : li >= 0 ? 1.6 : 1.1,
+        points: dm[k].map((r) => ({ x: r.t, y: r.nb })) };
+    });
+    const dSeries = modelSeries.slice().reverse().concat([
+      { label: t().treatAll, color: "var(--ink-2)", width: 1.5, dash: true, points: dca.map((r) => ({ x: r.t, y: r.all })) },
+    ]);
     const lo = Math.min(-0.05, ...dca.map((r) => Math.max(r.all, -0.1)));
-    const hi = Math.max(...dca.map((r) => Math.max(r.model, r.all))) + 0.03;
-    const fd = C.figure(dcCard, { title: t().dcaTitle, sub: t().dcaSub, legend: dSeries.map((s) => ({ label: s.label, color: s.color, type: "line" })).concat([{ label: t().treatNone, color: "var(--line-2)", type: "line" }]),
-      table: { columns: [t().threshold, "LightGBM", t().treatAll, t().treatNone], rows: dca.map((r) => [pct(r.t), num(r.model, 3), num(r.all, 3), "0"]) },
+    const hi = Math.max(...dKeys.flatMap((k) => dm[k].map((r) => r.nb)), ...dca.map((r) => r.all)) + 0.03;
+    const dLegend = modelSeries.filter((s2) => LEARNERS.map(mname).includes(s2.label)).map((s2) => ({ label: s2.label, color: s2.color, type: "line" }));
+    if (modelSeries.length > dLegend.length) dLegend.push({ label: tx("Published and bedside scores (grey)", "Publikovaná a bedside skóre (šedě)"), color: "var(--faint)", type: "line" });
+    dLegend.push({ label: t().treatAll, color: "var(--ink-2)", type: "line" }, { label: t().treatNone, color: "var(--line-2)", type: "line" });
+    const fd = C.figure(dcCard, { title: t().dcaTitle, sub: t().dcaSub, legend: dLegend,
+      table: { columns: [t().threshold].concat(dKeys.map(mname), [t().treatAll, t().treatNone]),
+        rows: dca.map((r, i) => [pct(r.t)].concat(dKeys.map((k) => num(dm[k][i].nb, 3)), [num(r.all, 3), "0"])) },
       labels: { table: t().showTable, chart: t().showChart } });
     C.lineChart(fd.body, { height: 240, x: { type: "lin", domain: [0.05, 0.8], fmt: (v) => pct(v), title: t().threshold, ticks: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8] }, y: { domain: [lo, hi], fmt: (v) => num(v, 2), title: t().netBenefit },
       series: dSeries.map((s) => ({ ...s, points: s.points.map((p) => ({ x: p.x, y: Math.max(p.y, lo) })) })), zeroLine: true,
       tipFmt: (v) => num(v, 3), tipHead: (xv) => `${t().threshold} ${pct(xv)}`, aria: t().dcaTitle });
     row3.appendChild(dcCard);
     root.appendChild(row3);
+    const recon = reconciliationCard();
+    if (recon) root.appendChild(recon);
+  }
+
+  // Same registry, earlier analysis: the HTML report rebuilt from the raw data
+  function reconciliationCard() {
+    const R = DATA.reconciliation;
+    if (!R) return null;
+    const rep = R.report_numbers;
+    const steps = Object.fromEntries(R.report_cohort_rebuilt.map((s2) => [s2.step, s2.n]));
+    const S1 = R.setups["report cohort, report split (test 2023-2025)"];
+    const S2 = R.setups["report cohort, report split, + 12 extra predictors"];
+    const S3 = R.setups["MTOP cohort, MTOP split (test 2021-2025)"];
+    if (!S1 || !S3) return null;
+    const A = (s2, k) => (s2 && s2.models[k] ? num(s2.models[k].auroc, 3) : "–");
+    const card = h("div", { class: "card card-pad block recon" });
+    card.appendChild(h("div", { class: "chart-head" }, h("div", null,
+      h("div", { class: "chart-title", text: tx("Same registry, earlier analysis", "Stejný registr, dřívější analýza") }),
+      h("div", { class: "chart-sub", text: tx(
+        "An earlier FNO report (2026) analysed this registry with a different cohort, test period and predictor set. Rebuilt from the raw data, its set-up gives the same numbers.",
+        "Dřívější zpráva FNO (2026) analyzovala tento registr s jinou kohortou, testovacím obdobím a sadou prediktorů. Po rekonstrukci ze surových dat dává stejná čísla.") }))));
+    const agree = [
+      [tx("Patients with known 90-day mRS", "Pacienti se známým mRS za 90 dní"), num(rep.known_mrs), num(steps["90-day mRS known"])],
+      [tx("Test set 2023–2025", "Testovací soubor 2023–2025"), `${num(rep.test)} · ${pct(rep.test_good_rate, 1)} mRS 0–2`, `${num(S1.n_test)} · ${pct(S1.test_good_rate, 1)} mRS 0–2`],
+      ["THRIVE", num(rep.auc_thrive, 3), A(S1, "THRIVE")],
+      [tx("SPAN as age + NIHSS", "SPAN jako věk + NIHSS"), num(rep.auc_span100, 3), A(S1, "SPAN index (age + NIHSS)")],
+      [tx("Bedside score", "Bedside skóre"), num(rep.auc_bedside, 3), A(S1, "Bedside score")],
+      [tx("Regression with splines", "Regrese se splajny"), `${num(rep.auc_spline_lr, 3)} · ${tx("33 predictors", "33 prediktorů")}`, `${A(S2, "Logistic regression (splines)")} · ${S2 ? num(S2.predictors) : "–"} ${tx("predictors", "prediktorů")}`],
+    ];
+    card.appendChild(h("div", { class: "table-scroll" }, h("table", { class: "data" },
+      h("thead", null, h("tr", null, [tx("Quantity (AUROC unless stated)", "Veličina (AUROC, není-li uvedeno jinak)"), tx("Earlier report", "Dřívější zpráva"), tx("Rebuilt here", "Rekonstrukce")].map((x) => h("th", { scope: "col", text: x })))),
+      h("tbody", null, agree.map((r) => h("tr", null, h("th", { scope: "row", text: r[0] }), h("td", { text: r[1] }), h("td", { text: r[2] })))))));
+    const why = h("div", { class: "recon-grid" });
+    why.appendChild(h("div", null, h("h4", { text: tx("Why MTOP's own numbers differ", "Proč se čísla MTOP liší") }), h("ul", null, [
+      tx(`MTOP leaves out the ${num(steps["of which diagnostic angiography only"])} diagnostic angiographies without thrombectomy and keeps the 29 patients with impossible times, whose times become missing.`,
+        `MTOP vynechává ${num(steps["of which diagnostic angiography only"])} diagnostických angiografií bez trombektomie a ponechává 29 pacientů s nemožnými časy, jejichž časy se berou jako chybějící.`),
+      tx(`MTOP tests on 2021–2025 (${num(S3.n_test)} patients) instead of 2023–2025 (${num(S1.n_test)}).`, `MTOP testuje na letech 2021–2025 (${num(S3.n_test)} pacientů) místo 2023–2025 (${num(S1.n_test)}).`),
+      tx("MTOP uses 17 admission predictors; the report used 33.", "MTOP používá 17 prediktorů při přijetí; zpráva jich měla 33."),
+      tx("SPAN-100 is scored here with its published cut-off of 100, which gives a lower AUROC than the continuous age + NIHSS.", "SPAN-100 se zde hodnotí s publikovanou hranicí 100, což dává nižší AUROC než spojitý součet věku a NIHSS."),
+    ].map((x) => h("li", { text: x })))));
+    const rk = [[tx("Report set-up (test 2023–2025)", "Nastavení zprávy (test 2023–2025)"), S1], [tx("MTOP set-up (test 2021–2025)", "Nastavení MTOP (test 2021–2025)"), S3]];
+    why.appendChild(h("div", null, h("h4", { text: tx("Which model ranks first depends on the test years", "Pořadí modelů závisí na testovacích letech") }),
+      h("div", { class: "table-scroll" }, h("table", { class: "data compact" },
+        h("thead", null, h("tr", null, ["", "LightGBM", tx("Regression", "Regrese"), tx("Splines", "Splajny"), tx("Bedside", "Bedside")].map((x) => h("th", { scope: "col", text: x })))),
+        h("tbody", null, rk.map(([lbl, s2]) => h("tr", null, h("th", { scope: "row", text: lbl }),
+          h("td", { text: A(s2, "LightGBM (MTOP settings)") }), h("td", { text: A(s2, "Logistic regression (linear)") }),
+          h("td", { text: A(s2, "Logistic regression (splines)") }), h("td", { text: A(s2, "Bedside score") })))))),
+      h("p", { class: "note", text: (() => {
+        const d = S3.models["LightGBM (MTOP settings)"].delta_vs_spline_lr;
+        return tx(`On the report's test years all regression and tree models lie within 0.02 of each other with overlapping intervals, as the report found. On MTOP's larger 2021–2025 test set LightGBM leads regression with splines by ${num(-d.mean, 3)} (95% CI ${num(-d.ci[1], 3)} to ${num(-d.ci[0], 3)}).`,
+          `Na testovacích letech zprávy leží všechny regresní i stromové modely do 0,02 od sebe s překrývajícími se intervaly, jak uvádí zpráva. Na větším testovacím souboru MTOP 2021–2025 vede LightGBM před regresí se splajny o ${num(-d.mean, 3)} (95% IS ${num(-d.ci[1], 3)} až ${num(-d.ci[0], 3)}).`);
+      })() })));
+    card.appendChild(why);
+    return card;
   }
 
   function ordinalCard(st) {
