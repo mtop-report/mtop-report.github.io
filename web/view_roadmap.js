@@ -62,7 +62,7 @@
       for (const it of list) {
         const card = h("article", { class: "board-card" }, h("h3", { text: tx(it.t[0], it.t[1]) }), h("p", { text: tx(it.d[0], it.d[1]) }));
         if (it.tab) {
-          const b = h("button", { class: "btn btn-ghost", type: "button" }, tx("Open →", "Otevřít →"));
+          const b = h("button", { class: "btn btn-ghost", type: "button" }, tx(`Open ${A.viewLabel(it.tab)}`, `Otevřít: ${A.viewLabel(it.tab)}`));
           b.addEventListener("click", () => A.goTo(it.tab));
           card.appendChild(b);
         }

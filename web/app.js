@@ -188,9 +188,19 @@
       [["en", "EN"], ["cs", "CZ"]].map(([code, lbl]) => h("button", {
         type: "button", "aria-pressed": String(lang === code), onclick: () => { lang = code; store.set("mtop.lang", code); render(); },
       }, lbl)));
-    return h("header", { class: "top" }, h("div", { class: "top-inner" },
-      h("div", { class: "brand" }, h("span", { class: "brand-mark", html: "MT<span>O</span>P" }), h("span", { class: "brand-sub", text: t().brandSub })),
-      nav, langSw));
+    const brand = h("a", { class: "brand", href: "#calc", "aria-label": tx("MTOP, go to the calculator", "MTOP, přejít na kalkulačku"),
+      onclick: (e) => { e.preventDefault(); goTo("calc"); } },
+      h("span", { class: "brand-logo", "aria-hidden": "true", html: DATA.logo_svg || "MTOP" }),
+      h("span", { class: "brand-sub", text: t().brandSub }));
+    // on narrow screens the tab row scrolls: keep the active tab in view and fade the edge only while more follows
+    const edge = () => nav.classList.toggle("at-end", nav.scrollLeft + nav.clientWidth >= nav.scrollWidth - 4);
+    nav.addEventListener("scroll", edge, { passive: true });
+    requestAnimationFrame(() => {
+      const a = nav.querySelector('[aria-selected="true"]');
+      if (a && nav.scrollWidth > nav.clientWidth) nav.scrollLeft = Math.max(0, a.offsetLeft - (nav.clientWidth - a.offsetWidth) / 2);
+      edge();
+    });
+    return h("header", { class: "top" }, h("div", { class: "top-inner" }, brand, nav, langSw));
   }
 
   function mainEl() {
@@ -199,9 +209,11 @@
   }
 
   function footer() {
-    const parts = [h("span", { text: `${t().footer} · v${B.version} · ${B.generated}` })];
-    if (SITE.repo_url) parts.push(h("a", { href: SITE.repo_url, target: "_blank", rel: "noopener", text: "GitHub" }));
-    return h("footer", { class: "foot" }, h("div", { class: "wrap" }, ...parts));
+    const left = h("span", { class: "foot-brand" },
+      DATA.logo_svg ? h("span", { "aria-hidden": "true", html: DATA.logo_svg }) : null,
+      h("span", { text: `${t().footer} · v${B.version} · ${B.generated}` }));
+    const right = SITE.repo_url ? h("a", { href: SITE.repo_url, target: "_blank", rel: "noopener", text: tx("Code on GitHub", "Kód na GitHubu") }) : null;
+    return h("footer", { class: "foot" }, h("div", { class: "wrap" }, left, right));
   }
 
   function renderView() {
@@ -216,8 +228,11 @@
   function renderCalc() {
     const root = $("#view-calc");
     root.replaceChildren();
-    root.appendChild(h("div", { class: "notice", role: "note", html: t().notice }));
-    const left = h("div", { class: "inputs" });
+    root.appendChild(h("div", { class: "view-head calc-head" }, h("div", null,
+      h("h2", { text: t().calcTitle }),
+      h("p", { text: t().calcLede }),
+      h("div", { class: "notice", role: "note" }, h("span", { html: t().notice })))));
+    const left = h("div", { class: "inputs sheet" });
     const ex = h("div", { class: "example-bar" },
       S.isExample ? h("span", { class: "pill", text: t().example }) : null,
       h("span", { text: t().exampleNote }),
@@ -246,7 +261,7 @@
     const i = idx(st);
     const locked = i > idx(S.current);
     const feats = B.features.filter((f) => f.stage === st && f.type !== "derived");
-    const card = h("section", { class: `card stage${locked ? " locked" : ""}`, id: `stage-${st}`, "aria-labelledby": `stage-${st}-h` });
+    const card = h("section", { class: `stage${locked ? " locked" : ""}`, id: `stage-${st}`, "aria-labelledby": `stage-${st}-h` });
     const head = h("div", { class: "stage-head" },
       h("span", { class: "stage-num", "aria-hidden": "true", text: String(i + 1) }),
       h("div", { class: "grow" }, h("h3", { id: `stage-${st}-h`, text: L(STAGE[st].title) }), h("div", { class: "when", text: t().stageWhen[st] })));
@@ -366,10 +381,12 @@
         box.value = v === null ? "" : v;
         range.disabled = v === null; box.disabled = v === null;
         if (unk) unk.checked = v === null;
+        fill();
         refresh();
       };
       const clamp = (v) => Math.min(f.max, Math.max(f.min, v));
-      range.addEventListener("input", () => { setInput(f.key, Number(range.value)); box.value = range.value; refresh(); });
+      const fill = () => range.style.setProperty("--fill", `${((Number(range.value) - f.min) / ((f.max - f.min) || 1)) * 100}%`);
+      range.addEventListener("input", () => { setInput(f.key, Number(range.value)); box.value = range.value; fill(); refresh(); });
       box.addEventListener("change", () => {
         const v = Number(String(box.value).replace(",", "."));
         if (box.value === "" || Number.isNaN(v)) { sync(); return; }
@@ -383,7 +400,7 @@
     } else {
       const opts = f.options.slice();
       const isCat = f.type === "categorical";
-      const seg = h("div", { class: `seg${isCat && opts.length > 3 ? " cols-2" : ""}`, role: "group", "aria-labelledby": `lbl-${f.key}` });
+      const seg = h("div", { class: `seg${isCat && opts.length > 3 ? " cols-2" : ""}${f.key === "mrs_pre" || f.key === "tici" ? " nums" : ""}`, role: "group", "aria-labelledby": `lbl-${f.key}` });
       const buttons = [];
       const mk = (val, label, extraClass) => {
         const b = h("button", { type: "button", class: extraClass || "", "data-v": val === null ? "" : String(val) }, label);
@@ -460,23 +477,56 @@
       h("span", { class: "delta", text: stageLabel(vs) }));
   }
 
+  // The prognosis instrument: estimate on a calibrated 0–100 % scale, with the spread across model
+  // refits (band) and what actually happened to similar recent registry patients (caret).
+  let lastScale = null;
   function headlineCard(st, pv) {
     const g = pv.good.p, d = pv.death.p;
     const bin = realityBin(st, g);
-    const big = h("div", { class: "big" }, num(g * 100, 0), h("small", { text: lang === "cs" ? " %" : "%" }));
-    const card = h("div", { class: "card headline" },
-      h("div", { class: "headline-top" },
-        h("div", null, h("div", { class: "eyebrow", text: t().estimateAt(stageLabel(st)) }), big, h("div", { class: "big-label", text: t().headline })),
-        h("div", { class: "side-stat" }, h("div", { class: "v", text: pct(d) }), h("div", { class: "l", text: t().deathLabel }),
-          st === "d7" ? h("div", { class: "l", style: "color:var(--muted)", text: t().lateDeaths }) : null)));
     const unc = XE.uncertainty(((X.uncertainty || {})[st] || {}).good_outcome, g);
-    if (unc) {
-      card.querySelector(".big-label").after(h("div", { class: "range-note" },
-        tx("95% range across 100 model refits: ", "95% rozpětí ze 100 přetrénování modelu: "), h("b", { text: `${num(unc[0] * 100)}–${pct(unc[1])}` })));
+    const card = h("div", { class: "card prognosis headline" });
+    card.appendChild(h("div", { class: "prog-top" }, h("span", { class: "prog-stage", text: t().estimateAt(stageLabel(st)) })));
+    card.appendChild(h("div", { class: "prog-main" },
+      h("div", null,
+        h("div", { class: "big" }, num(g * 100, 0), h("small", { text: lang === "cs" ? " %" : "%" })),
+        h("div", { class: "big-label", text: t().headline })),
+      h("div", { class: "side-stat" }, h("div", { class: "v", text: pct(d) }), h("div", { class: "l", text: t().deathLabel }),
+        st === "d7" ? h("div", { class: "l", text: t().lateDeaths }) : null)));
+
+    // scale
+    const P = (v) => `${(Math.max(0, Math.min(1, v)) * 100).toFixed(2)}%`;
+    const target = { g, lo: unc ? unc[0] : null, hi: unc ? unc[1] : null, obs: bin ? bin.obs : null };
+    const from = lastScale || target;
+    const scale = h("div", { class: "pscale", role: "img", "aria-label": t().scaleAria(pct(g), unc ? `${pct(unc[0])}–${pct(unc[1])}` : "", bin ? pct(bin.obs) : "") },
+      h("div", { class: "rail" }));
+    for (let k = 0; k <= 20; k++) scale.appendChild(h("i", { class: `tick${k % 5 === 0 ? " major" : ""}`, style: `left:${k * 5}%` }));
+    [0, 25, 50, 75, 100].forEach((v) => scale.appendChild(h("span", { class: `tl${v === 100 ? " end" : ""}`, style: `left:${v}%`, text: v === 100 ? pct100(100) : String(v) })));
+    const band = unc ? h("div", { class: "band", style: `left:${P(from.lo ?? target.lo)};width:${P((from.hi ?? target.hi) - (from.lo ?? target.lo))}` }) : null;
+    const obs = bin ? h("div", { class: "obs", style: `left:${P(from.obs ?? target.obs)}` }) : null;
+    const mark = h("div", { class: "mark", style: `left:${P(from.g)}` });
+    if (band) scale.insertBefore(band, scale.children[1]);
+    if (obs) scale.appendChild(obs);
+    scale.appendChild(mark);
+    card.appendChild(scale);
+    if (lastScale && !(window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches)) {
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        mark.style.left = P(target.g);
+        if (band) { band.style.left = P(target.lo); band.style.width = P(target.hi - target.lo); }
+        if (obs) obs.style.left = P(target.obs);
+      }));
+    } else {
+      mark.style.left = P(target.g);
+      if (band) { band.style.left = P(target.lo); band.style.width = P(target.hi - target.lo); }
+      if (obs) obs.style.left = P(target.obs);
     }
-    if (bin) {
-      card.appendChild(h("div", { class: "reality", html: t().reality(pct(bin.lo), pct(bin.hi), pct(bin.obs), bin.n) }));
-    }
+    lastScale = target;
+
+    const key = h("div", { class: "pkey" });
+    if (unc) key.appendChild(h("div", null, h("span", { class: "sw-band", "aria-hidden": "true" }),
+      h("span", null, tx("Range across 100 refits of the model (95%): ", "Rozpětí ze 100 přetrénování modelu (95 %): "), h("b", { text: `${num(unc[0] * 100)}–${pct(unc[1])}` }))));
+    if (bin) key.appendChild(h("div", null, h("span", { class: "sw-obs", "aria-hidden": "true" }),
+      h("span", { html: t().reality(pct(bin.lo), pct(bin.hi), pct(bin.obs), bin.n) })));
+    if (key.childNodes.length) card.appendChild(key);
     return card;
   }
 
@@ -787,7 +837,7 @@
     const dimSel = h("select", { class: "sel", id: "reg-dim" });
     for (const [key, d] of Object.entries(E.dimensions)) dimSel.appendChild(h("option", { value: key, selected: key === S.regDim ? true : null }, L(d.label)));
     dimSel.addEventListener("change", () => { S.regDim = dimSel.value; renderRegistry(); });
-    gBlock.appendChild(h("div", { class: "controls" }, h("label", { for: "reg-dim" }, t().groupBy), dimSel));
+    const dimCtl = h("div", { class: "controls" }, h("label", { for: "reg-dim" }, t().groupBy), dimSel);
     const dim = E.dimensions[S.regDim];
     const overallLabel = lang === "cs" ? "Celý soubor" : "Whole cohort";
     const rows = [{ label: overallLabel, n: E.overall.n, segs: E.overall.dist }].concat(dim.groups.map((g) => ({
@@ -796,10 +846,11 @@
     const legend = [0, 1, 2, 3, 4, 5, 6].map((m) => ({ label: `mRS ${m}`, color: MRS_COLORS[m] }));
     const tableRows = rows.map((r) => [r.label, r.suppressed ? t().suppressed : r.n].concat(r.suppressed || !r.segs ? Array(7).fill(null) : r.segs.map((v) => pct100(v, 1))));
     const fg = C.figure(gBlock, {
-      title: t().grottaTitle, sub: `${t().grottaSub} ${L(dim.label)}.`, legend,
+      title: t().grottaTitle, sub: t().grottaSub, legend,
       table: { columns: [t().variable, "n"].concat([0, 1, 2, 3, 4, 5, 6].map((m) => `mRS ${m}`)), rows: tableRows },
       labels: { table: t().showTable, chart: t().showChart },
     });
+    fg.fig.insertBefore(dimCtl, fg.fig.children[1]);
     C.grotta(fg.body, { rows, colors: MRS_COLORS, inkOn: MRS_INK, segLabels: legend.map((l) => l.label), fmt: (v) => pct100(v, 1), suppressedText: lang === "cs" ? "méně než 10 pacientů nebo méně než 30 pro rozložení" : "too few patients to show", nLabel: "n", aria: t().grottaTitle });
     root.appendChild(gBlock);
 
@@ -846,7 +897,7 @@
     const single = (title, key, dom, fmt, ticksArr) => {
       const card = h("div", { class: "card card-pad" });
       const f = C.figure(card, { title, table: { columns: [lang === "cs" ? "Rok" : "Year", title], rows: tr.map((r) => [r.label, r[key] === null ? null : fmt(r[key])]) }, labels: { table: t().showTable, chart: t().showChart } });
-      C.lineChart(f.body, { height: 150, x: { type: "cat", cats: yrs }, y: { domain: dom, ticks: ticksArr }, series: [{ label: title, color: "var(--c1)", points: tr.map((r, i) => ({ x: i, y: r[key] })) }], tipFmt: fmt, aria: title });
+      C.lineChart(f.body, { height: 150, x: { type: "cat", cats: yrs }, y: { domain: dom, ticks: ticksArr }, series: [{ label: title, color: "var(--c1)", area: true, endDot: true, points: tr.map((r, i) => ({ x: i, y: r[key] })) }], tipFmt: fmt, aria: title });
       sm.appendChild(card);
     };
     single(t().tPatients, "n", [0, 150], (v) => num(v), [0, 50, 100, 150]);
@@ -1012,14 +1063,14 @@
       series: [{ label: t().observed, color: "var(--c1)", dots: true, points: cal.map((b) => ({ x: b.pred, y: b.obs, n: b.n })) }],
       tipFmt: (v, p) => `${pct(v, 1)} · n ${p.n}`, tipHead: (xv) => `${t().predicted} ${pct(xv, 1)}`, aria: t().calTitle });
     row2.appendChild(kCard);
-    row2.appendChild(subgroupCard(tg, S.valStage));
-    root.appendChild(row2);
-    const rowX = h("div", { class: "grid-2 block" });
-    const oc = ordinalCard(S.valStage);
     const sc = stabilityCard(S.valStage, tg);
-    if (oc) rowX.appendChild(oc);
-    if (sc) rowX.appendChild(sc);
-    if (oc || sc) root.appendChild(rowX);
+    if (sc) row2.appendChild(sc);
+    root.appendChild(row2);
+    const oc = ordinalCard(S.valStage);
+    if (oc) { oc.classList.add("block"); root.appendChild(oc); }
+    const sg = subgroupCard(tg, S.valStage);
+    sg.classList.add("block");
+    root.appendChild(sg);
 
     // drift
     const lg = temporal.LightGBM;
@@ -1188,6 +1239,7 @@
     DATA, B, V, E, X, SITE, M, XE, C, h, S, STAGES, STAGE, FEAT, TARGETS, MODEL_NAMES, LEARNERS, MRS_COLORS,
     t, L, tx, lang: () => lang, num, pct, pct100, signed, stageLabel, idx, mname, statusChip,
     predictStage, modelInputs, samples, threeBand, registerView, render, renderView, goTo, store,
+    viewLabel: (id) => (VIEWS[id] ? VIEWS[id].label() : id),
     boot() {
       const hash = (location.hash || "").replace("#", "");
       if (VIEWS[hash]) S.view = hash;

@@ -3,7 +3,10 @@
   "use strict";
   const T = {
     en: {
-      brandSub: "Outcome after mechanical thrombectomy · FNO Ostrava registry",
+      brandSub: "Outcome after mechanical thrombectomy",
+      calcTitle: "Prognosis after thrombectomy",
+      calcLede: "Enter what is known at each step of care. The estimate is updated as information arrives, from admission to day 7, and shows what drives it.",
+      scaleAria: (p, range, obs) => `Estimate ${p} on a scale from 0 to 100%${range ? `; range across model refits ${range}` : ""}${obs ? `; similar recent patients ${obs}` : ""}.`,
       tabCalc: "Calculator", tabRegistry: "Registry", tabValidation: "Validation", tabAbout: "About",
       notice: "<strong>Research tool, not a medical device.</strong> Estimates describe what happened to similar patients treated at FNO Ostrava in 2005–2025. Do not use them on their own to decide treatment.",
       example: "Example patient", exampleNote: "Edit any value. Nothing you enter leaves this browser.",
@@ -23,7 +26,7 @@
       hm: (m) => `${Math.floor(m / 60)} h ${String(Math.round(m % 60)).padStart(2, "0")} min`,
       pcAspects: "pc-ASPECTS",
       headline: "Chance of functional independence (mRS 0–2) at 90 days",
-      estimateAt: (s) => `Estimate at: ${s}`,
+      estimateAt: (s) => `Estimate at ${s === "End of MT" ? "the end of MT" : s.charAt(0).toLowerCase() + s.slice(1)}`,
       deathLabel: "Death within 90 days",
       lateDeaths: "few late deaths in recent data; imprecise",
       reality: (lo, hi, obs, n) => `Among recent registry patients (2021–2025) with a similar estimate (${lo}–${hi}), <b>${obs}</b> reached mRS 0–2 (n = ${n}).`,
@@ -89,10 +92,13 @@
       subNote: "Groups with fewer than 30 patients or 10 events in either outcome class are not shown. Observed and predicted are before recalibration.",
       // about
       aboutTitle: "About MTOP",
-      footer: "MTOP · research use only",
+      footer: "Research use only",
     },
     cs: {
-      brandSub: "Výsledek po mechanické trombektomii · registr FNO Ostrava",
+      brandSub: "Výsledek po mechanické trombektomii",
+      calcTitle: "Prognóza po trombektomii",
+      calcLede: "Zadejte, co je známo v jednotlivých krocích péče. Odhad se zpřesňuje s každou novou informací, od přijetí po 7. den, a ukazuje, co jej ovlivňuje.",
+      scaleAria: (p, range, obs) => `Odhad ${p} na škále od 0 do 100 %${range ? `; rozpětí přes přetrénování modelu ${range}` : ""}${obs ? `; podobní nedávní pacienti ${obs}` : ""}.`,
       tabCalc: "Kalkulačka", tabRegistry: "Registr", tabValidation: "Validace", tabAbout: "O projektu",
       notice: "<strong>Výzkumný nástroj, nikoli zdravotnický prostředek.</strong> Odhady popisují, jak dopadli podobní pacienti léčení ve FNO Ostrava v letech 2005–2025. Nepoužívejte je samostatně k rozhodování o léčbě.",
       example: "Vzorový pacient", exampleNote: "Upravte libovolnou hodnotu. Zadané údaje neopouštějí tento prohlížeč.",
@@ -175,7 +181,7 @@
       subGroup: "Podskupina", subSex: "Pohlaví", subAge: "Věk", subCirc: "Povodí", subRoute: "Způsob přijetí",
       subNote: "Skupiny s méně než 30 pacienty nebo 10 událostmi v kterékoli třídě nejsou zobrazeny. Pozorované a predikované hodnoty jsou před rekalibrací.",
       aboutTitle: "O projektu MTOP",
-      footer: "MTOP · pouze pro výzkum",
+      footer: "Pouze pro výzkum",
     },
   };
   root.MTOP_I18N = T;

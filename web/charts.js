@@ -1,5 +1,5 @@
 /* MTOP charts: small, dependency-free SVG charts with hover tooltips, keyboard access,
- * and a table view for every figure. Colours come from CSS tokens so both themes work. */
+ * and a table view for every figure. Colours come from the CSS tokens in styles.css. */
 (function (root) {
   "use strict";
   const NS = "http://www.w3.org/2000/svg";
@@ -196,7 +196,7 @@
       if (o.zeroLine && o.y.domain[0] < 0) s("line", { class: "axis", x1: m.l, x2: m.l + iw, y1: ys(0), y2: ys(0) }, g);
       if (o.marker) {
         const mx = xs(o.marker.x);
-        s("line", { x1: mx, x2: mx, y1: m.t, y2: m.t + ih, style: "stroke: var(--ink-2); stroke-width:1" }, g);
+        s("line", { x1: mx, x2: mx, y1: m.t, y2: m.t + ih, style: "stroke: var(--ink-2); stroke-width:1; stroke-dasharray:3 3" }, g);
         if (o.marker.label) txt(g, Math.min(mx + 4, m.l + iw - 4), m.t + 10, o.marker.label, { class: "lbl", "text-anchor": mx + 90 > m.l + iw ? "end" : "start" });
       }
       const X = (p) => (cat ? xs(p.x) : xs(p.x));
@@ -208,6 +208,18 @@
           const x = X(p) + off;
           s("line", { x1: x, x2: x, y1: ys(p.lo), y2: ys(p.hi), style: `stroke:${se.color}; stroke-width:1.5; opacity:0.55` }, g);
         }
+      }
+      // soft area under single-measure trends
+      for (const se of o.series) {
+        if (!se.area) continue;
+        const off = se.offset || 0;
+        const pts = se.points.filter((p) => p.y !== null && p.y !== undefined && !Number.isNaN(p.y));
+        if (pts.length < 2) continue;
+        const base = ys(o.y.domain[0]).toFixed(1);
+        let d = `M${(X(pts[0]) + off).toFixed(1)},${base}`;
+        for (const p of pts) d += `L${(X(p) + off).toFixed(1)},${ys(p.y).toFixed(1)}`;
+        d += `L${(X(pts[pts.length - 1]) + off).toFixed(1)},${base}Z`;
+        s("path", { d, style: `fill:${se.color}; fill-opacity:0.08; stroke:none` }, g);
       }
       // lines
       for (const se of o.series) {
@@ -222,6 +234,13 @@
         }
         if (se.noLine) continue;
         s("path", { d, fill: "none", style: `stroke:${se.color}; stroke-width:${se.width || 2}; stroke-linejoin:round; stroke-linecap:round;${se.dash ? "stroke-dasharray:4 3;" : ""}` }, g);
+      }
+      // emphasised last value
+      for (const se of o.series) {
+        if (!se.endDot || se.dots) continue;
+        const pts = se.points.filter((p) => p.y !== null && p.y !== undefined && !Number.isNaN(p.y));
+        const p = pts[pts.length - 1];
+        if (p) s("circle", { cx: X(p) + (se.offset || 0), cy: ys(p.y), r: 3.5, style: `fill:${se.color}; stroke: var(--surface); stroke-width:2` }, g);
       }
       // dots
       for (const se of o.series) {
@@ -286,16 +305,18 @@
 
   // ------------------------------------------------------------------ 100% stacked rows (Grotta bars)
   /** grotta(body, {rows:[{label, n, segs:[number %], suppressed, note}], colors:[css], segLabels:[str], nLabel}) */
+  let clipSeq = 0;
   function grotta(body, o) {
     responsive(body, (W) => {
       body.replaceChildren();
       const narrow = W < 520;
       const labelW = narrow ? 0 : Math.min(190, Math.round(W * 0.28));
       const nW = 56;
-      const rowH = narrow ? 44 : 30;
-      const barH = 18;
+      const rowH = narrow ? 46 : 32;
+      const barH = 20;
       const H = o.rows.length * rowH + 8;
       const svg = s("svg", { width: W, height: H, viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": o.aria || "" }, body);
+      const defs = s("defs", null, svg);
       const x0 = labelW + (labelW ? 10 : 0), x1 = W - nW;
       const bw = x1 - x0;
       o.rows.forEach((r, i) => {
@@ -306,12 +327,16 @@
           txt(svg, x0, narrow ? yTop + 13 : labY, o.suppressedText || "", {});
           return;
         }
+        // round the two outer ends of each 100% bar
+        const cid = `mtop-gclip-${++clipSeq}`;
+        s("rect", { x: x0, y: yTop, width: Math.max(0, bw - 2), height: barH, rx: 5 }, s("clipPath", { id: cid }, defs));
+        const row = s("g", { "clip-path": `url(#${cid})` }, svg);
         let x = x0;
         r.segs.forEach((v, k) => {
           const w = (v / 100) * bw;
           if (w <= 0) return;
           const rx = x, rw = Math.max(0, w - 2);
-          const rect = s("rect", { x: rx, y: yTop, width: rw, height: barH, rx: 0, style: `fill:${o.colors[k]}` }, svg);
+          const rect = s("rect", { x: rx, y: yTop, width: rw, height: barH, rx: 0, style: `fill:${o.colors[k]}` }, row);
           rect.setAttribute("tabindex", "0");
           const show = (cx, cy) => tip.show(r.label, [{ label: o.segLabels[k], color: o.colors[k], value: `${o.fmt(v)}` }], cx, cy);
           rect.addEventListener("pointermove", (ev) => { rect.style.opacity = "0.85"; show(ev.clientX, ev.clientY); });
@@ -337,7 +362,7 @@
     if (!m) return "#ffffff";
     const lin = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
     const L = 0.2126 * lin(+m[1]) + 0.7152 * lin(+m[2]) + 0.0722 * lin(+m[3]);
-    return L > 0.36 ? "#111820" : "#ffffff";
+    return L > 0.36 ? "#0f1a2f" : "#ffffff";
   }
 
   // ------------------------------------------------------------------ horizontal bars (single series)

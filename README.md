@@ -19,7 +19,8 @@ browser: no server, no patient data, nothing typed in is sent anywhere.
 > **Research tool, not a medical device.** Do not use it on its own to decide treatment.
 
 **Live app:** https://viktorgajdosik.github.io/mt/ (published by GitHub Actions on every push to `main`).
-It can be installed on a phone or laptop and works offline.
+It can be installed on a phone or laptop and works offline. The page is a single light-themed file
+with its typeface bundled, so opening it contacts no third-party server.
 
 ## What the app contains
 
@@ -112,6 +113,10 @@ Full tables (Brier, calibration, ΔAUROC with paired-bootstrap CIs, subgroups) a
 - Only `artifacts/public/` is published: tree structure and leaf values (every leaf ≥ 20
   patients), aggregate statistics with small groups suppressed, and validation summaries.
   `tests/test_privacy.py` checks these rules before every deployment.
+- The page makes no third-party requests: fonts and icons are bundled, and values typed into the
+  calculator stay in the browser. The only exception is the multicentre tool, which loads the
+  SheetJS library from cdnjs when a partner opens an Excel file (CSV needs nothing); the file
+  itself is still read locally.
 - Before making the repository or the page public, confirm with the FNO ethics committee / data
   protection officer that publishing the trained model and aggregate results is covered.
 
@@ -145,7 +150,9 @@ Individual steps: `python -m mtop clean | train [--quick] | export | extras [--q
 config/            features.yaml (predictors, stages, UI labels EN/CZ), settings.yaml
 src/mtop/          clean · cohort · features · train · lr · metrics · scores · export · extras · adaptive · explorer · report · site · synth · cli
 web/               index.html template, styles.css, app.js + view_*.js, charts.js, model.js (trees + TreeSHAP),
-                   models_extra.js (comparators, mRS layer), metrics.js (in-browser validation), i18n.js, assets/
+                   models_extra.js (comparators, mRS layer), metrics.js (in-browser validation), i18n.js,
+                   assets/ (logo, app icons, bundled Instrument Sans font)
+scripts/           check_no_patient_data.sh (CI guard), make_brand.py (regenerates logo and icons)
 artifacts/public/  published model bundle, validation and explorer aggregates (committed)
 data/synthetic/    synthetic registry for CI and demos (committed)
 tests/             cleaning rules, JS↔LightGBM parity, privacy rules, end-to-end synthetic run
@@ -167,3 +174,4 @@ docs/              model card (TRIPOD+AI)
 Gajdošík V, Procházka V. *MTOP: staged, explainable prediction of 90-day outcome after
 mechanical thrombectomy.* University Hospital Ostrava / Faculty of Medicine, University of
 Ostrava, 2026. Code: MIT licence. The registry data are not included and not licensed.
+The bundled typeface, Instrument Sans, is under the SIL Open Font License 1.1 (`web/assets/fonts/OFL.txt`).
