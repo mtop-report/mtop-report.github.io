@@ -107,7 +107,7 @@
     if (o.legend && o.legend.length) {
       legendEl = h("div", { class: "legend" });
       for (const l of o.legend) {
-        const key = h("span", { class: "key" }, h("i", { class: l.type === "line" ? "line" : "", style: `background:${l.color}` }), l.label);
+        const key = h("span", { class: "key" }, h("i", { class: l.type || "", style: l.color ? `background:${l.color}` : null }), l.label);
         legendEl.appendChild(key);
       }
       fig.appendChild(legendEl);
@@ -458,6 +458,86 @@
     });
   }
 
+  // ------------------------------------------------------------------ odds-ratio forest (log axis, two estimates per row)
+  /**
+   * orForest(body, { groups:[{label, rows:[{label, unit, a:{or,lo,hi}, b:{or,lo,hi}, display, strong, tip:[{label, value}]}]}],
+   *                  color, left, right, leftShort, rightShort, tickFmt, aria })
+   * a: hollow circle (e.g. unadjusted), b: filled square (e.g. adjusted); a line at OR = 1.
+   */
+  function orForest(body, o) {
+    const CAND = [0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20];
+    let lo = 1, hi = 1;
+    for (const g of o.groups) for (const r of g.rows) for (const e of [r.a, r.b]) if (e) { lo = Math.min(lo, e.lo); hi = Math.max(hi, e.hi); }
+    const dLo = Math.max(0.1, CAND.filter((v) => v <= lo).pop() || CAND[0]);
+    const dHi = Math.min(10, CAND.find((v) => v >= hi) || CAND[CAND.length - 1]);
+    const tk = CAND.filter((v) => v >= dLo - 1e-9 && v <= dHi + 1e-9);
+    const color = o.color || "var(--accent)";
+    responsive(body, (W) => {
+      body.replaceChildren();
+      const narrow = W < 600;
+      const rowH = narrow ? 44 : 29, headH = 30;
+      const labelW = narrow ? 0 : Math.min(290, Math.round(W * 0.37));
+      const valW = narrow ? 0 : 112;
+      const top = 0, axisH = 50;
+      const nRows = o.groups.reduce((a, g) => a + g.rows.length, 0);
+      const yEnd = top + o.groups.length * headH + nRows * rowH;
+      const H = yEnd + axisH;
+      const svg = s("svg", { class: "orf", width: W, height: H, viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": o.aria || "" }, body);
+      const x0 = labelW ? labelW + 16 : 8, x1 = W - (valW ? valW + 16 : 8);
+      const lx = linear(Math.log(dLo), Math.log(dHi), x0, x1);
+      const X = (v) => lx(Math.log(Math.max(dLo, Math.min(dHi, v))));
+      const fmt = o.tickFmt || String;
+      for (const v of tk) {
+        s("line", { class: v === 1 ? "one" : "grid", x1: X(v), x2: X(v), y1: top + 8, y2: yEnd }, svg);
+        txt(svg, X(v), yEnd + 16, fmt(v), { "text-anchor": "middle" });
+      }
+      txt(svg, X(1) - 8, yEnd + 36, narrow ? o.leftShort || o.left : o.left, { "text-anchor": "end", class: "dir" });
+      txt(svg, X(1) + 8, yEnd + 36, narrow ? o.rightShort || o.right : o.right, { "text-anchor": "start", class: "dir" });
+      const arrow = (x, y, dir, col) => s("path", { d: `M${x},${y - 4}L${x + 6 * dir},${y}L${x},${y + 4}Z`, style: `fill:${col}`, "pointer-events": "none" }, svg);
+      const ci = (e, y, col, w) => {
+        s("line", { x1: X(e.lo), x2: X(e.hi), y1: y, y2: y, style: `stroke:${col}; stroke-width:${w}`, "pointer-events": "none" }, svg);
+        if (e.lo < dLo) arrow(X(dLo), y, -1, col);
+        if (e.hi > dHi) arrow(X(dHi), y, 1, col);
+      };
+      let y = top;
+      o.groups.forEach((g, gi) => {
+        if (gi) s("line", { class: "sep", x1: 0, x2: W, y1: y + 6, y2: y + 6 }, svg);
+        txt(svg, 0, y + headH - 8, g.label.toUpperCase(), { class: "grp" });
+        y += headH;
+        for (const r of g.rows) {
+          const rowTop = y;
+          const hit = s("rect", { class: "hit", x: -6, y: rowTop, width: W + 12, height: rowH, rx: 6, tabindex: 0, "aria-label": `${r.label} ${r.unit || ""}: ${r.display}` }, svg);
+          const yMid = narrow ? rowTop + 30 : rowTop + rowH / 2;
+          // label (+ unit) on the left, adjusted estimate right-aligned; on a phone both sit above the bars
+          const lineY = narrow ? rowTop + 14 : yMid + 4;
+          const val = txt(svg, W, lineY, r.display, { "text-anchor": "end", class: r.strong ? "lbl-strong" : "lbl" });
+          const lab = txt(svg, 0, lineY, "", { class: r.strong ? "lbl-strong" : "lbl" });
+          lab.appendChild(document.createTextNode(r.label));
+          const unit = r.unit ? s("tspan", { class: "unit", dx: 5 }, lab) : null;
+          if (unit) unit.textContent = r.unit;
+          const len = () => (lab.getComputedTextLength ? lab.getComputedTextLength() : 0);
+          const room = narrow ? W - (val.getComputedTextLength ? val.getComputedTextLength() : 90) - 10 : labelW;
+          if (unit && len() > room * 1.1) lab.removeChild(unit);          // the unit stays in the tooltip and the table
+          if (len() > room) { lab.setAttribute("textLength", room); lab.setAttribute("lengthAdjust", "spacingAndGlyphs"); }
+          if (r.a) {
+            ci(r.a, yMid - 4, "var(--line-3)", 1.5);
+            s("circle", { cx: X(r.a.or), cy: yMid - 4, r: 3.6, class: "est-a", "pointer-events": "none" }, svg);
+          }
+          if (r.b) {
+            ci(r.b, yMid + 4, color, 2);
+            s("rect", { x: X(r.b.or) - 4.5, y: yMid + 4 - 4.5, width: 9, height: 9, rx: 1.5, style: `fill:${color}`, class: "est-b", "pointer-events": "none" }, svg);
+          }
+          const show = (cx, cy) => tip.show(r.unit ? `${r.label} · ${r.unit}` : r.label, r.tip || [], cx, cy);
+          hit.addEventListener("pointermove", (ev) => show(ev.clientX, ev.clientY));
+          hit.addEventListener("pointerleave", () => tip.hide());
+          hit.addEventListener("focus", () => { const b = hit.getBoundingClientRect(); show(b.left + b.width * 0.6, b.top); });
+          hit.addEventListener("blur", () => tip.hide());
+          y += rowH;
+        }
+      });
+    });
+  }
+
   // ------------------------------------------------------------------ icon array (100 people)
   /** iconArray(body, { counts:[ints summing to 100], colors:[css], labels:[str] }) */
   function iconArray(body, o) {
@@ -522,5 +602,5 @@
     });
   }
 
-  root.MTOPCharts = { h, s, figure, dataTable, lineChart, grotta, hbars, tip, ticks, linear, forest, iconArray, heat };
+  root.MTOPCharts = { h, s, figure, dataTable, lineChart, grotta, hbars, tip, ticks, linear, forest, orForest, iconArray, heat };
 })(typeof globalThis !== "undefined" ? globalThis : this);

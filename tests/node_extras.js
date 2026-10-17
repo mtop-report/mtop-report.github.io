@@ -11,6 +11,7 @@ const nanify = (a) => a.map((v) => (v === null ? NaN : v));
 const res = {};
 
 if (job.lr) res.lr = job.lr.rows.map((r) => XE.lrPredict(job.lr.spec, nanify(r)));
+if (job.spline) res.spline = job.spline.rows.map((r) => XE.lrPredict(job.spline.spec, XE.splineRow(job.spline.spec, nanify(r))));
 if (job.points) {
   res.points = {};
   for (const name of Object.keys(XE.POINTS)) res.points[name] = job.points.map((x) => {

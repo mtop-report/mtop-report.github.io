@@ -62,7 +62,7 @@ stages:
     requires: [nihss_7d]      # alive and assessable at day 7
 
 site:
-  title: "MTOP Outcome Explorer"
+  title: "MTOP · Mechanical Thrombectomy Outcome Predictor"
   repo_url: "https://github.com/viktorgajdosik/mt"
   site_url: "https://viktorgajdosik.github.io/mt/"
   contact: "viktor.gajdosik@fno.cz"

@@ -156,7 +156,7 @@
   const $ = (sel, el) => (el || document).querySelector(sel);
   const app = $("#app");
 
-  const VIEW_ORDER = ["calc", "registry", "validation", "adaptive", "network", "federated", "roadmap", "about"];
+  const VIEW_ORDER = ["calc", "registry", "validation", "adaptive", "network", "roadmap", "about"];
   const VIEWS = {
     calc: { label: () => t().tabCalc, render: () => renderCalc() },
     registry: { label: () => t().tabRegistry, render: () => renderRegistry() },
@@ -165,8 +165,11 @@
   };
   function registerView(id, label, renderFn) { VIEWS[id] = { label, render: renderFn }; }
   const viewIds = () => VIEW_ORDER.filter((id) => VIEWS[id]);
+  // addresses of the two parts of the Multicentre tab
+  const ALIASES = { federated: ["network", { netMode: "federated" }], validate: ["network", { netMode: "validate" }] };
   function goTo(id) {
-    S.view = id;
+    if (ALIASES[id]) Object.assign(S, ALIASES[id][1]);
+    S.view = ALIASES[id] ? ALIASES[id][0] : id;
     try { history.replaceState(null, "", `#${id}`); } catch (e) { /* sandboxed frame */ }
     render();
     window.scrollTo(0, 0);
@@ -264,17 +267,6 @@
     stickyEl = h("div", { class: "stickybar" }, h("div", { class: "inner" }));
     root.appendChild(stickyEl);
     updateReadout();
-    setupSticky();
-  }
-
-  function setupSticky() {
-    if (typeof IntersectionObserver === "undefined") return;
-    const head = $(".headline", readoutEl);
-    if (!head) return;
-    const io = new IntersectionObserver((ents) => {
-      for (const e of ents) stickyEl.classList.toggle("show", !e.isIntersecting && S.view === "calc");
-    });
-    io.observe(head);
   }
 
   function stageCard(st) {
@@ -491,10 +483,45 @@
     if (idx(S.viewed) > idx(S.current)) S.viewed = S.current;
     const vs = S.viewed;
     const pv = preds[vs];
-    readoutEl.replaceChildren(...[headlineCard(vs, pv), distributionCard(vs, pv), trajectoryCard(preds), explainCard(vs, pv), bedsideCard(vs, x), othersCard(vs, x, pv), whatifCard(vs, x)].filter(Boolean));
+    readoutEl.replaceChildren(...[miniCard(vs, pv), headlineCard(vs, pv), distributionCard(vs, pv), trajectoryCard(preds), explainCard(vs, pv), bedsideCard(vs, x), othersCard(vs, x, pv), whatifCard(vs, x)].filter(Boolean));
     if (stickyEl) $(".inner", stickyEl).replaceChildren(
       h("span", { html: t().sticky(pct(pv.good.p), pct(pv.death.p)) }),
       h("span", { class: "delta", text: stageLabel(vs) }));
+    observeHeadline();
+  }
+
+  // Once the full prognosis card has scrolled away, a slim copy stays at the top of the column
+  // (desktop) or at the bottom of the screen (phone), so the panels below remain readable.
+  function miniCard(st, pv) {
+    const g = pv.good.p, d = pv.death.p;
+    const unc = XE.uncertainty(((X.uncertainty || {})[st] || {}).good_outcome, g);
+    const P = (v) => `${(Math.max(0, Math.min(1, v)) * 100).toFixed(2)}%`;
+    const scale = h("div", { class: "pm-scale" }, h("i", { class: "pm-rail" }),
+      unc ? h("i", { class: "pm-band", style: `left:${P(unc[0])};width:${P(unc[1] - unc[0])}` }) : null,
+      h("i", { class: "pm-mark", style: `left:${P(g)}` }));
+    return h("div", { class: "card prog-mini", "aria-hidden": "true" },
+      h("div", { class: "pm-main" }, h("span", { class: "pm-stage", text: stageLabel(st) }),
+        h("span", { class: "pm-g" }, h("b", { text: num(g * 100, 0) }), h("small", { text: lang === "cs" ? " %" : "%" }),
+          h("span", { text: tx(" mRS 0–2", " mRS 0–2") }))),
+      scale,
+      h("div", { class: "pm-d" }, h("b", { text: pct(d) }), h("span", { text: tx("death", "úmrtí") })));
+  }
+
+  let headIO = null;
+  function observeHeadline() {
+    if (typeof IntersectionObserver === "undefined" || !readoutEl) return;
+    if (headIO) headIO.disconnect();
+    const head = $(".headline", readoutEl);
+    if (!head) return;
+    const top = (parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--head-h")) || 60) + 8;
+    headIO = new IntersectionObserver((ents) => {
+      for (const e of ents) {
+        const gone = S.view === "calc" && e.boundingClientRect.top < top && e.intersectionRatio < 0.35;
+        readoutEl.classList.toggle("mini-on", gone);
+        if (stickyEl) stickyEl.classList.toggle("show", gone);
+      }
+    }, { rootMargin: `-${top}px 0px 0px 0px`, threshold: [0, 0.15, 0.35, 0.6, 1] });
+    headIO.observe(head);
   }
 
   // The prognosis instrument: estimate on a calibrated 0–100 % scale, with the spread across model
@@ -685,6 +712,11 @@
     card.appendChild(h("p", { class: "note", text: tx(
       `AUROC ${a ? num(a.auc, 2) : "–"} in 2021–2025 patients, against ${am ? num(am.auc, 2) : "–"} for MTOP${at ? " (both before thrombectomy)" : " at this stage"}; 0.774 on 2023–2025 patients in the earlier analysis. Items that are not recorded score 0.`,
       `AUROC ${a ? num(a.auc, 2) : "–"} u pacientů 2021–2025, MTOP ${am ? num(am.auc, 2) : "–"}${at ? " (obojí před trombektomií)" : " ve stejné fázi"}; v dřívější analýze 0,774 u pacientů 2023–2025. Nezadané položky mají 0 bodů.`) }));
+    card.appendChild(h("p", { class: "note", text: st === "admission"
+      ? tx("Why it can differ from MTOP for one patient: the score uses seven items in coarse bands and ignores occlusion site, IV thrombolysis, transfer, blood pressure, sex and most of the history. It ranks groups of patients almost as well as MTOP, but for an individual the two often differ by 10 percentage points or more.",
+        "Proč se může od MTOP u jednoho pacienta lišit: skóre používá sedm položek v hrubých pásmech a nebere v úvahu místo okluze, IV trombolýzu, překlad, tlak, pohlaví ani většinu anamnézy. Skupiny pacientů seřadí téměř stejně dobře jako MTOP, u jednotlivce se však oba odhady často liší o 10 procentních bodů i více.")
+      : tx(`The score uses admission information only. MTOP at ${stageLabel(st).toLowerCase()} also knows ${st === "procedure" ? "the reperfusion result and procedure details" : "the reperfusion result and the NIHSS course since admission"}, so for one patient the two can differ a lot; compare the score with MTOP's admission estimate in the pathway panel.`,
+        `Skóre používá jen informace při přijetí. MTOP ve fázi ${stageLabel(st).toLowerCase()} zná navíc ${st === "procedure" ? "výsledek reperfuze a detaily výkonu" : "výsledek reperfuze a vývoj NIHSS od přijetí"}, takže se u jednoho pacienta mohou oba odhady výrazně lišit; skóre srovnávejte s odhadem MTOP při přijetí v panelu průběhu.`) }));
     return card;
   }
 
@@ -724,8 +756,8 @@
     list.appendChild(h("div", { class: "orow ohead" }, h("div"), h("div", { class: "scale" }, h("span", { text: "0%" }), h("span", { text: "50%" }), h("span", { text: "100%" })), h("div"), h("div", { class: "au", text: "AUROC" })));
     card.appendChild(list);
     card.appendChild(h("p", { class: "note", text: tx(
-      "Published scores are mapped to probabilities with a logistic recalibration on the FNO registry; THRIVE-c and MR PREDICTS@24H are their predictor sets refitted on the registry (MR PREDICTS@24H without collateral score, which the registry does not record). * AUROC measured at an earlier stage.",
-      "Publikovaná skóre jsou převedena na pravděpodobnosti logistickou rekalibrací na registru FNO; THRIVE-c a MR PREDICTS@24H jsou jejich sady prediktorů přepočtené na registru (MR PREDICTS@24H bez skóre kolaterál, které registr neeviduje). * AUROC změřené v dřívější fázi.") }));
+      "The two logistic regressions use exactly MTOP's inputs (one linear, one with restricted cubic splines for age, NIHSS, times and glucose) and are shifted to recent outcomes like MTOP. Published scores are mapped to probabilities with a logistic recalibration on the FNO registry; THRIVE-c and MR PREDICTS@24H are their predictor sets refitted on the registry (MR PREDICTS@24H without collateral score, which the registry does not record). * AUROC measured at an earlier stage.",
+      "Obě logistické regrese používají přesně vstupy MTOP (jedna lineární, druhá s restrikovanými kubickými splajny pro věk, NIHSS, časy a glykémii) a jsou posunuté k nedávným výsledkům stejně jako MTOP. Publikovaná skóre jsou převedena na pravděpodobnosti logistickou rekalibrací na registru FNO; THRIVE-c a MR PREDICTS@24H jsou jejich sady prediktorů přepočtené na registru (MR PREDICTS@24H bez skóre kolaterál, které registr neeviduje). * AUROC změřené v dřívější fázi.") }));
     return card;
   }
 
@@ -883,6 +915,123 @@
     return h("div", { class: "kpi" }, h("div", { class: "l", text: label }), h("div", { class: "v", text: value }), sub ? h("div", { class: "s", text: sub }) : null);
   }
 
+  // outcome by age band x NIHSS band (cells with fewer than 30 patients are not published)
+  S.regMap = S.regMap || "good";
+  const lerp = (a, b, f) => a.map((v, i) => Math.round(v + (b[i] - v) * f));
+  const hex2rgb = (x) => [1, 3, 5].map((i) => parseInt(x.slice(i, i + 2), 16));
+  function ageNihssCard() {
+    const M = E.age_nihss;
+    const good = S.regMap === "good";
+    const card = h("div", { class: "card card-pad block" });
+    const seg = h("div", { class: "mini-seg", role: "group", "aria-label": t().outcome },
+      [["good", t().targetGood], ["death", t().targetDeath]].map(([k, lbl]) => h("button", {
+        type: "button", "aria-pressed": String(S.regMap === k), onclick: () => { S.regMap = k; card.replaceWith(ageNihssCard()); },
+      }, lbl)));
+    card.appendChild(h("div", { class: "chart-head" }, h("div", null,
+      h("div", { class: "chart-title", text: tx("Outcome by age and stroke severity", "Výsledek podle věku a závažnosti CMP") }),
+      h("div", { class: "chart-sub", text: good
+        ? tx("Share of patients independent at 90 days (mRS 0–2), by age and NIHSS on admission", "Podíl pacientů soběstačných za 90 dní (mRS 0–2) podle věku a NIHSS při přijetí")
+        : tx("Share of patients who died within 90 days, by age and NIHSS on admission", "Podíl pacientů zemřelých do 90 dní podle věku a NIHSS při přijetí") })), seg));
+    const lo = hex2rgb(good ? "#eef4fd" : "#fdf1ec"), hi = hex2rgb(good ? "#10428f" : "#8f2f16");
+    const top = good ? 80 : 60;
+    const tbl = h("table", { class: "heatmap" });
+    tbl.appendChild(h("caption", { class: "visually-hidden", text: tx("Outcome by age band and NIHSS band", "Výsledek podle věkové skupiny a skupiny NIHSS") }));
+    tbl.appendChild(h("thead", null, h("tr", null, h("th", { scope: "col", class: "corner", text: tx("Age ↓ NIHSS →", "Věk ↓ NIHSS →") }),
+      M.cols.map((c) => h("th", { scope: "col", text: c })))));
+    const tb = h("tbody");
+    M.rows.forEach((r, i) => {
+      tb.appendChild(h("tr", null, h("th", { scope: "row", text: r }), M.cells[i].map((cell) => {
+        if (cell.suppressed) return h("td", { class: "sup", title: tx(`fewer than ${M.min_n} patients`, `méně než ${M.min_n} pacientů`) }, h("span", { text: "–" }));
+        const v = good ? cell.good : cell.death;
+        const f = Math.max(0, Math.min(1, v / top));
+        const rgb = lerp(lo, hi, f);
+        return h("td", { style: `background:rgb(${rgb.join(",")});color:${f > 0.52 ? "#ffffff" : "var(--ink)"}` },
+          h("b", { text: pct100(v, 0) }), h("span", { text: `n ${num(cell.n)}` }));
+      })));
+    });
+    tbl.appendChild(tb);
+    card.appendChild(h("div", { class: "table-scroll" }, tbl));
+    card.appendChild(h("p", { class: "note", text: tx(
+      `Observed outcomes in the registry, not model estimates. Cells with fewer than ${M.min_n} patients are hidden. Age and severity explain much of the difference between patients; the calculator adds everything else that is known.`,
+      `Pozorované výsledky v registru, nikoli odhady modelu. Buňky s méně než ${M.min_n} pacienty jsou skryté. Věk a závažnost vysvětlují velkou část rozdílů mezi pacienty; kalkulačka přidává vše ostatní, co je známo.`) }));
+    return card;
+  }
+
+  // factors associated with 90-day outcome: unadjusted and adjusted odds ratios (associations.json)
+  S.regOr = S.regOr || "good";
+  function associationCard() {
+    const A = DATA.associations;
+    const good = S.regOr === "good";
+    const res = A.outcomes[good ? "good_outcome" : "death90"];
+    const card = h("div", { class: "card card-pad block" });
+    const seg = h("div", { class: "mini-seg", role: "group", "aria-label": t().outcome },
+      [["good", t().targetGood], ["death", t().targetDeath]].map(([k, lbl]) => h("button", {
+        type: "button", "aria-pressed": String(S.regOr === k), onclick: () => { S.regOr = k; card.replaceWith(associationCard()); },
+      }, lbl)));
+    const orTxt = (e) => `${num(e.or, 2)} (${num(e.lo, 2)}–${num(e.hi, 2)})`;
+    const UN = tx("Unadjusted", "Neadjustovaný"), AD = tx("Adjusted", "Adjustovaný");
+    const groups = Object.keys(A.groups).map((g) => ({
+      label: L(A.groups[g]),
+      rows: A.terms.filter((tm) => tm.group === g).map((tm) => {
+        const r = res.terms[tm.key];
+        return {
+          label: L(tm.label), unit: tm.unit ? L(tm.unit) : "", a: r.unadjusted, b: r.adjusted, display: orTxt(r.adjusted),
+          strong: r.adjusted.lo > 1 || r.adjusted.hi < 1,
+          tip: [{ label: UN, value: orTxt(r.unadjusted) }, { label: AD, value: orTxt(r.adjusted) },
+            { label: tx("Recorded", "Zaznamenáno"), value: `${num(r.unadjusted.n)} / ${num(res.n)}` }],
+        };
+      }),
+    })).filter((g) => g.rows.length);
+    const tableRows = [];
+    for (const g of groups) for (const r of g.rows) tableRows.push([r.label, r.unit || "–", orTxt(r.a), num(r.a.n), orTxt(r.b)]);
+    const f = C.figure(card, {
+      title: tx("Factors associated with the 90-day outcome", "Faktory spojené s výsledkem za 90 dní"),
+      sub: good
+        ? tx(`Odds ratios for independence at 90 days (mRS 0–2) with 95% confidence intervals, ${num(res.n)} patients. Above 1: more often independent.`,
+          `Poměry šancí pro soběstačnost za 90 dní (mRS 0–2) s 95% intervaly spolehlivosti, ${num(res.n)} pacientů. Nad 1: častěji soběstační.`)
+        : tx(`Odds ratios for death within 90 days with 95% confidence intervals, ${num(res.n)} patients. Above 1: higher mortality.`,
+          `Poměry šancí pro úmrtí do 90 dní s 95% intervaly spolehlivosti, ${num(res.n)} pacientů. Nad 1: vyšší mortalita.`),
+      legend: [{ label: tx("Unadjusted: one factor at a time", "Neadjustovaný: každý faktor zvlášť"), type: "ring" },
+        { label: tx("Adjusted: all factors together", "Adjustovaný: všechny faktory společně"), type: "sq", color: good ? "var(--blue)" : "var(--dead)" }],
+      table: { columns: [tx("Factor", "Faktor"), tx("Unit / comparison", "Jednotka / srovnání"), `${UN} OR (95% CI)`, tx("n recorded", "n se záznamem"), `${AD} OR (95% CI)`], rows: tableRows },
+      labels: { table: t().showTable, chart: t().showChart },
+    });
+    const fh = f.fig.querySelector(".chart-head");
+    fh.insertBefore(seg, fh.querySelector(".tbl-toggle"));
+    C.orForest(f.body, {
+      groups, color: good ? "var(--blue)" : "var(--dead)", tickFmt: (v) => num(v, v < 1 ? 1 : 0),
+      left: good ? tx("← less often independent", "← méně často soběstační") : tx("← lower mortality", "← nižší mortalita"),
+      right: good ? tx("more often independent →", "častěji soběstační →") : tx("higher mortality →", "vyšší mortalita →"),
+      leftShort: tx("← lower odds", "← nižší šance"), rightShort: tx("higher odds →", "vyšší šance →"),
+      aria: tx("Forest plot of odds ratios", "Lesní graf poměrů šancí"),
+    });
+    const notes = h("div", { class: "or-notes" });
+    const yr = res.terms.year5 && res.terms.year5.adjusted;
+    if (yr) {
+      const what = good ? tx("independence (mRS 0–2)", "na soběstačnost (mRS 0–2)") : tx("death", "úmrtí");
+      const ci = `OR ${num(yr.or, 2)}, ${tx("95% CI", "95% IS")} ${num(yr.lo, 2)}–${num(yr.hi, 2)}`;
+      if (yr.hi < 1 || yr.lo > 1) {
+        const ch = Math.round(Math.abs(1 - yr.or) * 100);
+        const dir = yr.hi < 1 ? tx("lower", "nižší") : tx("higher", "vyšší");
+        notes.appendChild(h("p", { class: "callout", text: tx(
+          `Outcomes drifted: with all the other factors accounted for, the odds of ${what} were ${ch}% ${dir} for every five years later in the registry (${ci}). This is why MTOP's estimates are shifted to the outcome level of 2021–2025.`,
+          `Výsledky se v čase posunuly: po zohlednění všech ostatních faktorů byla šance ${what} o ${ch} % ${dir} za každých pět let pozdější léčby (${ci}). Proto jsou odhady MTOP posunuty na úroveň výsledků let 2021–2025.`) }));
+      } else {
+        notes.appendChild(h("p", { class: "note", text: tx(
+          `With all the other factors accounted for, the odds of ${what} showed no clear change over the years (OR ${num(yr.or, 2)} per five years, 95% CI ${num(yr.lo, 2)}–${num(yr.hi, 2)}).`,
+          `Po zohlednění ostatních faktorů se šance ${what} v průběhu let jasně neměnila (OR ${num(yr.or, 2)} na pět let, 95% IS ${num(yr.lo, 2)}–${num(yr.hi, 2)}).`) }));
+      }
+    }
+    notes.appendChild(h("p", { class: "note", text: tx(
+      `Unadjusted: logistic regression with one factor, in the patients with that value recorded. Adjusted: one logistic model with all factors and the treatment year; missing values were filled in ${A.imputations} times by multiple imputation and the results combined (Rubin's rules), so all ${num(res.n)} patients count. Bold: the adjusted interval excludes 1. Intervals are not corrected for multiple comparisons.`,
+      `Neadjustovaný: logistická regrese s jedním faktorem u pacientů, u nichž je hodnota zaznamenána. Adjustovaný: jeden logistický model se všemi faktory a rokem léčby; chybějící hodnoty byly ${A.imputations}× doplněny vícenásobnou imputací a výsledky sloučeny (Rubinova pravidla), takže se započítá všech ${num(res.n)} pacientů. Tučně: adjustovaný interval nezahrnuje 1. Intervaly nejsou korigovány na mnohočetné srovnávání.`) }));
+    notes.appendChild(h("p", { class: "note", text: tx(
+      "These are associations in one registry, not effects of treatment choices: general anaesthesia, for example, is used more often in restless or more severely affected patients, and successful reperfusion partly reflects favourable anatomy. The calculator does not use these odds ratios; its model also captures non-linear effects and interactions.",
+      "Jde o souvislosti v jednom registru, nikoli o účinky léčebných rozhodnutí: například celková anestezie se častěji volí u neklidných nebo závažněji postižených pacientů a úspěšná reperfuze zčásti odráží příznivou anatomii. Kalkulačka tyto poměry šancí nepoužívá; její model zachycuje i nelineární vztahy a interakce.") }));
+    card.appendChild(notes);
+    return card;
+  }
+
   function renderRegistry() {
     const root = $("#view-registry");
     root.replaceChildren();
@@ -918,8 +1067,11 @@
       labels: { table: t().showTable, chart: t().showChart },
     });
     fg.fig.insertBefore(dimCtl, fg.fig.children[1]);
+    if (dim.note) gBlock.appendChild(h("p", { class: "note", text: L(dim.note) }));
     C.grotta(fg.body, { rows, colors: MRS_COLORS, inkOn: MRS_INK, segLabels: legend.map((l) => l.label), fmt: (v) => pct100(v, 1), suppressedText: lang === "cs" ? "méně než 10 pacientů nebo méně než 30 pro rozložení" : "too few patients to show", nLabel: "n", aria: t().grottaTitle });
     root.appendChild(gBlock);
+    if (E.age_nihss) root.appendChild(ageNihssCard());
+    if (DATA.associations) root.appendChild(associationCard());
 
     // time + outcome by year
     const two = h("div", { class: "grid-2 block" });
@@ -969,9 +1121,15 @@
     };
     single(t().tPatients, "n", [0, 150], (v) => num(v), [0, 50, 100, 150]);
     single(t().tAge, "age", [55, 80], (v) => num(v), [55, 65, 75]);
-    single(t().tTici, "tici2b3", [0, 100], (v) => pct100(v), [0, 50, 100]);
+    single(tx("Aged 80 or older (%)", "Ve věku 80 a více let (%)"), "age80", [0, 40], (v) => pct100(v), [0, 20, 40]);
+    single(tx("IV thrombolysis (%)", "IV trombolýza (%)"), "ivt", [0, 100], (v) => pct100(v), [0, 50, 100]);
+    single(tx("Transferred from another hospital (%)", "Překlad z jiné nemocnice (%)"), "transfer", [0, 100], (v) => pct100(v), [0, 50, 100]);
     single(t().tOtp, "otp", [0, 300], (v) => `${num(v)} min`, [0, 100, 200, 300]);
+    single(tx("Procedure duration (median, min)", "Délka výkonu (medián, min)"), "proc", [0, 80], (v) => `${num(v)} min`, [0, 40, 80]);
+    single(t().tTici, "tici2b3", [0, 100], (v) => pct100(v), [0, 50, 100]);
+    single(tx("Symptomatic ICH (%)", "Symptomatické ICH (%)"), "sich", [0, 20], (v) => pct100(v), [0, 10, 20]);
     single(t().tGa, "ga", [0, 100], (v) => pct100(v), [0, 50, 100]);
+    single(tx("Acute stenting (%)", "Akutní stenting (%)"), "stenting", [0, 100], (v) => pct100(v), [0, 50, 100]);
     // technique mix
     const techCard = h("div", { class: "card card-pad" });
     const techSeries = [
@@ -1323,8 +1481,8 @@
         : `Modely vycházejí z prospektivního registru trombektomií Fakultní nemocnice Ostrava (FNO). Z ${num(E.flow[0].n)} záznamů registru bylo analyzováno ${num(nAll)} dospělých pacientů po endovaskulární léčbě se známým mRS za 90 dní (${E.period[0]}–${E.period[1]}). Diagnostická angiografie bez léčby byla vyřazena. NIHSS 43 v registru označuje úmrtí a 99 „nehodnotitelné“; tyto kódy se nikdy nepoužívají jako skóre.`),
       h("h3", { text: en ? "Models" : "Modely" }),
       P(en
-        ? `Each stage has its own gradient-boosted tree model (LightGBM) with monotone constraints, so that, for example, a longer time to puncture or a higher NIHSS can never raise the predicted chance of independence. Hyperparameters were tuned by cross-validation on the development cohort only. Logistic regression, XGBoost, a multilayer perceptron, published scores (THRIVE, SPAN-100, HIAT2, PRE, NIHSS alone) and refitted published predictor sets (THRIVE-c, MR PREDICTS@24H) serve as comparators. Explanations are exact TreeSHAP values computed in your browser.`
-        : `Každá fáze má vlastní model gradientně boostovaných stromů (LightGBM) s monotónními omezeními, takže například delší čas do punkce nebo vyšší NIHSS nikdy nezvýší predikovanou šanci na nezávislost. Hyperparametry byly laděny křížovou validací pouze na vývojové kohortě. Jako srovnání slouží logistická regrese, XGBoost, vícevrstvý perceptron, publikovaná skóre (THRIVE, SPAN-100, HIAT2, PRE, samotné NIHSS) a přepočtené publikované sady prediktorů (THRIVE-c, MR PREDICTS@24H). Vysvětlení jsou přesné hodnoty TreeSHAP počítané ve vašem prohlížeči.`),
+        ? `Each stage has its own gradient-boosted tree model (LightGBM) with monotone constraints, so that, for example, a longer time to puncture or a higher NIHSS can never raise the predicted chance of independence. Hyperparameters were tuned by cross-validation on the development cohort only. Logistic regression (linear and with restricted cubic splines), XGBoost, a multilayer perceptron, the 7-item FNO bedside score from the earlier registry analysis, published scores (THRIVE, SPAN-100, HIAT2, PRE, NIHSS alone) and refitted published predictor sets (THRIVE-c, MR PREDICTS@24H) serve as comparators. Explanations are exact TreeSHAP values computed in your browser.`
+        : `Každá fáze má vlastní model gradientně boostovaných stromů (LightGBM) s monotónními omezeními, takže například delší čas do punkce nebo vyšší NIHSS nikdy nezvýší predikovanou šanci na nezávislost. Hyperparametry byly laděny křížovou validací pouze na vývojové kohortě. Jako srovnání slouží logistická regrese (lineární i s restrikovanými kubickými splajny), XGBoost, vícevrstvý perceptron, 7položkové bedside skóre FNO z dřívější analýzy registru, publikovaná skóre (THRIVE, SPAN-100, HIAT2, PRE, samotné NIHSS) a přepočtené publikované sady prediktorů (THRIVE-c, MR PREDICTS@24H). Vysvětlení jsou přesné hodnoty TreeSHAP počítané ve vašem prohlížeči.`),
       h("h3", { text: en ? "Validation" : "Validace" }),
       P(en
         ? `Temporal validation on patients treated in 2021–2025 gave an AUROC for mRS 0–2 of ${auc("admission")} before thrombectomy, ${auc("procedure")} at the end of the procedure, ${auc("h24")} at 24 hours and ${auc("d7")} on day 7. Outcomes in recent years were worse than the development data predicted, so the published models are refitted on all years and their intercepts shifted to the 2021–2025 outcome level.`
@@ -1365,6 +1523,7 @@
         h("div", null, h("div", { class: "chart-title", text: en ? "Open on your phone" : "Otevřít v telefonu" }), h("div", { class: "copyable", text: SITE.site_url.replace(/^https?:\/\//, "") }))));
     }
     root.appendChild(h("div", { class: "about-grid" }, prose, aside));
+    if (window.MTOPApp.dictionaryBlock) root.appendChild(window.MTOPApp.dictionaryBlock());
   }
 
   // ------------------------------------------------------------------ shared API for the other views
@@ -1372,11 +1531,15 @@
     DATA, B, V, E, X, SITE, M, XE, C, h, S, STAGES, STAGE, FEAT, TARGETS, MODEL_NAMES, LEARNERS, MRS_COLORS,
     t, L, tx, lang: () => lang, num, pct, pct100, signed, stageLabel, idx, mname, statusChip,
     predictStage, modelInputs, samples, threeBand, registerView, render, renderView, goTo, store,
-    viewLabel: (id) => (VIEWS[id] ? VIEWS[id].label() : id),
+    viewLabel: (id) => { const v = VIEWS[ALIASES[id] ? ALIASES[id][0] : id]; return v ? v.label() : id; },
     boot() {
       const hash = (location.hash || "").replace("#", "");
-      if (VIEWS[hash]) S.view = hash;
+      if (ALIASES[hash]) { Object.assign(S, ALIASES[hash][1]); S.view = ALIASES[hash][0]; } else if (VIEWS[hash]) S.view = hash;
       render();
+      window.addEventListener("hashchange", () => {
+        const id = (location.hash || "").replace("#", "");
+        if (ALIASES[id] || VIEWS[id]) goTo(id);
+      });
     },
   };
 })();

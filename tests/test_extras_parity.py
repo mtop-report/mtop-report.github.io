@@ -70,6 +70,21 @@ def test_logistic_regression_matches_sklearn(tmp_path):
     assert np.max(np.abs(predict_exported(spec, X.to_numpy(float)) - sk)) < 1e-9
 
 
+def test_spline_regression_matches_python(tmp_path):
+    from mtop.splines import export_spline_logreg, fit_spline_logreg
+
+    d, y = _cohort(500, 7)
+    X = d[["age", "nihss_adm", "aspects", "glucose", "onset_to_puncture", "mrs_pre", "htn"]].astype(float)
+    model = fit_spline_logreg(X, y, 1)
+    spec = export_spline_logreg(model, shift=0.2)
+    assert set(spec["knots"]) >= {"age", "nihss_adm", "glucose", "onset_to_puncture"}
+    rows = [[None if np.isnan(v) else float(v) for v in r] for r in X.to_numpy(float)]
+    js = np.array(_node({"spline": {"spec": spec, "rows": rows}}, tmp_path)["spline"])
+    p = model.predict_proba(X)[:, 1]
+    py = 1 / (1 + np.exp(-(np.log(p / (1 - p)) + 0.2)))
+    assert np.max(np.abs(js - py)) < 1e-9
+
+
 def test_points_scores_and_terms_match_python(tmp_path):
     d, _ = _cohort(300, 3)
     recs = _records(d)

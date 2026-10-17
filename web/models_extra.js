@@ -21,6 +21,29 @@
     return sig(lin);
   }
 
+  /** Restricted cubic spline terms (Harrell) of x for knots t1 < ... < tk: k - 2 values, NaN if x is missing.
+   *  Same arithmetic as src/mtop/splines.py rcs_terms. */
+  function rcsTerms(x, t) {
+    const k = t.length;
+    if (miss(x) || Number.isNaN(Number(x))) return Array.from({ length: k - 2 }, () => NaN);
+    const v = Number(x);
+    const p3 = (z) => Math.pow(Math.max(z, 0), 3);
+    const d = (t[k - 1] - t[0]) * (t[k - 1] - t[0]);
+    const out = [];
+    for (let j = 0; j < k - 2; j++) {
+      out.push((p3(v - t[j]) - (p3(v - t[k - 2]) * (t[k - 1] - t[j])) / (t[k - 1] - t[k - 2])
+        + (p3(v - t[k - 1]) * (t[k - 2] - t[j])) / (t[k - 1] - t[k - 2])) / d);
+    }
+    return out;
+  }
+
+  /** Model row for the spline regression: the base columns followed by each knotted variable's terms. */
+  function splineRow(spec, base) {
+    const row = base.slice();
+    for (const [v, knots] of Object.entries(spec.knots)) row.push(...rcsTerms(base[spec.base_columns.indexOf(v)], knots));
+    return row;
+  }
+
   /** Published predictor-set terms: num, bin, in (membership), min(x, c), max(x - c, 0). */
   function termValues(terms, inputs) {
     return terms.map((t) => {
@@ -89,6 +112,7 @@
   /** Probability of mRS 0-2 from a comparator for one patient (inputs keyed by predictor). */
   function comparatorProb(comp, inputs, features, buildRow) {
     if (comp.kind === "lr") return lrPredict(comp.spec, buildRow({ columns: comp.spec.columns }, features, inputs));
+    if (comp.kind === "spline") return lrPredict(comp.spec, splineRow(comp.spec, buildRow({ columns: comp.spec.base_columns }, features, inputs)));
     if (comp.kind === "refit") return lrPredict(comp.spec, termValues(comp.terms, inputs));
     return null;
   }
@@ -128,7 +152,7 @@
     return [sig(z + best.off_lo), sig(z + best.off_hi)];
   }
 
-  const api = { sig, logit, lrPredict, termValues, POINTS, BEDSIDE, pointsProb, comparatorProb, ordinalProbs, fullDistribution, uncertainty, GLU_150 };
+  const api = { sig, logit, lrPredict, rcsTerms, splineRow, termValues, POINTS, BEDSIDE, pointsProb, comparatorProb, ordinalProbs, fullDistribution, uncertainty, GLU_150 };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   root.MTOPExtra = api;
 })(typeof globalThis !== "undefined" ? globalThis : this);

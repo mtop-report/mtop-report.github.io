@@ -15,7 +15,7 @@ from .config import settings
 from .paths import PUBLIC, SITE, WEB
 
 JS_FILES = ["i18n.js", "model.js", "models_extra.js", "metrics.js", "charts.js", "app.js",
-            "view_adaptive.js", "view_network.js", "view_federated.js", "view_roadmap.js", "boot.js"]
+            "view_adaptive.js", "view_network.js", "view_federated.js", "view_roadmap.js", "view_dictionary.js", "boot.js"]
 ASSETS = ["icon-192.png", "icon-512.png", "icon-maskable-512.png", "apple-touch-icon.png", "mark.svg"]
 
 # Instrument Sans (SIL OFL 1.1, web/assets/fonts/OFL.txt), self-hosted and inlined so the page makes
@@ -99,6 +99,7 @@ def build_site():
         "bundle": _load("model_bundle.json"),
         "validation": _load("validation.json"),
         "explorer": _load("explorer.json"),
+        "associations": _load("associations.json"),
         "extras": _load("extras.json", {}),
         "adaptive": _load("adaptive.json"),
         "subgroups": _load("subgroups.json", []),
@@ -131,7 +132,7 @@ def build_site():
         if (WEB / "assets" / a).exists():
             shutil.copyfile(WEB / "assets" / a, SITE / a)
     manifest = {
-        "name": site_cfg.get("title", "MTOP Outcome Explorer"), "short_name": "MTOP",
+        "name": site_cfg.get("title", "MTOP · Mechanical Thrombectomy Outcome Predictor"), "short_name": "MTOP",
         "description": "Staged, explainable estimate of 90-day outcome after mechanical thrombectomy",
         "start_url": "./", "scope": "./", "display": "standalone",
         "background_color": PAPER, "theme_color": THEME,

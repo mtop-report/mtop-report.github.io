@@ -158,6 +158,17 @@
     two2.appendChild(policyCard());
     two2.appendChild(versionsCard());
     root.appendChild(two2);
+    if (A.DATA.federated) {
+      const fed = h("div", { class: "card card-pad block next-step" },
+        h("div", null, h("div", { class: "chart-title", text: tx("The same strategies across several centres", "Tytéž strategie napříč více centry") }),
+          h("p", { class: "note", text: tx(
+            "Every strategy above also runs in the federated network: monitoring, recalibration and refitting become network jobs on a range of treatment years, and patient data stay at each hospital.",
+            "Každá strategie výše funguje i ve federované síti: monitorování, rekalibrace i přetrénování se stanou úlohami sítě na zvoleném rozmezí let léčby a data pacientů zůstávají v každé nemocnici.") })));
+      const b = h("button", { class: "btn", type: "button", text: tx("How it works in the network", "Jak to funguje v síti") });
+      b.addEventListener("click", () => A.goTo("federated"));
+      fed.appendChild(b);
+      root.appendChild(fed);
+    }
   }
 
   function flagText(f) {

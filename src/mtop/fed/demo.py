@@ -74,7 +74,8 @@ def make_sites(base: pd.DataFrame) -> tuple[list[SiteNode], dict]:
         f.unlink()
     nodes, reports = [], {}
     for cid, a, z in CENTRES:
-        d = base[(base["year"] >= a) & (base["year"] <= z)]
+        d = base[(base["year"] >= a) & (base["year"] <= z)].copy()
+        d["year"] = d["year"].astype(float)
         path = FED_DIR / f"centre_{cid}.csv"
         write_site_csv(d, path)
         typed, rep = read_site_csv(path)

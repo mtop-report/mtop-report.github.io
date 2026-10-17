@@ -3,6 +3,10 @@
 One row per patient, one column per predictor (the calculator's inputs) plus `mrs90`. The same
 template is used by the in-browser validation tool (web/view_network.js); values may use common
 English or Czech spellings. Unrecognised or out-of-range values become missing and are counted.
+
+Optional column `year` (year of treatment) lets the network work on ranges of years: monitoring
+performance year by year, recalibrating to recent patients, refitting on a sliding window. It
+never leaves the hospital either; jobs only select patients by it.
 """
 from __future__ import annotations
 
@@ -38,8 +42,16 @@ def norm(s) -> str:
     return re.sub(r"[^a-z0-9]", "", s.lower())
 
 
+OPTIONAL_COLUMNS = ["year"]
+
+
 def template_columns() -> list[str]:
     return [f.key for f in features() if f.type != "derived"] + ["mrs90"]
+
+
+def _year(raw) -> float:
+    s = str(raw).strip()[:4]
+    return float(s) if s.isdigit() and 1990 <= int(s) <= 2100 else np.nan
 
 
 def _parse(f, raw, issues: dict):
@@ -110,6 +122,10 @@ def read_site_csv(path) -> tuple[pd.DataFrame, dict]:
         else:
             df[key] = df[key].astype(object).where(df[key].notna(), None)
     df["mrs90"] = pd.to_numeric(df["mrs90"], errors="coerce").astype(float)
+    ycol = by_norm.get("year") or by_norm.get("rok")
+    if ycol is not None:
+        df["year"] = [_year(v) for v in raw[ycol].tolist()]
+        found.append("year")
     df.loc[df["occlusion"].isin(POSTERIOR), "side_left"] = 0.0
     df["nihss_change_24h"] = df["nihss_24h"] - df["nihss_adm"]
     df["good_outcome"] = (df["mrs90"] <= 2).astype(float).where(df["mrs90"].notna())
@@ -122,7 +138,7 @@ def read_site_csv(path) -> tuple[pd.DataFrame, dict]:
 def write_site_csv(df: pd.DataFrame, path) -> None:
     """Write registry rows (clean variable names) in the template, as a partner centre would."""
     tici_label = {0.0: "0", 1.0: "1", 2.0: "2a", 2.5: "2", 3.0: "2b", 4.0: "3"}
-    cols = template_columns()
+    cols = template_columns() + [c for c in OPTIONAL_COLUMNS if c in df.columns]
     out = df[cols].copy()
     out["tici"] = out["tici"].map(lambda v: tici_label.get(v, "") if pd.notna(v) else "")
     for col in cols:

@@ -6,14 +6,15 @@ with **masked sums** over their own patients, and the coordinator adds them up. 
 totals ever become readable, and the result is the same model that pooling everyone's data would
 give.
 
-The *Federated* tab of the app shows a working network of four virtual centres. This document is
-for the people who decide whether a centre joins: clinicians, registry and IT staff, and the data
-protection officer.
+The *Multicentre* tab of the app (*Learn together*) shows a working network of four virtual
+centres. This document is for the people who decide whether a centre joins: clinicians, registry
+and IT staff, and the data protection officer.
 
 ## What the demo shows
 
-FNO's registry was split by treatment era into four virtual centres (A 2005–2014, B 2015–2017,
-C 2018–2020, D 2021–2025, 316–378 patients each). Each centre's data were exported in the MTOP
+No other hospital is involved yet: the four centres are FNO's own patients, split by treatment
+years into four virtual centres (A 2005–2014, B 2015–2017, C 2018–2020, D 2021–2025, 316–378
+patients each). Each centre's data were exported in the MTOP
 template and read by its own node. Inside every centre, 5-fold cross-validation kept a fifth of the
 patients aside, and each centre scored its own held-out patients with three options: a model
 trained on its own patients only (*alone*), the shared model trained by the network (*network*),
@@ -81,6 +82,29 @@ then sees exactly the totals pooled training would see. The test suite checks th
 **Fixed, public value bands.** Splits can only fall on value bands agreed in advance
 (`config/federated.yaml`, at most 30 per predictor), never on quantiles of anyone's data.
 
+## Keeping the shared model up to date
+
+Outcomes drift: in FNO's registry the odds of independence at 90 days fell over the years more
+than the case mix explains, which is why MTOP is recalibrated to 2021–2025. The update strategies
+compared on the *Adaptive* tab run in the network as ordinary jobs restricted to a range of
+treatment years. A centre adds the optional `year` column (year of treatment) to its export; it
+never leaves the hospital, and a job only selects patients by it
+(`"subset": {"kind": "years", "from": 2021, "to": 2025}`). A centre without the column declines
+such jobs.
+
+| Strategy | In the network |
+|---|---|
+| Drift monitor | A validation job per year: network-wide AUROC and calibration from masked counts |
+| Intercept recalibration | A few Newton steps on one number, on the most recent years |
+| Logistic recalibration | The same with intercept and slope |
+| Refit | A new training job on all years |
+| Refit + recalibration (MTOP's current policy) | Training on all years, then recalibration on the latest years |
+| Sliding window | Training only on the last few years |
+| Centre-specific calibration | Each centre shifts the shared model to its own patients locally; nothing is shared |
+
+How often to update, which strategy to use and which alarms trigger an update are agreed by the
+network in advance.
+
 ## What leaves a hospital, and what does not
 
 | | Leaves the hospital? |
@@ -119,7 +143,8 @@ audit log with its time, round, size and SHA-256.
    your ethics committee and data protection officer confirm local participation and which
    agreements your institution needs.
 2. **Map your registry.** Export one row per patient with the template's columns
-   (`python -m mtop.fed template mtop_template.csv` writes the header). The *Multicentre* tab
+   (`python -m mtop.fed template mtop_template.csv` writes the header; the `year` column is
+   optional and enables the update jobs above). The *Multicentre* tab (*Validate on your data*)
    checks the mapping in the browser without uploading anything, or run
    `python -m mtop.fed check registry.csv`. English and Czech spellings are recognised; anything
    unrecognised becomes missing and is counted.
@@ -152,7 +177,7 @@ curve. The trained model is written in the same format the web app uses.
 | File | Role |
 |---|---|
 | `config/federated.yaml` | Shared settings: minimum sizes, value bands, model recipes, knots |
-| `src/mtop/fed/schema.py` | Reads a registry export in the MTOP template |
+| `src/mtop/fed/schema.py` | Reads a registry export in the MTOP template (optional `year` column) |
 | `src/mtop/fed/bins.py` | Fixed value bands |
 | `src/mtop/fed/secagg.py` | Identities, key agreement, masks, aggregation |
 | `src/mtop/fed/gbdt.py` | Boosted trees from network histograms (monotone constraints, missing values) |

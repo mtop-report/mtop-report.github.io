@@ -11,6 +11,8 @@
   fed-demo  federated network demo: four virtual centres from the registry (artifacts/public)
             (the network itself: python -m mtop.fed coordinator | site | template | check)
   explorer  suppressed aggregate statistics for the cohort explorer (artifacts/public)
+  associations  factors associated with 90-day outcome: unadjusted and adjusted odds ratios
+            (multiple imputation; artifacts/public)
   report    Table 1, figures and a validation summary for the manuscript (reports/)
   site      build the self-contained web app (site/index.html)
   all       everything above, in order
@@ -105,6 +107,12 @@ def cmd_explorer(args):
     build_explorer(_load_clean())
 
 
+def cmd_associations(args):
+    from .associations import build_associations
+
+    build_associations(_load_clean(), m=5 if getattr(args, "quick", False) else 20)
+
+
 def cmd_report(args):
     from .report import build_report
 
@@ -143,6 +151,7 @@ def cmd_all(args):
     cmd_extras(args)
     cmd_adaptive(args)
     cmd_explorer(args)
+    cmd_associations(args)
     cmd_report(args)
     cmd_site(args)
     print(f"all done in {time.time() - t:.0f}s")
@@ -156,13 +165,13 @@ def main(argv=None):
     for name, fn in [("clean", cmd_clean), ("train", cmd_train), ("export", cmd_export),
                      ("extras", cmd_extras), ("compare", cmd_compare), ("reconcile", cmd_reconcile),
                      ("adaptive", cmd_adaptive), ("fed-demo", cmd_fed_demo),
-                     ("explorer", cmd_explorer), ("report", cmd_report), ("site", cmd_site),
+                     ("explorer", cmd_explorer), ("associations", cmd_associations), ("report", cmd_report), ("site", cmd_site),
                      ("all", cmd_all), ("synth", cmd_synth)]:
         p = sub.add_parser(name)
         p.set_defaults(fn=fn)
         if name in ("clean", "all"):
             p.add_argument("--input", help="registry Excel file (default: data/raw/mt_patients_master.xlsx)")
-        if name in ("train", "extras", "all", "fed-demo"):
+        if name in ("train", "extras", "all", "fed-demo", "associations"):
             p.add_argument("--quick", action="store_true", help="fewer tuning trials / bootstrap refits, for testing")
         if name == "extras":
             p.add_argument("--comparators-only", action="store_true",

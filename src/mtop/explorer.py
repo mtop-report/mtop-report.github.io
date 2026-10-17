@@ -1,7 +1,8 @@
 """Aggregate, disclosure-controlled statistics for the public cohort explorer.
 
 Rules (enforced here and re-checked by tests/test_privacy.py):
-* only one-way breakdowns (no cross-tabulation of patient attributes);
+* one-way breakdowns, plus a single two-way table (age band x NIHSS band) whose cells are shown
+  only with >= 3 * min_cell patients;
 * a group is shown only if it has >= min_cell patients (default 10);
 * full 7-level mRS distributions only for groups with >= 3 * min_cell patients;
 * no dates, IDs, referring-hospital names, minima or maxima; percentages rounded to 0.1.
@@ -55,17 +56,32 @@ def _group_stats(g: pd.DataFrame, min_cell: int) -> dict | None:
 DIMENSIONS = {
     "era": ("Era", "Období"),
     "age_group": ("Age", "Věk"),
+    "sex": ("Sex", "Pohlaví"),
+    "mrs_pre_group": ("Pre-stroke mRS", "mRS před CMP"),
     "nihss_group": ("NIHSS on admission", "NIHSS při přijetí"),
+    "glucose_group": ("Glucose on admission", "Glykémie při přijetí"),
+    "af": ("Atrial fibrillation / arrhythmia", "Fibrilace síní / arytmie"),
+    "dm": ("Diabetes", "Diabetes"),
+    "anticoag": ("Anticoagulated before stroke", "Antikoagulace před CMP"),
     "occlusion": ("Occlusion site", "Místo okluze"),
     "aspects_group": ("ASPECTS (2016+)", "ASPECTS (od 2016)"),
     "otp_group": ("Onset to puncture", "Od vzniku do punkce"),
-    "tici_group": ("Final mTICI", "Výsledné mTICI"),
-    "technique": ("Technique", "Technika"),
-    "anesthesia": ("Anaesthesia", "Anestezie"),
     "ivt": ("IV thrombolysis", "IV trombolýza"),
     "transfer": ("Admission route", "Způsob přijetí"),
-    "sex": ("Sex", "Pohlaví"),
+    "technique": ("Technique", "Technika"),
+    "anesthesia": ("Anaesthesia", "Anestezie"),
+    "stenting": ("Acute stenting", "Akutní stenting"),
+    "proc_group": ("Procedure duration", "Délka výkonu"),
+    "tici_group": ("Final mTICI", "Výsledné mTICI"),
+    "nihss_change": ("NIHSS change in the first 24 h", "Změna NIHSS za prvních 24 h"),
     "sich": ("Symptomatic ICH", "Symptomatické ICH"),
+}
+
+DIM_NOTES = {
+    "nihss_change": ("Patients with an assessed NIHSS at 24 h only (alive and assessable), so deaths within the first day are not included.",
+                     "Jen pacienti s hodnoceným NIHSS za 24 h (žijící a hodnotitelní), úmrtí během prvního dne proto nejsou zahrnuta."),
+    "aspects_group": ("ASPECTS is recorded from 2016.", "ASPECTS se eviduje od roku 2016."),
+    "proc_group": ("From groin puncture to recanalisation or the end of the procedure.", "Od punkce do rekanalizace nebo ukončení výkonu."),
 }
 
 LABELS = {
@@ -86,6 +102,17 @@ LABELS = {
     "transfer": {"direct": ("Direct to FNO", "Přímo do FNO"), "transfer": ("Drip-and-ship", "Drip-and-ship")},
     "sex": {"male": ("Men", "Muži"), "female": ("Women", "Ženy")},
     "sich": {"no": ("No sICH", "Bez sICH"), "yes": ("sICH", "sICH")},
+    "mrs_pre_group": {"0": ("0 · no symptoms", "0 · bez příznaků"), "1": ("1", "1"), "2": ("2", "2"), "≥3": ("≥3", "≥3")},
+    "glucose_group": {"<7.8": ("<7.8 mmol/L", "<7,8 mmol/l"), "7.8–11.0": ("7.8–11.0 mmol/L", "7,8–11,0 mmol/l"),
+                      "≥11.1": ("≥11.1 mmol/L", "≥11,1 mmol/l")},
+    "proc_group": {"≤30": ("≤30 min", "≤30 min"), "31–60": ("31–60 min", "31–60 min"), "61–90": ("61–90 min", "61–90 min"),
+                   ">90": (">90 min", ">90 min")},
+    "nihss_change": {"improved": ("Improved by ≥4", "Zlepšení o ≥4"), "stable": ("Within 3 points", "Změna do 3 bodů"),
+                     "worse": ("Worsened by ≥4", "Zhoršení o ≥4")},
+    "af": {"no": ("No AF / arrhythmia", "Bez FS / arytmie"), "yes": ("AF / arrhythmia", "FS / arytmie")},
+    "dm": {"no": ("No diabetes", "Bez diabetu"), "yes": ("Diabetes", "Diabetes")},
+    "anticoag": {"no": ("Not anticoagulated", "Bez antikoagulace"), "yes": ("Anticoagulated", "Antikoagulace")},
+    "stenting": {"no": ("No acute stent", "Bez akutního stentu"), "yes": ("Acute stent", "Akutní stent")},
 }
 
 
@@ -102,10 +129,17 @@ def _derive(d: pd.DataFrame) -> pd.DataFrame:
     d["transfer_lbl"] = d["transfer"].map({1.0: "transfer", 0.0: "direct"})
     d["sex_lbl"] = d["sex_male"].map({1.0: "male", 0.0: "female"})
     d["sich_lbl"] = d["sich"].map({1.0: "yes", 0.0: "no"})
+    d["mrs_pre_group"] = pd.cut(d["mrs_pre"], [-1, 0, 1, 2, 6], labels=["0", "1", "2", "≥3"])
+    d["glucose_group"] = pd.cut(d["glucose"], [0, 7.75, 11.05, 100], labels=["<7.8", "7.8–11.0", "≥11.1"])
+    d["proc_group"] = pd.cut(d["procedure_min"], [0, 30, 60, 90, 1e9], labels=["≤30", "31–60", "61–90", ">90"])
+    d["nihss_change"] = pd.cut(d["nihss_24h"] - d["nihss_adm"], [-100, -4, 3, 100], labels=["improved", "stable", "worse"])
+    for col, src in (("af_lbl", "arrhythmia"), ("dm_lbl", "dm"), ("anticoag_lbl", "anticoag"), ("stenting_lbl", "stenting")):
+        d[col] = d[src].map({1.0: "yes", 0.0: "no"})
     return d
 
 
-DIM_COL = {"ivt": "ivt_lbl", "transfer": "transfer_lbl", "sex": "sex_lbl", "sich": "sich_lbl"}
+DIM_COL = {"ivt": "ivt_lbl", "transfer": "transfer_lbl", "sex": "sex_lbl", "sich": "sich_lbl", "af": "af_lbl", "dm": "dm_lbl",
+           "anticoag": "anticoag_lbl", "stenting": "stenting_lbl"}
 
 
 def _breakdown(d: pd.DataFrame, dim: str, min_cell: int) -> list[dict]:
@@ -142,9 +176,26 @@ def _trend_rows(d: pd.DataFrame, min_cell: int) -> list[dict]:
             "combined": _pct((mt == "combined").mean()), "stenting": _pct(g["stenting"].mean()),
             "age80": _pct((g["age"] >= 80).mean()),
             "sich": _pct(g["sich"].mean()),
+            "proc": _med(g["procedure_min"]),
         }
         rows.append(r)
     return rows
+
+
+def _age_nihss(d: pd.DataFrame, min_cell: int) -> dict:
+    """Outcome by age band and NIHSS band. The only two-way table: cells need >= 3 * min_cell."""
+    ages, nihss = list(d["age_group"].cat.categories), list(d["nihss_group"].cat.categories)
+    cells = []
+    for a in ages:
+        row = []
+        for b in nihss:
+            g = d[(d["age_group"] == a) & (d["nihss_group"] == b)]
+            if len(g) < 3 * min_cell:
+                row.append({"suppressed": True})
+            else:
+                row.append({"n": int(len(g)), "good": _pct(g["good_outcome"].mean()), "death": _pct(g["death90"].mean())})
+        cells.append(row)
+    return {"rows": ages, "cols": nihss, "cells": cells, "min_n": 3 * min_cell}
 
 
 def _time_curve(d: pd.DataFrame, min_cell: int, reperfused_only: bool) -> list[dict]:
@@ -241,9 +292,11 @@ def build_explorer(clean: pd.DataFrame) -> dict:
             "death": _pct(d["death90"].mean()), "sich": _pct(d["sich"].mean()),
         },
         "overall": _group_stats(d, min_cell),
-        "dimensions": {k: {"label": {"en": v[0], "cs": v[1]}, "groups": _breakdown(d, k, min_cell)}
+        "dimensions": {k: {"label": {"en": v[0], "cs": v[1]}, "groups": _breakdown(d, k, min_cell),
+                           **({"note": {"en": DIM_NOTES[k][0], "cs": DIM_NOTES[k][1]}} if k in DIM_NOTES else {})}
                        for k, v in DIMENSIONS.items()},
         "time_curve": {"all": _time_curve(d, min_cell, False), "reperfused": _time_curve(d, min_cell, True)},
+        "age_nihss": _age_nihss(d, min_cell),
         "trends": _trend_rows(d, min_cell),
         "registry_years": registry_years,
         "table1": _table1(base, min_cell),

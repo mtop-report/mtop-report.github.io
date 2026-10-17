@@ -31,6 +31,7 @@ from .features import design_matrix, monotone_vector
 from .lr import export_logreg, fit_logreg
 from .paths import PRIVATE, PUBLIC, SYNTHETIC
 from .scores import PANEL, POINT_SCORES, REFIT_TERMS, apply_points_map, design, fit_points_map
+from .splines import export_spline_logreg, fit_spline_logreg
 from .train import _params, fit_lgbm, oof_lgbm
 
 UW_MRS = [1.0, 0.91, 0.76, 0.65, 0.33, 0.0, 0.0]  # utility-weighted mRS (Chaisinanunkul et al., Stroke 2015)
@@ -109,6 +110,13 @@ def _oof_logreg(Xd, y, seed):
     return p
 
 
+def _oof_spline(X, y, seed):
+    p = np.zeros(len(y))
+    for tr, va in StratifiedKFold(5, shuffle=True, random_state=seed).split(X, y):
+        p[va] = fit_spline_logreg(X.iloc[tr], y[tr], seed).predict_proba(X.iloc[va])[:, 1]
+    return p
+
+
 def _citl(y, p):
     return float(M._fit_logistic(np.zeros(len(y)), np.asarray(y, float), offset=M.logit(p), slope=False)[0])
 
@@ -133,6 +141,9 @@ def stage_comparators(stage: str, d: pd.DataFrame, X: pd.DataFrame, yg: np.ndarr
     lrm = fit_logreg(X, yg, seed)
     comp["Logistic regression"] = {"kind": "lr", "spec": export_logreg(
         lrm, list(X.columns), _citl(yg[recent], _oof_logreg(X, yg, seed)[recent]))}
+    slr = fit_spline_logreg(X, yg, seed)
+    comp["Logistic regression (splines)"] = {"kind": "spline", "spec": export_spline_logreg(
+        slr, _citl(yg[recent], _oof_spline(X, yg, seed)[recent]))}
     for name in PANEL[stage]:
         if name in POINT_SCORES:
             sc = POINT_SCORES[name](d)

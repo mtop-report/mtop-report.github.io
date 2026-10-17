@@ -21,9 +21,9 @@ import yaml
 
 
 def _template(args):
-    from .schema import template_columns
+    from .schema import OPTIONAL_COLUMNS, template_columns
 
-    Path(args.out).write_text(",".join(template_columns()) + "\n", encoding="utf-8")
+    Path(args.out).write_text(",".join(template_columns() + OPTIONAL_COLUMNS) + "\n", encoding="utf-8")
     print(f"wrote {args.out}")
 
 

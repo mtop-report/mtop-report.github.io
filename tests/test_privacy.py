@@ -17,7 +17,7 @@ from mtop.config import settings
 from mtop.paths import PUBLIC
 
 FILES = ["model_bundle.json", "validation.json", "explorer.json", "extras.json", "adaptive.json", "subgroups.json",
-         "reconciliation.json", "federated.json"]
+         "reconciliation.json", "federated.json", "associations.json"]
 
 
 def _load(name):
@@ -53,6 +53,22 @@ def test_no_identifiers_or_dates():
         if isinstance(data, dict) and "generated" in data:
             allowed.add(data["generated"])
         assert dates <= allowed, f"unexpected dates in {name}: {dates - allowed}"
+
+
+def test_explorer_two_way_table_is_coarse():
+    """The only cross-tabulation (age band x NIHSS band) needs >= 3 * min_cell patients per cell."""
+    e = _load("explorer.json")
+    k = int(settings()["privacy"]["min_cell"])
+    m = e.get("age_nihss")
+    if not m:
+        pytest.skip("no two-way table")
+    assert m["min_n"] >= 3 * k
+    for row in m["cells"]:
+        for c in row:
+            if c.get("suppressed"):
+                assert set(c) == {"suppressed"}
+            else:
+                assert c["n"] >= 3 * k
 
 
 def test_explorer_small_cells_suppressed():
@@ -160,6 +176,23 @@ def test_federated_outputs_are_aggregates():
         if k2 == "trees":                       # tree counts and learning-curve positions only
             assert isinstance(v, int) or all(isinstance(t, int) for t in v), path
     assert f["equivalence"]["gbdt"]["min_leaf"] >= int(settings()["privacy"]["min_leaf"])
+
+
+def test_associations_are_aggregates():
+    """Odds ratios only; a yes/no factor needs >= min_cell patients in each group."""
+    a = _load("associations.json")
+    k = int(settings()["privacy"]["min_cell"])
+    assert a["n"] >= 10 * k
+    keys = {t["key"] for t in a["terms"]}
+    for t in a["terms"]:
+        if t["kind"] in ("bin", "occ"):
+            assert t["n1"] >= k and t["n0"] >= k
+    for res in a["outcomes"].values():
+        assert set(res["terms"]) == keys
+        assert min(res["events"], res["n"] - res["events"]) >= 10 * k
+        for r in res["terms"].values():
+            assert r["unadjusted"]["n"] >= 10 * k
+            assert set(r["adjusted"]) == {"or", "lo", "hi"}
 
 
 def test_reconciliation_is_aggregate():

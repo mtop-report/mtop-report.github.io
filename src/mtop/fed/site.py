@@ -92,6 +92,13 @@ class SiteNode:
             f = self.folds(y, int(subset["folds"]), int(subset["seed"]))
             inside = f == int(subset["fold"])
             return idx[~inside] if subset["part"] == "train" else idx[inside]
+        if subset["kind"] == "years":
+            d, _, _ = self.cohort(stage, target)
+            if "year" not in d.columns or d["year"].isna().all():
+                raise Declined("this centre's export has no treatment year")
+            yr = d["year"].to_numpy(float)
+            lo, hi = float(subset.get("from", -np.inf)), float(subset.get("to", np.inf))
+            return idx[(yr >= lo) & (yr <= hi)]
         raise Declined(f"unknown subset {subset.get('kind')}")
 
     def describe(self) -> dict:

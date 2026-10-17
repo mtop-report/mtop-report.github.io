@@ -3,7 +3,7 @@
   "use strict";
   const T = {
     en: {
-      brandSub: "Outcome after mechanical thrombectomy",
+      brandSub: "Mechanical Thrombectomy Outcome Predictor",
       calcTitle: "Prognosis after thrombectomy",
       calcLede: "Enter what is known at each step of care. The estimate is updated as information arrives, from admission to day 7, and shows what drives it.",
       scaleAria: (p, range, obs) => `Estimate ${p} on a scale from 0 to 100%${range ? `; range across model refits ${range}` : ""}${obs ? `; similar recent patients ${obs}` : ""}.`,
@@ -95,7 +95,7 @@
       footer: "Research use only",
     },
     cs: {
-      brandSub: "Výsledek po mechanické trombektomii",
+      brandSub: "Prediktor výsledku mechanické trombektomie",
       calcTitle: "Prognóza po trombektomii",
       calcLede: "Zadejte, co je známo v jednotlivých krocích péče. Odhad se zpřesňuje s každou novou informací, od přijetí po 7. den, a ukazuje, co jej ovlivňuje.",
       scaleAria: (p, range, obs) => `Odhad ${p} na škále od 0 do 100 %${range ? `; rozpětí přes přetrénování modelu ${range}` : ""}${obs ? `; podobní nedávní pacienti ${obs}` : ""}.`,

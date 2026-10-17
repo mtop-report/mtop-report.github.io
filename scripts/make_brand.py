@@ -2,7 +2,7 @@
 
 The wordmark is drawn from real glyph outlines (so it does not depend on the font loading),
 with the O replaced by the MTOP mark: a ring holding a filled lower half whose upper edge is a
-rising wave, like a curve on a chart (the outcome we estimate, read from data).
+rising curve, like a line on a chart (the outcome we estimate, read from data).
 
     pip install "fonttools[woff]" playwright
     python scripts/make_brand.py            # writes web/assets/{logo.svg, mark.svg, *.png}
@@ -33,23 +33,47 @@ RING_R, RING_W = 370, 112    # ring: outer radius and stroke (font units)
 FILL_R = 208                 # inner filled disc, leaving a clear gap inside the ring
 
 
+CURVE = (0.42, -0.18, 2.6)   # height at the left and right edge (radii, positive = down), bend
+
+
 def wave(u: float) -> float:
     """Upper edge of the fill across the disc (u from -1 to 1), in radii, positive = down.
-    A gentle wave that rises to the right."""
-    return 0.09 - 0.15 * u - 0.08 * math.sin(math.pi * (1.45 * u + 0.4))
+    One smooth rise to the right, steep at first and then levelling off, like a curve on a chart
+    (a learning or ROC curve) rather than a wave."""
+    y0, y1, k = CURVE
+    t = (u + 1) / 2
+    return y0 + (y1 - y0) * (1 - math.exp(-k * t)) / (1 - math.exp(-k))
 
 
-def fill_path(cx: float, cy: float, r: float, n: int = 96) -> str:
-    """The part of the disc (cx, cy, r) that lies below the wave, as one closed path."""
-    pts = []
-    for i in range(n + 1):
-        x = cx - r + 2 * r * i / n
-        half = math.sqrt(max(0.0, r * r - (x - cx) ** 2))
-        top = max(cy + wave((x - cx) / r) * r, cy - half)
-        if top < cy + half - 1e-6:
-            pts.append((x, top, cy + half))
-    d = "M%.1f,%.1f" % pts[0][:2] + "".join("L%.1f,%.1f" % (x, t) for x, t, _ in pts[1:])
-    d += "".join("L%.1f,%.1f" % (x, b) for x, _, b in reversed(pts))
+def _cross(f, a: float, b: float) -> float:
+    """Root of f between a and b (f(a) and f(b) of opposite sign), by bisection."""
+    fa = f(a)
+    for _ in range(80):
+        m = (a + b) / 2
+        if (f(m) > 0) == (fa > 0):
+            a, fa = m, f(m)
+        else:
+            b = m
+    return (a + b) / 2
+
+
+def fill_path(cx: float, cy: float, r: float, n: int = 120) -> str:
+    """The part of the disc (cx, cy, r) that lies below the curve, as one closed path: along the
+    curve between the two points where it meets the circle, then back along the circle's arc, so
+    both ends close smoothly (no vertical cut where the curve leaves the disc)."""
+    inside = lambda u: abs(wave(u)) < math.sqrt(max(0.0, 1 - u * u))  # noqa: E731
+    # left end: the curve enters through the lower arc; right end: it leaves through the arc as well
+    lo = _cross(lambda u: wave(u) - math.sqrt(max(0.0, 1 - u * u)) * (1 if wave(u) > 0 else -1), -1.0, 0.0)
+    hi = _cross(lambda u: abs(wave(u)) - math.sqrt(max(0.0, 1 - u * u)), 0.0, 1.0) if not inside(1.0) else 1.0
+    pts = [(lo + (hi - lo) * i / n, None) for i in range(n + 1)]
+    d = "".join(("M" if i == 0 else "L") + "%.2f,%.2f" % (cx + u * r, cy + wave(u) * r) for i, (u, _) in enumerate(pts))
+    a0 = math.atan2(wave(hi), hi)               # angle of the right end (SVG y down)
+    a1 = math.atan2(wave(lo), lo)               # angle of the left end
+    if a1 < a0:
+        a1 += 2 * math.pi
+    for i in range(1, n + 1):                   # arc clockwise on screen: right end, bottom, left end
+        a = a0 + (a1 - a0) * i / n
+        d += "L%.2f,%.2f" % (cx + r * math.cos(a), cy + r * math.sin(a))
     return d + "Z"
 
 

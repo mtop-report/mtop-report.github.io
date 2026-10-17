@@ -261,6 +261,39 @@ def test_http_network_end_to_end(sites):
         httpd.shutdown()
 
 
+def test_jobs_on_a_range_of_treatment_years(tmp_path):
+    """Optional `year` column: a network job can use only, e.g., the most recent years."""
+    nodes = []
+    for i, n in enumerate([200, 180, 220]):
+        df = synthetic_frame(n, 300 + i)
+        df["year"] = np.random.default_rng(i).integers(2015, 2026, n)
+        f = tmp_path / f"y{i}.csv"
+        write_site_csv(df, f)
+        typed, rep = read_site_csv(f)
+        assert "year" in rep["columns_found"] and typed["year"].between(2015, 2025).all()
+        nodes.append(SiteNode("XYZ"[i], typed))
+    recent = {"kind": "years", "from": 2019, "to": 2025}
+    for s in nodes:
+        d, B, y = s.cohort(STAGE, TARGET)
+        assert len(s.rows(STAGE, TARGET, recent)) == int((d["year"] >= 2019).sum())
+    co = Coordinator(LocalTransport(nodes))
+    p = GBDTParams.default(trees=3, learning_rate=0.1, max_depth=2, min_child=20)
+    fed, _ = federated_gbdt(co, ["X", "Y", "Z"], STAGE, TARGET, recent, params=p)
+    ref = fit_gbdt(PooledNetwork.from_sites(nodes, STAGE, TARGET, recent), STAGE, TARGET, p)
+    assert fed["trees"] == ref["trees"] and fed["n"] == sum(len(s.rows(STAGE, TARGET, recent)) for s in nodes)
+    # a centre whose export has no year cannot take part in a job defined by years
+    no_year = SiteNode("W", read_site_csv(_write(tmp_path, synthetic_frame(150, 9)))[0])
+    co2 = Coordinator(LocalTransport(nodes[:2] + [no_year]))
+    with pytest.raises(JobFailed, match="no treatment year"):
+        federated_gbdt(co2, ["X", "Y", "W"], STAGE, TARGET, recent, params=p)
+
+
+def _write(tmp_path, df):
+    f = tmp_path / f"w{len(df)}.csv"
+    write_site_csv(df, f)
+    return f
+
+
 def test_template_columns_are_the_shared_dictionary():
     from mtop.extras import template_columns as extras_template
 

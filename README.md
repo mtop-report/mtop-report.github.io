@@ -1,4 +1,6 @@
-# MTOP: staged, explainable outcome prediction after mechanical thrombectomy
+# MTOP · Mechanical Thrombectomy Outcome Predictor
+
+Staged, explainable outcome prediction after mechanical thrombectomy.
 
 MTOP estimates the chance that a patient treated with mechanical thrombectomy (MT) for acute
 ischaemic stroke will be **functionally independent (mRS 0–2) at 90 days**, and the chance of
@@ -30,11 +32,16 @@ with its typeface bundled, so opening it contacts no third-party server.
   ("of recent registry patients with a similar estimate, X % reached mRS 0–2"). Unknown inputs
   are averaged over the registry's values. English and Czech.
   *New in v1.1 (beta):* the full predicted 90-day mRS distribution with a 100-patient view,
-  a bootstrap uncertainty range, the same patient scored by logistic regression and six published
-  scores or predictor sets, and clearly marked previews of candidate predictors (GFAP, imaging).
-- **Registry.** 90-day mRS distributions (Grotta bars) by 13 subgroups, outcome by time to
-  puncture, two decades of trends (volume, age, reperfusion, technique, anaesthesia), data
-  completeness by year, and Table 1. Aggregates only; groups under 10 patients are hidden.
+  a bootstrap uncertainty range, the same patient scored by logistic regression (linear and with
+  splines), the FNO bedside score and six published scores or predictor sets, and clearly marked
+  previews of candidate predictors (GFAP, imaging). On a wide screen a slim copy of the estimate
+  stays at the top once the full card scrolls away, so the explanations below remain visible.
+- **Registry.** 90-day mRS distributions (Grotta bars) by 21 subgroups, outcome by age and NIHSS
+  together (cells under 30 patients hidden), factors associated with the 90-day outcome (unadjusted
+  and adjusted odds ratios; missing values handled by multiple imputation), outcome by time to
+  puncture, two decades of trends (volume, age, thrombolysis, transfers, times, reperfusion, sICH,
+  technique, anaesthesia, stenting), data completeness by year, and Table 1. Aggregates only;
+  groups under 10 patients are hidden.
 - **Validation.** Temporal validation of every stage against logistic regression, XGBoost, an
   MLP and published scores, with ROC, calibration, decision curves, subgroup performance and an
   explanation of the post-2020 outcome drift.
@@ -42,17 +49,20 @@ with its typeface bundled, so opening it contacts no third-party server.
   by year 2018–2025 (frozen, intercept or logistic recalibration, refit, refit + recalibration,
   sliding window), a drift monitor with control limits, data availability by year, a draft update
   policy and the model version history with its SHA-256 fingerprint.
-- **Multicentre** *(v1.1 beta).* Any centre can validate MTOP on its own registry export inside the
-  browser (CSV or Excel; nothing is uploaded) and export a results file with aggregate metrics
-  only. Results from several sites are pooled in a random-effects meta-analysis (forest plot);
-  until partners join, the four FNO treatment eras (internal–external validation) stand in.
-- **Federated** *(beta).* A working federated network: hospitals train and validate a shared
+- **Multicentre** *(beta).* Two parts.
+  *Learn together:* a working federated network in which hospitals train and validate a shared
   model without moving patient data (secure aggregation; the result equals pooled training bit for
-  bit). Demonstrated on four virtual centres from the FNO registry: for 90-day death the network
-  raised the mean AUROC at the centres' own patients from 0.742 to 0.780, and a centre with only
-  50 patients went from 0.57 alone to 0.77. See [docs/federated.md](docs/federated.md).
+  bit), with the Adaptive tab's update strategies run as network jobs on ranges of treatment
+  years. Demonstrated on four virtual centres that are FNO's own patients split by treatment
+  years: for 90-day death the network raised the mean AUROC at the centres' own patients from
+  0.742 to 0.780, and a centre with only 50 patients went from 0.57 alone to 0.77
+  ([docs/federated.md](docs/federated.md)).
+  *Validate on your data:* any centre can validate MTOP on its own registry export inside the
+  browser (CSV or Excel; nothing is uploaded) and export a results file with aggregate metrics
+  only; results from several sites are pooled in a random-effects meta-analysis.
 - **Roadmap** *(v1.1).* What is live, what is new, what is in progress and what is proposed.
-- **About.** Methods, limits, privacy, authors, QR code.
+- **About.** Methods, limits, privacy, authors, QR code, and the data dictionary: every predictor,
+  its options and how the registry's values were coded ([docs/data_dictionary.md](docs/data_dictionary.md)).
 
 ## Results (temporal validation, patients treated 2021–2025)
 
@@ -150,14 +160,14 @@ python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 
 # put the registry export at data/raw/mt_patients_master.xlsx, then:
-python -m mtop all            # clean → train → export → explorer → report → site  (~15 min)
+python -m mtop all            # clean → train → export → … → explorer → associations → report → site
 open site/index.html          # the app; works offline from the file
 
 # no data at hand? use the synthetic registry
 python -m mtop all --input data/synthetic/registry_synthetic.xlsx --quick
 ```
 
-Individual steps: `python -m mtop clean | train [--quick] | export | extras [--quick] | compare | reconcile | adaptive | fed-demo | explorer | report | site | synth`.
+Individual steps: `python -m mtop clean | train [--quick] | export | extras [--quick] | compare | reconcile | adaptive | fed-demo | explorer | associations | report | site | synth`.
 
 ## Updating with new patients
 
@@ -171,7 +181,7 @@ Individual steps: `python -m mtop clean | train [--quick] | export | extras [--q
 ```
 config/            features.yaml (predictors, stages, UI labels EN/CZ), settings.yaml, federated.yaml
 src/mtop/          clean · cohort · features · train · lr · splines · metrics · scores · export · extras · compare ·
-                   reconcile · adaptive · explorer · report · site · synth · cli
+                   reconcile · adaptive · explorer · associations · report · site · synth · cli
 src/mtop/fed/      federated network: schema · bins · secagg · gbdt · logreg · site · coordinator · server · client · demo
 web/               index.html template, styles.css, app.js + view_*.js, charts.js, model.js (trees + TreeSHAP),
                    models_extra.js (comparators, mRS layer), metrics.js (in-browser validation), i18n.js,
@@ -180,7 +190,7 @@ scripts/           check_no_patient_data.sh (CI guard), make_brand.py (regenerat
 artifacts/public/  published model bundle, validation and explorer aggregates (committed)
 data/synthetic/    synthetic registry for CI and demos (committed)
 tests/             cleaning rules, JS↔LightGBM parity, privacy rules, federated network, end-to-end synthetic run
-docs/              model card (TRIPOD+AI), federated network
+docs/              model card (TRIPOD+AI), data dictionary, federated network
 .github/workflows/ ci.yml (tests), pages.yml (build and deploy the app)
 ```
 

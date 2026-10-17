@@ -22,10 +22,11 @@
   const target = (t) => (t === "good_outcome" ? tx("Functional independence", "Funkční nezávislost") : tx("Death by 90 days", "Úmrtí do 90 dní"));
   const centre = (id) => tx(`Centre ${id}`, `Centrum ${id}`);
   const era = (id) => (F.centres.find((c) => c.id === id) || {}).era || "";
+  const centreEra = (id) => `${centre(id)} (${era(id)})`;
   const pts = (n) => tx(`${num(n)} patients`, `${num(n)} pacientů`);
   const stageName = (s) => A.stageLabel(s);
   const svgEl = (tag, attrs, parent) => C.s(tag, attrs, parent);
-  const viewWidth = () => (document.getElementById("view-federated") || document.body).clientWidth;
+  const viewWidth = () => (document.getElementById("view-network") || document.body).clientWidth;
   function responsive(el, draw) {
     let last = 0;
     const run = () => { const w = Math.floor(el.clientWidth); if (w > 0 && Math.abs(w - last) > 2) { last = w; draw(w); } };
@@ -57,18 +58,32 @@
       h("p", { text: tx(
         "MTOP can be trained across stroke centres without moving a single patient record. Each hospital runs a small node that answers the network's questions with masked sums; the coordinator adds them up and learns exactly what pooling the data would have taught. Below, a working network of four centres.",
         "MTOP lze trénovat napříč iktovými centry bez přesunu jediného záznamu pacienta. Každá nemocnice provozuje malý uzel, který na dotazy sítě odpovídá maskovanými součty; koordinátor je sečte a naučí se přesně to, co by ho naučila sloučená data. Níže je funkční síť čtyř center.") }))));
+    root.appendChild(demoCallout());
     root.appendChild(kpis());
     root.appendChild(liveCard(res, rerender));
     root.appendChild(centresCard(res, rerender));
     root.appendChild(h("div", { class: "grid-2 block" }, sizeCard(res), growthCard(res)));
     root.appendChild(stagesCard());
     root.appendChild(losoCard(res));
+    root.appendChild(adaptiveCard());
     root.appendChild(privacyCard());
     root.appendChild(proofCard());
     root.appendChild(joinCard());
     root.appendChild(h("p", { class: "note fx-demo-note", text: tx(
       `About this demo: the four centres are FNO's own thrombectomy registry split by treatment era (A ${era("A")}, B ${era("B")}, C ${era("C")}, D ${era("D")}). Each centre's data were exported in the MTOP template and read by its own node. Inside every centre, ${F.folds}-fold cross-validation kept a fifth of the patients aside, and each centre scored its own held-out patients. Model: boosted trees at admission (${F.recipe.trees} trees, depth ${F.recipe.max_depth}, learning rate ${num(F.recipe.learning_rate, 2)}, at least ${F.recipe.min_child} patients per leaf, monotone constraints). Real partner centres differ more in case mix and practice; measuring that is what the network is for.`,
       `O této ukázce: čtyři centra jsou registr trombektomií FNO rozdělený podle období léčby (A ${era("A")}, B ${era("B")}, C ${era("C")}, D ${era("D")}). Data každého centra byla exportována do šablony MTOP a načtena jeho vlastním uzlem. V každém centru se při ${F.folds}násobné křížové validaci odložila pětina pacientů a každé centrum hodnotilo své vlastní odložené pacienty. Model: boosting stromů při přijetí (${F.recipe.trees} stromů, hloubka ${F.recipe.max_depth}, rychlost učení ${num(F.recipe.learning_rate, 2)}, nejméně ${F.recipe.min_child} pacientů v listu, monotónní omezení). Skutečná partnerská centra se liší více, a právě to by síť měřila.`) }));
+  }
+
+  // ================================================================== what the demo centres are
+  function demoCallout() {
+    const eras = F.centres.map((c) => h("span", { class: "fx-era" }, h("b", { text: c.id }), ` ${c.era}`));
+    return h("div", { class: "fx-callout", role: "note" },
+      h("div", { class: "fx-callout-t", text: tx("The four centres in this demo are FNO's own patients, split by treatment years",
+        "Čtyři centra v této ukázce jsou vlastní pacienti FNO rozdělení podle let léčby") }),
+      h("div", { class: "fx-eras" }, eras),
+      h("p", { text: tx(
+        "No other hospital is involved yet. Each period's patients were exported to the shared template and run as a separate node, exactly as a partner hospital would. The periods differ in practice and case mix, so they behave like different centres; real partner centres would differ more, and measuring that is what joining the network is for.",
+        "Žádná jiná nemocnice zatím zapojena není. Pacienti každého období byli exportováni do společné šablony a spuštěni jako samostatný uzel, přesně jako by to udělala partnerská nemocnice. Období se liší praxí i skladbou pacientů, takže se chovají jako různá centra; skutečná partnerská centra by se lišila více, a právě to by zapojení do sítě změřilo.") }));
   }
 
   // ================================================================== headline numbers
@@ -178,7 +193,7 @@
       const t1 = C.s("text", { x, y: y - 4, "text-anchor": "middle", class: "fx-node-t" }, g);
       t1.textContent = centre(id);
       const t2 = C.s("text", { x, y: y + 16, "text-anchor": "middle", class: "fx-node-s" }, g);
-      t2.textContent = narrow ? `${c.era} · ${num(c[S.fedTarget].n)}` : `${c.era} · ${pts(c[S.fedTarget].n)}`;
+      t2.textContent = narrow ? `${c.era} · ${num(c[S.fedTarget].n)}` : `FNO ${c.era} · ${num(c[S.fedTarget].n)}`;
       return { x, y, p, chip };
     });
     const hg = svgEl("g", { class: "fx-hub" }, nodes);
@@ -318,7 +333,7 @@
     // calibration detail
     const det = h("details", { class: "fx-details" });
     det.appendChild(h("summary", { text: tx("Calibration at each centre", "Kalibrace v jednotlivých centrech") }));
-    const rows = res.per_centre.map((e) => [centre(e.id), ...MODELS.map((m) => signed(e[m].citl, 2)), ...MODELS.map((m) => num(e[m].slope, 2))]);
+    const rows = res.per_centre.map((e) => [centreEra(e.id), ...MODELS.map((m) => signed(e[m].citl, 2)), ...MODELS.map((m) => num(e[m].slope, 2))]);
     const calTbl = C.dataTable([tx("Centre", "Centrum"),
       ...MODELS.map((m) => `CITL · ${name[m]()}`), ...MODELS.map((m) => `${tx("Slope", "Sklon")} · ${name[m]()}`)], rows);
     calTbl.className = "data compact";
@@ -369,7 +384,7 @@
         MODELS.forEach((m) => {
           const dot = svgEl("circle", { cx: X(e[m].auroc), cy: yMid, r: 7, class: `fx-mark ${m}`, tabindex: 0,
             "aria-label": `${centre(e.id)}, ${name[m]()}: AUROC ${num(e[m].auroc, 3)}` }, svg);
-          const show = (cx, cy) => C.tip.show(`${centre(e.id)} · ${name[m]()}`, [
+          const show = (cx, cy) => C.tip.show(`${centreEra(e.id)} · ${name[m]()}`, [
             { label: "AUROC (95% CI)", value: e[m].auroc_ci ? `${num(e[m].auroc, 3)} (${num(e[m].auroc_ci[0], 2)}–${num(e[m].auroc_ci[1], 2)})` : num(e[m].auroc, 3) },
             ...(m !== "alone" && e[`gain_${m}`] ? [{ label: tx("Gain vs alone (95% CI)", "Zisk oproti samotnému (95% CI)"),
               value: `${signed(e[`gain_${m}`].mean, 3)} (${signed(e[`gain_${m}`].ci[0], 3)} až ${signed(e[`gain_${m}`].ci[1], 3)})`.replace(" až ", tx(" to ", " až ")) }] : []),
@@ -429,14 +444,14 @@
       title: tx("What each additional centre adds", "Co přidá každé další centrum"),
       sub: tx(`${target(S.fedTarget)}: AUROC at a centre by the number of centres learning together`, `${target(S.fedTarget)}: AUROC v centru podle počtu společně se učících center`),
       legend: [{ label: tx("Average", "Průměr"), color: COL.network, type: "line" }, { label: tx("Individual centres", "Jednotlivá centra"), color: "var(--line-3)", type: "line" }],
-      table: { columns: [tx("Centres", "Center"), ...ids.map(centre), tx("Average", "Průměr")], rows: cats.map((c, i) => [c, ...ids.map((id) => num(g[id][i], 3)), num(g.mean[i], 3)]) },
+      table: { columns: [tx("Centres", "Center"), ...ids.map(centreEra), tx("Average", "Průměr")], rows: cats.map((c, i) => [c, ...ids.map((id) => num(g[id][i], 3)), num(g.mean[i], 3)]) },
       labels: { table: A.t().showTable, chart: A.t().showChart },
     });
     const vals = ids.flatMap((id) => g[id]);
     C.lineChart(fig.body, {
       height: 240, x: { type: "cat", cats, title: tx("centres in the network", "center v síti") },
       y: { domain: [Math.floor((Math.min(...vals) - 0.01) * 20) / 20, Math.ceil((Math.max(...vals) + 0.01) * 20) / 20], fmt: (v) => num(v, 2) },
-      series: ids.map((id) => ({ label: centre(id), color: "var(--line-3)", width: 1.25, points: g[id].map((y, i) => ({ x: i, y })) }))
+      series: ids.map((id) => ({ label: centreEra(id), color: "var(--line-3)", width: 1.25, points: g[id].map((y, i) => ({ x: i, y })) }))
         .concat([{ label: tx("Average", "Průměr"), color: COL.network, width: 2.75, dots: true, points: g.mean.map((y, i) => ({ x: i, y })) }]),
       tipFmt: (v) => num(v, 3), tipHead: (i) => tx(`${cats[i]} ${i === 0 ? "centre" : "centres"}`, `${cats[i]} ${i === 0 ? "centrum" : i < 4 ? "centra" : "center"}`),
     });
@@ -492,12 +507,12 @@
       sub: tx(`${target(S.fedTarget)}: a network of three centres trained the model; the fourth tested it on all its patients, at home. Only the result left the centre.`,
         `${target(S.fedTarget)}: model natrénovala síť tří center; čtvrté ho otestovalo na všech svých pacientech, doma. Centrum opustil jen výsledek.`),
       table: { columns: [tx("Tested at", "Testováno v"), tx("Trained by", "Trénovaly"), "AUROC (95% CI)", "CITL", tx("Slope", "Sklon")],
-        rows: res.loso.map((r) => [centre(r.id), r.trained_on.join(" + "), `${num(r.auroc, 3)} (${num(r.auroc_ci[0], 2)}–${num(r.auroc_ci[1], 2)})`, signed(r.citl, 2), num(r.slope, 2)]) },
+        rows: res.loso.map((r) => [centreEra(r.id), r.trained_on.join(" + "), `${num(r.auroc, 3)} (${num(r.auroc_ci[0], 2)}–${num(r.auroc_ci[1], 2)})`, signed(r.citl, 2), num(r.slope, 2)]) },
       labels: { table: A.t().showTable, chart: A.t().showChart },
     });
     const vals = res.loso.flatMap((r) => r.auroc_ci);
     C.forest(fig.body, {
-      rows: res.loso.map((r) => ({ label: centre(r.id), sub: tx(`trained by ${r.trained_on.join(" + ")}`, `trénovaly ${r.trained_on.join(" + ")}`), est: r.auroc, lo: r.auroc_ci[0], hi: r.auroc_ci[1],
+      rows: res.loso.map((r) => ({ label: centreEra(r.id), sub: tx(`trained by ${r.trained_on.join(" + ")}`, `trénovaly ${r.trained_on.join(" + ")}`), est: r.auroc, lo: r.auroc_ci[0], hi: r.auroc_ci[1],
         weight: r.n, display: `${num(r.auroc, 2)} (${num(r.auroc_ci[0], 2)}–${num(r.auroc_ci[1], 2)})`, color: "var(--c1)" })),
       domain: [Math.floor((Math.min(...vals) - 0.02) * 20) / 20, Math.min(1, Math.ceil((Math.max(...vals) + 0.02) * 20) / 20)], fmt: (v) => num(v, 2),
     });
@@ -506,6 +521,39 @@
       `Discrimination carries over to a centre the model has never seen. Calibration is where centres differ (largest at ${centre(worst.id)}: CITL ${signed(worst.citl, 2)}), which a centre can measure and correct locally before use.`,
       `Rozlišovací schopnost se přenáší i do centra, které model nikdy neviděl. Centra se liší v kalibraci (nejvíce ${centre(worst.id)}: CITL ${signed(worst.citl, 2)}), kterou si centrum může před použitím změřit a opravit na místě.`) }));
     return box;
+  }
+
+  // ================================================================== keeping the model up to date
+  function adaptiveCard() {
+    const card = h("div", { class: "card card-pad block" });
+    card.appendChild(h("div", { class: "chart-head" }, h("div", null,
+      h("div", { class: "chart-title", text: tx("Keeping the shared model up to date", "Jak udržet sdílený model aktuální") }),
+      h("div", { class: "chart-sub", text: tx("The Adaptive tab's strategies, run as network jobs on a range of treatment years",
+        "Strategie ze záložky Adaptace, spuštěné jako úlohy sítě na zvoleném rozmezí let léčby") }))));
+    const rows = [
+      [tx("Drift monitor", "Monitor driftu"), tx("A validation job for each year: network-wide AUROC and calibration from masked counts. Each centre also tracks its own patients at home.",
+        "Validační úloha pro každý rok: AUROC a kalibrace celé sítě z maskovaných počtů. Každé centrum navíc sleduje vlastní pacienty doma.")],
+      [tx("Intercept recalibration", "Rekalibrace interceptu"), tx("A few Newton steps on one number: the shared model is shifted to the outcome rate of recent years.",
+        "Několik Newtonových kroků na jednom čísle: sdílený model se posune k podílu výsledků posledních let.")],
+      [tx("Logistic recalibration", "Logistická rekalibrace"), tx("The same with intercept and slope.", "Totéž s interceptem i sklonem.")],
+      [tx("Refit", "Přetrénování"), tx("A new training job on all years at every centre.", "Nová trénovací úloha na všech letech ve všech centrech.")],
+      [tx("Refit + recalibration (MTOP's current policy)", "Přetrénování + rekalibrace (současná pravidla MTOP)"), tx("Training on all years, then recalibration on the latest years.",
+        "Trénování na všech letech, poté rekalibrace na posledních letech.")],
+      [tx("Sliding window", "Posuvné okno"), tx("Training only on the last few years at every centre.", "Trénování jen na posledních několika letech v každém centru.")],
+      [tx("Centre-specific calibration", "Kalibrace pro jedno centrum"), tx("Each centre shifts the shared model to its own patients locally (the adapted option above); nothing is shared.",
+        "Každé centrum si sdílený model posune ke svým pacientům samo (doladění výše); nic se nesdílí.")],
+    ];
+    const tbl = h("table", { class: "data fx-table fx-map" });
+    tbl.appendChild(h("thead", null, h("tr", null, h("th", { scope: "col", text: tx("Strategy", "Strategie") }), h("th", { scope: "col", class: "txt", text: tx("In the network", "V síti") }))));
+    tbl.appendChild(h("tbody", null, rows.map(([a, b]) => h("tr", null, h("th", { scope: "row", text: a }), h("td", { class: "txt", text: b })))));
+    card.appendChild(h("div", { class: "table-scroll" }, tbl));
+    const go = h("button", { class: "btn btn-ghost", type: "button", text: tx("Open the Adaptive tab", "Otevřít záložku Adaptace") });
+    go.addEventListener("click", () => A.goTo("adaptive"));
+    card.appendChild(h("p", { class: "note", text: tx(
+      "All of these use job types the network already runs (training, Newton recalibration, validation counts), restricted to a range of treatment years. Centres add the optional year column to their export; like everything else, it never leaves the hospital. The update policy itself (how often, which strategy, which alarms) is agreed by the network in advance.",
+      "Všechny využívají typy úloh, které síť už provádí (trénování, Newtonova rekalibrace, validační počty), omezené na rozmezí let léčby. Centra přidají do exportu volitelný sloupec s rokem; stejně jako vše ostatní nemocnici neopustí. Samotná pravidla aktualizace (jak často, jaká strategie, jaké alarmy) si síť dohodne předem.") }));
+    card.appendChild(go);
+    return card;
   }
 
   // ================================================================== privacy
@@ -622,13 +670,13 @@
     });
     const tplBtn = h("button", { class: "btn", type: "button", text: tx("Download the template", "Stáhnout šablonu") });
     tplBtn.addEventListener("click", () => {
-      const cols = A.B.features.filter((f) => f.type !== "derived").map((f) => f.key).concat(["mrs90"]);
+      const cols = A.B.features.filter((f) => f.type !== "derived").map((f) => f.key).concat(["mrs90", "year"]);
       const blob = new Blob([cols.join(",") + "\n"], { type: "text/csv" });
       const a = h("a", { href: URL.createObjectURL(blob), download: "mtop_template.csv" });
       document.body.appendChild(a); a.click(); a.remove();
     });
     const netBtn = h("button", { class: "btn btn-ghost", type: "button", text: tx("Check your data in the browser", "Ověřit data v prohlížeči") });
-    netBtn.addEventListener("click", () => A.goTo("network"));
+    netBtn.addEventListener("click", () => A.goTo("validate"));
     const steps = [
       [tx("Agree", "Dohoda"), tx("Join the protocol and the shared data dictionary. Patient rows never leave your hospital; the coordinator's role is set out in a processing agreement, and your ethics committee and data protection officer confirm local participation and the agreements your institution needs.",
         "Přistoupení k protokolu a společnému datovému slovníku. Řádky pacientů nikdy neopustí vaši nemocnici; roli koordinátora upravuje smlouva o zpracování a místní účast i potřebné smlouvy potvrdí vaše etická komise a pověřenec pro ochranu osobních údajů.")],
@@ -648,5 +696,5 @@
     return card;
   }
 
-  A.registerView("federated", () => tx("Federated", "Federované učení"), render);
+  A.renderFederated = render;   // shown as the first part of the Multicentre tab (view_network.js)
 })();
