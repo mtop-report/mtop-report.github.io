@@ -2,7 +2,7 @@
 
 The wordmark is drawn from real glyph outlines (so it does not depend on the font loading),
 with the O replaced by the MTOP mark: a ring holding a filled lower half whose upper edge is a
-rising curve, like a line on a chart (the outcome we estimate, read from data).
+rising S-curve, the logistic curve that turns a model's score into a probability.
 
     pip install "fonttools[woff]" playwright
     python scripts/make_brand.py            # writes web/assets/{logo.svg, mark.svg, *.png}
@@ -33,16 +33,16 @@ RING_R, RING_W = 370, 112    # ring: outer radius and stroke (font units)
 FILL_R = 208                 # inner filled disc, leaving a clear gap inside the ring
 
 
-CURVE = (0.42, -0.18, 2.6)   # height at the left and right edge (radii, positive = down), bend
+CURVE = (0.40, -0.20, 4.0, -0.1)   # height at the left and right edge (radii, positive = down), steepness, midpoint
 
 
 def wave(u: float) -> float:
     """Upper edge of the fill across the disc (u from -1 to 1), in radii, positive = down.
-    One smooth rise to the right, steep at first and then levelling off, like a curve on a chart
-    (a learning or ROC curve) rather than a wave."""
-    y0, y1, k = CURVE
-    t = (u + 1) / 2
-    return y0 + (y1 - y0) * (1 - math.exp(-k * t)) / (1 - math.exp(-k))
+    An S-shaped rise to the right: a logistic curve, the sigmoid that turns a model's score into a
+    probability, flat at both ends and steepest just left of the centre."""
+    y0, y1, k, mid = CURVE
+    s = lambda z: 1 / (1 + math.exp(-k * (z - mid)))  # noqa: E731
+    return y0 + (y1 - y0) * (s(u) - s(-1)) / (s(1) - s(-1))
 
 
 def _cross(f, a: float, b: float) -> float:
