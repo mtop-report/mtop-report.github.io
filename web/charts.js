@@ -345,7 +345,7 @@
           rect.addEventListener("blur", () => tip.hide());
           if (rw >= 30) {
             txt(svg, rx + rw / 2, yTop + barH / 2 + 4, `${Math.round(v)}`, {
-              "text-anchor": "middle", style: `fill:${inkFor(rect)}; font-size:11px; font-weight:600; pointer-events:none`,
+              "text-anchor": "middle", style: `fill:${inkFor(rect, o.colors[k])}; font-size:11px; font-weight:600; pointer-events:none`,
             });
           }
           x += w;
@@ -355,8 +355,11 @@
     });
   }
 
-  /** White or ink text for a label sitting on a coloured fill, by the fill's luminance. */
-  function inkFor(node) {
+  /** Text colour for a label on a coloured fill: the fill's own "-ink" token when it has one (so it follows
+   *  the light or dark theme), otherwise white or ink by the fill's luminance. */
+  function inkFor(node, color) {
+    const v = /^var\((--[\w-]+)\)$/.exec(color || "");
+    if (v && getComputedStyle(document.documentElement).getPropertyValue(`${v[1]}-ink`).trim()) return `var(${v[1]}-ink)`;
     const c = getComputedStyle(node).fill || "";
     const m = c.match(/rgba?\(([\d.]+),\s*([\d.]+),\s*([\d.]+)/);
     if (!m) return "#ffffff";

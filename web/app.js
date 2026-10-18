@@ -25,6 +25,43 @@
   const L = (o) => (o && typeof o === "object" ? o[lang] || o.en : o);
   const tx = (en, cs) => (lang === "cs" ? cs : en);
 
+  // light or dark: the stored choice, otherwise the system setting (followed until one is chosen here)
+  const darkQuery = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
+  const storedTheme = () => { const v = store.get("mtop.theme", ""); return v === "dark" || v === "light" ? v : null; };
+  let theme = storedTheme() || (darkQuery && darkQuery.matches ? "dark" : "light");
+  const themeTitle = () => (theme === "dark" ? tx("Switch to light mode", "Přepnout na světlý režim") : tx("Switch to dark mode", "Přepnout na tmavý režim"));
+  function applyTheme() {
+    document.documentElement.setAttribute("data-theme", theme);
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute("content", theme === "dark" ? "#0a1120" : "#ffffff");
+    const b = document.querySelector(".theme-tog");
+    if (b) { b.setAttribute("aria-pressed", String(theme === "dark")); b.title = themeTitle(); }
+  }
+  applyTheme();
+  if (darkQuery && darkQuery.addEventListener) {
+    darkQuery.addEventListener("change", (e) => { if (!storedTheme()) { theme = e.matches ? "dark" : "light"; applyTheme(); } });
+  }
+  function toggleTheme(ev) {
+    const next = theme === "dark" ? "light" : "dark";
+    store.set("mtop.theme", next);
+    const swap = () => { theme = next; applyTheme(); };
+    const still = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (!document.startViewTransition || still || !ev || !ev.currentTarget) { swap(); return; }
+    // the new theme spreads out from the switch
+    const r = ev.currentTarget.getBoundingClientRect();
+    const x = r.left + r.width / 2, y = r.top + r.height / 2;
+    const R = Math.hypot(Math.max(x, window.innerWidth - x), Math.max(y, window.innerHeight - y));
+    const root = document.documentElement;
+    root.classList.add("theme-sweep");
+    const vt = document.startViewTransition(swap);
+    vt.ready.then(() => root.animate({ clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${R}px at ${x}px ${y}px)`] },
+      { duration: 640, easing: "cubic-bezier(0.65, 0, 0.35, 1)", pseudoElement: "::view-transition-new(root)" })).catch(() => {});
+    vt.finished.catch(() => {}).then(() => root.classList.remove("theme-sweep"));
+  }
+  const THEME_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">'
+    + '<g class="ti-sun"><circle cx="12" cy="12" r="4.4"/><path d="M12 2.4v2.2M12 19.4v2.2M2.4 12h2.2M19.4 12h2.2M5.2 5.2l1.55 1.55M17.25 17.25l1.55 1.55M5.2 18.8l1.55-1.55M17.25 6.75l1.55-1.55"/></g>'
+    + '<path class="ti-moon" d="M20.2 14.9A8.4 8.4 0 0 1 9.1 3.8a8.4 8.4 0 1 0 11.1 11.1Z"/></svg>';
+
   const STAGES = B.stages.map((s) => s.id);
   const STAGE = Object.fromEntries(B.stages.map((s) => [s.id, s]));
   const FEAT = Object.fromEntries(B.features.map((f) => [f.key, f]));
@@ -256,7 +293,11 @@
       if (a && nav.scrollWidth > nav.clientWidth) nav.scrollLeft = Math.max(0, a.offsetLeft - (nav.clientWidth - a.offsetWidth) / 2);
       edge();
     });
-    return h("header", { class: "top" }, h("div", { class: "top-inner" }, brand, nav, langSw));
+    const themeSw = h("button", {
+      type: "button", class: "theme-tog", "aria-pressed": String(theme === "dark"),
+      "aria-label": tx("Dark mode", "Tmavý režim"), title: themeTitle(), onclick: (e) => toggleTheme(e), html: THEME_ICON,
+    });
+    return h("header", { class: "top" }, h("div", { class: "top-inner" }, brand, nav, h("div", { class: "top-tools" }, langSw, themeSw)));
   }
 
   function mainEl() {
@@ -1066,7 +1107,10 @@
         const v = good ? cell.good : cell.death;
         const f = Math.max(0, Math.min(1, v / top));
         const rgb = lerp(lo, hi, f);
-        return h("td", { style: `background:rgb(${rgb.join(",")});color:${f > 0.52 ? "#ffffff" : "var(--ink)"}` },
+        // the colours follow the theme (CSS tokens); rgb() stays as the fallback without color-mix()
+        const k = good ? "good" : "bad";
+        return h("td", { style: `background:rgb(${rgb.join(",")});background:color-mix(in srgb, var(--heat-${k}-hi) ${Math.round(f * 100)}%, var(--heat-${k}-lo));`
+          + `color:${f > 0.64 ? "var(--heat-ink-hi)" : "var(--ink)"}` },
           h("b", { text: pct100(v, 0) }), h("span", { text: `n ${num(cell.n)}` }));
       })));
     });

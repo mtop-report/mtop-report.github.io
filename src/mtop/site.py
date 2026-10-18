@@ -37,7 +37,10 @@ PAGE_HEAD = """<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="%(theme)s">
-<meta name="color-scheme" content="light">
+<meta name="color-scheme" content="light dark">
+<script>/* light or dark before the first paint: the stored choice, else the system setting */
+(function(){try{var t=localStorage.getItem("mtop.theme");if(t!=="dark"&&t!=="light")t=matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";
+document.documentElement.setAttribute("data-theme",t);if(t==="dark")document.querySelector('meta[name="theme-color"]').setAttribute("content","#0a1120");}catch(e){}})();</script>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" type="image/svg+xml" href="mark.svg">
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">

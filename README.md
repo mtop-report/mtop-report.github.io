@@ -38,7 +38,8 @@ with its typeface bundled, so opening it contacts no third-party server.
   registry's values. By default each stage uses the model chosen by the pre-specified rule; any
   other published model can be selected, and every model and published score is shown side by
   side for the same patient. Also the full 90-day mRS distribution with a 100-patient view and a
-  bootstrap uncertainty range. English and Czech.
+  bootstrap uncertainty range. English and Czech; light and dark themes (follows the system setting
+  until one is chosen with the switch in the header).
 - **Registry.** *Outcomes and trends:* 90-day mRS distributions (Grotta bars) by 21 subgroups,
   outcome by age and NIHSS, factors associated with the outcome (unadjusted and adjusted odds
   ratios, multiple imputation), outcome by time to puncture and two decades of trends.
