@@ -110,7 +110,7 @@ REFIT_TERMS = {
                                        ("num", "aspects"), ("num", "onset_to_puncture"), ("bin", "stroke_prior")],
     "MR PREDICTS@24H": [
         ("num", "age"), ("num", "nihss_adm"), ("num", "mrs_pre"), ("bin", "dm"),
-        ("in", "occlusion", ["M1"]), ("in", "occlusion", ["distal", "basilar", "other_posterior"]),
+        ("in", "occlusion", ["M1"]), ("in", "occlusion", ["M2", "basilar", "other_posterior"]),
         ("num", "tici"), ("min", "nihss_24h", 12), ("max0", "nihss_24h", 12), ("bin", "sich"),
     ],
 }

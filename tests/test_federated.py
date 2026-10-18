@@ -43,7 +43,7 @@ def synthetic_frame(n: int, seed: int) -> pd.DataFrame:
     aspects = maybe(rng.integers(4, 11, n), 0.1)
     df = pd.DataFrame({
         "age": age, "sex_male": rng.integers(0, 2, n).astype(float), "mrs_pre": mrs_pre, "nihss_adm": nihss,
-        "aspects": aspects, "occlusion": rng.choice(["ICA", "M1", "distal", "basilar"], n, p=[0.2, 0.5, 0.2, 0.1]),
+        "aspects": aspects, "occlusion": rng.choice(["ICA", "M1", "M2", "basilar"], n, p=[0.2, 0.5, 0.2, 0.1]),
         "side_left": rng.integers(0, 2, n).astype(float), "onset_to_puncture": maybe(rng.integers(60, 600, n), 0.15),
         "ivt": rng.integers(0, 2, n).astype(float), "transfer": rng.integers(0, 2, n).astype(float),
         "glucose": maybe(np.round(rng.uniform(4, 15, n), 1), 0.1), "sbp": maybe(rng.integers(100, 220, n), 0.05),
@@ -58,7 +58,7 @@ def synthetic_frame(n: int, seed: int) -> pd.DataFrame:
         "antithrombotic": rng.choice(["none", "antiplatelet", "anticoagulant"], n, p=[0.55, 0.3, 0.15]),
         "tici": rng.choice([0.0, 1.0, 2.0, 2.5, 3.0, 4.0], n, p=[0.05, 0.03, 0.07, 0.05, 0.4, 0.4]),
         "procedure_min": maybe(rng.integers(10, 150, n), 0.1),
-        "technique": rng.choice(["aspiration", "stent_retriever", "combined"], n),
+        "technique": rng.choice(["aspiration", "stent_retriever", "solumbra", "combined"], n),
         "stenting": rng.integers(0, 2, n).astype(float), "angioplasty": (rng.random(n) < 0.1).astype(float),
         "ia_lysis": (rng.random(n) < 0.05).astype(float), "onset_to_recan": maybe(rng.integers(120, 700, n), 0.2),
         "anesthesia": rng.choice(["general", "sedation", "local"], n),

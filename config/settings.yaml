@@ -3,6 +3,7 @@
 cohort:
   min_age: 18                     # patients recorded as younger are excluded; a missing age is kept (imputed)
   require_outcome: true           # 90-day mRS must be known
+  min_category: 30                # a detailed occlusion code with fewer patients is pooled into its parent for modelling
   exclude_diagnostic_only: false  # "PAG" (diagnostic angiography only) is kept: at admission every patient
                                   # taken for intended thrombectomy belongs to the population, as in the 2026 analysis
   exclude_impossible_times: false # false: an impossible time (IVT after puncture, recanalisation before

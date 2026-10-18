@@ -24,9 +24,10 @@ from sklearn.experimental import enable_iterative_imputer  # noqa: F401
 from sklearn.impute import IterativeImputer
 
 OCCLUSION_REF = "M1"
-OCCLUSIONS = [("ICA", "Intracranial ICA / carotid T", "Intrakraniální ACI / karotické T"),
-              ("distal", "MCA M2–M3 / ACA", "ACM M2–M3 / ACA"),
-              ("cervical_ICA", "Cervical ICA/CCA (± tandem)", "Krční ACI/ACC (± tandem)"),
+OCCLUSIONS = [("ICA", "Intracranial ICA", "Intrakraniální ACI"),
+              ("tandem", "Tandem (cervical ICA/CCA + intracranial)", "Tandem (krční ACI/ACC + intrakraniální)"),
+              ("cervical_ICA", "Cervical ICA / CCA", "Krční ACI / ACC"),
+              ("M2", "MCA M2 or more distal", "ACM M2 nebo distálněji"),
               ("basilar", "Basilar artery", "Arteria basilaris"),
               ("other_posterior", "Vertebral / PCA", "AV / ACP")]
 

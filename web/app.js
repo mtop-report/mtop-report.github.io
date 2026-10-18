@@ -1230,10 +1230,11 @@
     const techSeries = [
       { label: t().aspiration, color: "var(--c1)", points: tr.map((r, i) => ({ x: i, y: r.aspiration })) },
       { label: t().stentRetriever, color: "var(--c2)", points: tr.map((r, i) => ({ x: i, y: r.stent_retriever })) },
+      { label: t().solumbra, color: "var(--c4)", points: tr.map((r, i) => ({ x: i, y: r.solumbra })) },
       { label: t().combined, color: "var(--c3)", points: tr.map((r, i) => ({ x: i, y: r.combined })) },
     ];
     const ftech = C.figure(techCard, { title: t().tTech, legend: techSeries.map((s) => ({ label: s.label, color: s.color, type: "line" })),
-      table: { columns: [lang === "cs" ? "Rok" : "Year"].concat(techSeries.map((s) => s.label)), rows: tr.map((r) => [r.label, pct100(r.aspiration), pct100(r.stent_retriever), pct100(r.combined)]) },
+      table: { columns: [lang === "cs" ? "Rok" : "Year"].concat(techSeries.map((s) => s.label)), rows: tr.map((r) => [r.label, pct100(r.aspiration), pct100(r.stent_retriever), pct100(r.solumbra), pct100(r.combined)]) },
       labels: { table: t().showTable, chart: t().showChart } });
     C.lineChart(ftech.body, { height: 150, x: { type: "cat", cats: yrs }, y: { domain: [0, 100], ticks: [0, 50, 100] }, series: techSeries, tipFmt: (v) => pct100(v), aria: t().tTech });
     sm.appendChild(techCard);
@@ -1640,7 +1641,8 @@
     premrs: ["Pre-stroke mRS", "mRS před CMP"], procedure: ["Procedure", "Výkon"],
   };
   const SUBGRP = {
-    anterior: ["anterior", "přední"], posterior: ["posterior", "zadní"], M1: ["MCA M1", "ACM M1"], ICA: ["ICA / T", "ACI / T"], cervical_ICA: ["cervical ICA", "krční ACI"],
+    anterior: ["anterior", "přední"], posterior: ["posterior", "zadní"], M1: ["MCA M1", "ACM M1"], ICA: ["intracranial ICA", "intrakraniální ACI"],
+    tandem: ["tandem", "tandem"], cervical_ICA: ["cervical ICA / CCA", "krční ACI / ACC"], M2: ["M2 or more distal", "M2 nebo distálněji"],
     distal: ["M2–M3 / ACA", "M2–M3 / ACA"], "<80": ["under 80", "pod 80"], "80+": ["80 or older", "80 a více"], men: ["men", "muži"], women: ["women", "ženy"],
     ivt: ["with IVT", "s IVT"], no_ivt: ["without IVT", "bez IVT"], direct: ["direct", "přímo"], transfer: ["transferred", "překlad"],
     "<10": ["below 10", "pod 10"], "10-19": ["10–19", "10–19"], "20+": ["20 or more", "20 a více"], "<=6h": ["≤ 6 h", "≤ 6 h"], ">6h": ["> 6 h", "> 6 h"],

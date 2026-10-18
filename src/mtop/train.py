@@ -74,8 +74,8 @@ def threshold_table(y, p, min_cell: int) -> list[dict]:
 SUBGROUPS = [
     ("circulation", lambda d: np.where(d["occlusion"].isin(["basilar", "other_posterior"]), "posterior",
                                        np.where(d["occlusion"].notna(), "anterior", None))),
-    ("occlusion", lambda d: d["occlusion"].map({"M1": "M1", "ICA": "ICA", "cervical_ICA": "cervical_ICA", "distal": "distal",
-                                                "basilar": "posterior", "other_posterior": "posterior"})),
+    ("occlusion", lambda d: d["occlusion"].map({"M1": "M1", "ICA": "ICA", "tandem": "tandem", "cervical_ICA": "cervical_ICA",
+                                                "M2": "M2", "basilar": "posterior", "other_posterior": "posterior"})),
     ("age", lambda d: np.where(d["age"] >= 80, "80+", np.where(d["age"].notna(), "<80", None))),
     ("sex", lambda d: d["sex_male"].map({1.0: "men", 0.0: "women"})),
     ("ivt", lambda d: d["ivt"].map({1.0: "ivt", 0.0: "no_ivt"})),
@@ -83,7 +83,7 @@ SUBGROUPS = [
     ("nihss", lambda d: pd.cut(d["nihss_adm"], [-1, 9, 19, 99], labels=["<10", "10-19", "20+"]).astype(object)),
     ("otp", lambda d: np.where(d["onset_to_puncture"] > 360, ">6h", np.where(d["onset_to_puncture"].notna(), "<=6h", None))),
     ("premrs", lambda d: np.where(d["mrs_pre"] >= 1, "1+", np.where(d["mrs_pre"].notna(), "0", None))),
-    ("procedure", lambda d: d["technique"].map({"aspiration": "mt", "stent_retriever": "mt", "combined": "mt",
+    ("procedure", lambda d: d["technique"].map({"aspiration": "mt", "stent_retriever": "mt", "solumbra": "mt", "combined": "mt",
                                                 "none": "other", "diagnostic": "diagnostic"})),
 ]
 

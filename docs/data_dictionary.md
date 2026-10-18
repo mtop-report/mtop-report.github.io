@@ -19,7 +19,7 @@ patient ID in `reports/data_quality.xlsx` (local only). NIHSS 43 (died) and 99 (
 | Sex | `sex_male` | Before thrombectomy | binary | 1 = male, 0 = female |  |
 | Pre-stroke mRS | `mrs_pre` | Before thrombectomy | ordinal | 0 = 0 · no symptoms; 1 = 1 · no significant disability; 2 = 2 · slight disability; 3 = 3 · moderate disability; 4 = 4 · moderately severe; 5 = 5 · severe disability | monotone in LightGBM (− for mRS 0–2) |
 | NIHSS on admission | `nihss_adm` | Before thrombectomy | numeric | 0–42 | monotone in LightGBM (− for mRS 0–2) |
-| Occlusion site | `occlusion` | Before thrombectomy | categorical | ICA = Intracranial ICA / carotid T; M1 = MCA M1; distal = MCA M2–M3 / ACA; cervical_ICA = Cervical ICA/CCA (± tandem); basilar = Basilar artery; other_posterior = Vertebral / PCA |  |
+| Occlusion site | `occlusion` | Before thrombectomy | categorical | ICA = Intracranial ICA; tandem = Tandem (cervical ICA/CCA + intracranial); cervical_ICA = Cervical ICA / CCA; M1 = MCA M1; M2 = MCA M2 or more distal (M3, ACA); basilar = Basilar artery (± vertebral); other_posterior = Vertebral / PCA | Tandem: a cervical ICA/CCA lesion plus an intracranial occlusion. M3 and ACA occlusions are grouped with M2 until each has 30 patients in the registry. |
 | Affected hemisphere | `side_left` | Before thrombectomy | binary | 1 = left, 0 = right or posterior |  |
 | ASPECTS | `aspects` | Before thrombectomy | numeric | 0–10 | monotone in LightGBM (+ for mRS 0–2); may be left unknown in the calculator; Non-contrast CT, middle cerebral artery territory. Recorded in the registry from 2016. |
 | IV thrombolysis | `ivt` | Before thrombectomy | binary | 1 = yes, 0 = no |  |
@@ -49,7 +49,7 @@ patient ID in `reports/data_quality.xlsx` (local only). NIHSS 43 (died) and 99 (
 | Pulse pressure | `pulse_pressure` | Before thrombectomy | derived | sbp - dbp |  |
 | Glucose above 7.8 mmol/L | `hyperglycemia` | Before thrombectomy | derived | glucose > 7.8 | monotone in LightGBM (− for mRS 0–2) |
 | Final reperfusion (mTICI) | `tici` | End of the procedure | ordinal | 0 = 0; 1 = 1; 2 = 2a; 3 = 2b; 4 = 3 | monotone in LightGBM (+ for mRS 0–2) |
-| Procedure | `technique` | End of the procedure | categorical | aspiration = Thrombectomy: direct aspiration (ADAPT); stent_retriever = Thrombectomy: stent retriever; combined = Thrombectomy: combined (e.g. Solumbra); none = No thrombectomy: stent, angioplasty or intra-arterial lysis; diagnostic = Diagnostic angiography only |  |
+| Procedure | `technique` | End of the procedure | categorical | aspiration = Thrombectomy: direct aspiration (ADAPT); stent_retriever = Thrombectomy: stent retriever; solumbra = Thrombectomy: Solumbra (aspiration + stent retriever); combined = Combined procedure (two or more techniques); none = No thrombectomy: stent, angioplasty or intra-arterial lysis; diagnostic = Diagnostic angiography only |  |
 | Stent placed | `stenting` | End of the procedure | binary | 1 = yes, 0 = no | Carotid or intracranial stent during the procedure. |
 | Angioplasty (PTA) | `angioplasty` | End of the procedure | binary | 1 = yes, 0 = no |  |
 | Intra-arterial thrombolysis | `ia_lysis` | End of the procedure | binary | 1 = yes, 0 = no | Local intra-arterial lysis (LIAT, EKOS) or an intra-arterial thrombolytic. |
@@ -75,7 +75,7 @@ patient ID in `reports/data_quality.xlsx` (local only). NIHSS 43 (died) and 99 (
 | `Age` | predictor | `age` |
 | `Sex` | predictor | `sex_male` |
 | `ASPECTS` | predictor | `aspects` |
-| `Occlusion site` | predictor | `occlusion` |
+| `Occlusion site` | predictor | `occlusion_detail`, `occlusion` |
 | `Hemisphere` | predictor | `side_left` |
 | `Intervention procedure` | predictor | `technique`, `stenting`, `angioplasty`, `ia_lysis` |
 | `Stent combo` | source | `stenting` |
@@ -125,19 +125,19 @@ patient ID in `reports/data_quality.xlsx` (local only). NIHSS 43 (died) and 99 (
 | Registry value | MTOP value |
 |---|---|
 | `M1-ACM` | M1 |
-| `M2-ACM` | distal |
-| `M3-ACM` | distal |
-| `ACA` | distal |
+| `M2-ACM` | M2 |
+| `M3-ACM` | M3 |
+| `ACA` | ACA |
 | `ACI-Intracranial` | ICA |
-| `ACI+ACM` | ICA |
+| `ACI+ACM` | tandem |
+| `ACI-odstup +T typ` | tandem |
+| `ACC+ACI+ACM` | tandem_cca |
 | `ACI-odstup` | cervical_ICA |
-| `ACI-odstup +T typ` | cervical_ICA |
-| `ACC` | cervical_ICA |
-| `ACC+ACI+ACM` | cervical_ICA |
+| `ACC` | CCA |
 | `AB` | basilar |
-| `AB+AV` | basilar |
-| `AV` | other_posterior |
-| `ACP` | other_posterior |
+| `AB+AV` | basilar_vertebral |
+| `AV` | vertebral |
+| `ACP` | PCA |
 | `Rekanalizace` | missing |
 
 **Hemisphere**
@@ -181,9 +181,9 @@ patient ID in `reports/data_quality.xlsx` (local only). NIHSS 43 (died) and 99 (
 | `Embotrap` | stent_retriever |
 | `Bonnet` | stent_retriever |
 | `Merci` | stent_retriever |
-| `PENUMBRA + Catch` | combined |
-| `PENUMBRA + Preset` | combined |
-| `PENUMBRA + TIGERTRIEVER` | combined |
+| `PENUMBRA + Catch` | solumbra |
+| `PENUMBRA + Preset` | solumbra |
+| `PENUMBRA + TIGERTRIEVER` | solumbra |
 | `žádný` | none |
 
 **Anti-thrombotics before**

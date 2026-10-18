@@ -64,12 +64,26 @@
     "Systolic BP": ["Also gives the pulse pressure (systolic − diastolic).", "Dává i tlakovou amplitudu (systolický − diastolický)."],
     "Glycemia": ["Also gives hyperglycaemia (> 7.8 mmol/L).", "Dává i hyperglykémii (> 7,8 mmol/l)."],
     "Stroke onset to IVT (min)": ["Also gives the IVT-to-puncture interval; not applicable without IVT.", "Dává i interval od IVT do punkce; bez IVT se neuplatní."],
+    "IVT in different hospital": ["Where IV thrombolysis was given: another hospital's name = given elsewhere, before the transfer; “FNO” = given at FNO; “žádné” = not given. With the IVT column it gives three states: none, at FNO, elsewhere.", "Kde byla podána IV trombolýza: název jiné nemocnice = podána jinde, před překladem; „FNO“ = podána ve FNO; „žádné“ = nepodána. Se sloupcem IVT dává tři stavy: žádná, ve FNO, jinde."],
+    "Occlusion site": ["Tandem = a cervical ICA/CCA lesion plus an intracranial occlusion. Every recorded value keeps its own detailed category; rare ones are pooled for the models only (see the coding).", "Tandem = léze krční ACI/ACC spolu s intrakraniálním uzávěrem. Každá zaznamenaná hodnota má vlastní podrobnou kategorii; vzácné se slučují jen pro modely (viz kódování)."],
+    "Intervention procedure": ["“kombinovaný výkon” = two or more techniques in one procedure (its own category); Solumbra = aspiration and a stent retriever together; PAG = diagnostic angiography only.", "„kombinovaný výkon“ = dvě a více technik v jednom výkonu (vlastní kategorie); Solumbra = aspirace a stentretriever současně; PAG = pouze diagnostická angiografie."],
+    "Extraction system": ["The device decides the technique only where the procedure label does not: PENUMBRA = aspiration; a stent retriever alone = stent retriever; PENUMBRA + a stent retriever = Solumbra.", "Zařízení určuje techniku jen tam, kde ji neurčuje označení výkonu: PENUMBRA = aspirace; samotný stentretriever = stentretriever; PENUMBRA + stentretriever = Solumbra."],
   };
   const CLEAN_NAME = {
     onset_date: ["Onset date", "Datum vzniku"], onset_time: ["Onset time", "Čas vzniku"], "sbp/dbp": ["Blood pressure", "Krevní tlak"],
     heart: ["Heart condition", "Srdeční onemocnění"], agent: ["Thrombolytic agent", "Trombolytikum"], device: ["Extraction device", "Extrakční systém"],
     procedure: ["Procedure", "Výkon"], side: ["Hemisphere", "Hemisféra"], cholesterol: ["Cholesterol", "Cholesterol"], mrs90: ["90-day mRS", "mRS za 90 dní"],
     sex: ["Sex", "Pohlaví"], etiology: ["Etiology", "Etiologie"], iat: ["Intra-arterial lysis", "Intraarteriální lýza"],
+    occlusion_detail: ["Occlusion site, detailed", "Místo okluze, podrobně"],
+  };
+  // detailed occlusion codes (every registry value apart) and how the models currently group them
+  const OCC_DETAIL = {
+    M1: ["MCA M1", "ACM M1"], M2: ["MCA M2", "ACM M2"], M3: ["MCA M3", "ACM M3"], ACA: ["ACA", "ACA"], ICA: ["Intracranial ICA", "Intrakraniální ACI"],
+    tandem: ["Tandem (cervical ICA + intracranial)", "Tandem (krční ACI + intrakraniální)"],
+    tandem_cca: ["CCA + ICA + MCA (complete carotid occlusion with intracranial extension)", "ACC + ACI + ACM (úplný uzávěr karotidy s intrakraniálním pokračováním)"],
+    cervical_ICA: ["Cervical ICA", "Krční ACI"], CCA: ["Common carotid (CCA)", "A. carotis communis (ACC)"],
+    basilar: ["Basilar", "Basilaris"], basilar_vertebral: ["Basilar + vertebral", "Basilaris + vertebrální"], vertebral: ["Vertebral", "Vertebrální"], PCA: ["PCA", "ACP"],
+    missing: ["Not classified (artery already open)", "Neklasifikováno (tepna již průchodná)"],
   };
   const KIND = {
     repaired: ["Repaired", "Opraveno"],
@@ -78,7 +92,9 @@
     flag: ["Flagged for review at the source, value kept", "Označeno ke kontrole u zdroje, hodnota ponechána"],
   };
   const TECH = {
-    aspiration: ["Aspiration (ADAPT)", "Aspirace (ADAPT)"], stent_retriever: ["Stent retriever", "Stentretriever"], combined: ["Combined", "Kombinovaná"],
+    aspiration: ["Aspiration (ADAPT)", "Aspirace (ADAPT)"], stent_retriever: ["Stent retriever", "Stentretriever"],
+    solumbra: ["Solumbra (aspiration + stent retriever)", "Solumbra (aspirace + stentretriever)"],
+    combined: ["Combined procedure (two or more techniques)", "Kombinovaný výkon (dvě a více technik)"],
     none: ["No thrombectomy (stent, angioplasty or IA lysis only)", "Bez trombektomie (jen stent, angioplastika nebo IA lýza)"],
     diagnostic: ["Diagnostic angiography only", "Pouze diagnostická angiografie"], missing: ["Not recorded", "Nezaznamenáno"],
   };
@@ -203,11 +219,14 @@
     ["Occlusion site = Rekanalizace", ["artery already open at angiography", "tepna při angiografii již průchodná"], ["No occlusion to classify: occlusion site missing, patient kept.", "Není co klasifikovat: místo uzávěru chybí, pacient ponechán."], true],
     ["Procedure = PAG", ["diagnostic angiography only", "pouze diagnostická angiografie"], ["Kept, with its own technique category: before the procedure nobody knows that no treatment will follow.", "Ponecháno, s vlastní kategorií techniky: před výkonem nikdo neví, že léčba nebude následovat."], false],
     ["Procedure = Stent, PTA, cPTA, LIAT, EKOS …", ["endovascular treatment without thrombectomy", "endovaskulární léčba bez trombektomie"], ["Technique “none” plus the stent, angioplasty and intra-arterial lysis flags.", "Technika „žádná“ plus příznaky stentu, angioplastiky a intraarteriální lýzy."], false],
-    ["Procedure = kombinovaný výkon", ["thrombectomy; technique from the extraction device", "trombektomie; technika podle extrakčního systému"], ["Mostly thrombectomy with carotid stenting.", "Většinou trombektomie s karotickým stentem."], true],
-    ["Procedure = Solumbra", ["combined aspiration and stent retriever", "kombinace aspirace a stentretrieveru"], ["The device column lists only the stent retriever.", "Sloupec zařízení uvádí jen stentretriever."], false],
+    ["Procedure = kombinovaný výkon", ["combined procedure: two or more techniques", "kombinovaný výkon: dvě a více technik"], ["Its own category.", "Vlastní kategorie."], false],
+    ["Procedure = Solumbra", ["aspiration and a stent retriever together", "aspirace a stentretriever současně"], ["Its own technique category (not the combined procedure).", "Vlastní kategorie techniky (nejde o kombinovaný výkon)."], false],
+    ["Extraction system = PENUMBRA + Catch / Preset / TIGERTRIEVER", ["Solumbra technique", "technika Solumbra"], ["Used where the procedure label does not name the technique (for example MT+stent).", "Použito tam, kde označení výkonu techniku neuvádí (např. MT+stent)."], false],
+    ["Occlusion site = ACI+ACM, ACI-odstup +T typ", ["tandem occlusion", "tandemový uzávěr"], ["Cervical ICA lesion plus intracranial occlusion.", "Léze krční ACI s intrakraniálním uzávěrem."], false],
+    ["Occlusion site = ACC+ACI+ACM", ["complete carotid occlusion reaching the MCA", "úplný uzávěr karotidy až do ACM"], ["Kept apart in the data; pooled with tandem in the models while rare (same proximal-plus-intracranial pattern).", "V datech zvlášť; v modelech, dokud je vzácný, sloučen s tandemem (stejný vzorec proximálního a intrakraniálního uzávěru)."], false],
     ["Anaesthesia = bez ARO", ["local anaesthesia, no anaesthesiologist", "lokální anestezie, bez anesteziologa"], ["“Without the anaesthesiology department”.", "„Bez ARO“."], true],
     ["Transfer = FNO or žádné", ["direct admission to FNO", "přímý příjem do FNO"], ["A referring hospital's name means a transfer; hospital names are never published.", "Název odesílající nemocnice znamená překlad; názvy nemocnic se nezveřejňují."], true],
-    ["IVT in different hospital = a hospital's name", ["IV thrombolysis started before the transfer", "IV trombolýza zahájená před překladem"], ["“FNO” or “žádné” = not external.", "„FNO“ nebo „žádné“ = ne mimo FNO."], false],
+    ["IVT in different hospital = a hospital's name", ["IV thrombolysis given elsewhere, not at FNO", "IV trombolýza podaná jinde, ne ve FNO"], ["“FNO” = given at FNO; “žádné” = not given.", "„FNO“ = podána ve FNO; „žádné“ = nepodána."], false],
     ["Heart condition = KS. Kardio.", ["pacemaker", "kardiostimulátor"], ["Grouped with the other structural conditions (valve disease, cardiomyopathy, PFO, left-atrial thrombus).", "Sloučeno s ostatními strukturálními onemocněními (chlopenní vada, kardiomyopatie, PFO, trombus v levém oušku)."], true],
     ["Thrombolytics = Integrilin", ["eptifibatide, an antiplatelet drug", "eptifibatid, antiagregans"], ["The agent column is not a predictor.", "Sloupec látky není prediktorem."], false],
     ["Time of stroke onset", ["onset, or the time last known well", "vznik, nebo kdy byl pacient naposledy v pořádku"], ["Times are minutes from this moment.", "Časy jsou minuty od tohoto okamžiku."], true],
@@ -252,9 +271,21 @@
           const o = f && f.options ? f.options.find((o2) => String(o2.value) === String(to)) : null;
           return o ? L(o.label).replace(/ · .*/, "") : TECH[to] ? lab2(TECH[to]) : String(to);
         };
-        det.appendChild(table([tx("Recorded value", "Zaznamenaná hodnota"), tx("Model value", "Hodnota v modelu"), "n"],
-          v.coding.map((c) => h("tr", null, h("th", { scope: "row", class: "mono", text: c.value }), h("td", { text: toLabel(v.column, c.to) }),
-            h("td", { class: "num", text: c.present ? cnt(c.n, c.small) : "0" }))), "compact"));
+        if (v.column === "Occlusion site") {
+          const occF = FEAT.occlusion;
+          const modelLabel = (m) => { const o = occF && occF.options.find((o2) => o2.value === m); return o ? L(o.label) : (m ? String(m) : "–"); };
+          det.appendChild(table([tx("Recorded value", "Zaznamenaná hodnota"), tx("Detailed category", "Podrobná kategorie"), tx("In the models", "V modelech"), "n"],
+            v.coding.map((c) => h("tr", null, h("th", { scope: "row", class: "mono", text: c.value }), h("td", { text: lab2(OCC_DETAIL[c.to]) || c.to }),
+              h("td", { text: c.to === "missing" ? tx("missing", "chybí") : modelLabel(c.model) }),
+              h("td", { class: "num", text: c.present ? cnt(c.n, c.small) : "0" }))), "compact txt"));
+          det.appendChild(h("p", { class: "note", text: tx(
+            `Every recorded value keeps its own detailed category. For the models, a category with fewer than ${P.min_category || 30} analysed patients is pooled with its nearest group (M3 and ACA with M2, CCA + ICA + MCA with tandem, CCA with cervical ICA, basilar + vertebral with basilar, vertebral and PCA together) and gets its own place automatically once it reaches that size.`,
+            `Každá zaznamenaná hodnota má vlastní podrobnou kategorii. Pro modely se kategorie s méně než ${P.min_category || 30} analyzovanými pacienty slučuje s nejbližší skupinou (M3 a ACA s M2, ACC + ACI + ACM s tandemem, ACC s krční ACI, basilaris + vertebrální s basilaris, vertebrální a ACP spolu) a vlastní místo dostane automaticky, jakmile této velikosti dosáhne.`) }));
+        } else {
+          det.appendChild(table([tx("Recorded value", "Zaznamenaná hodnota"), tx("Model value", "Hodnota v modelu"), "n"],
+            v.coding.map((c) => h("tr", null, h("th", { scope: "row", class: "mono", text: c.value }), h("td", { text: toLabel(v.column, c.to) }),
+              h("td", { class: "num", text: c.present ? cnt(c.n, c.small) : "0" }))), "compact"));
+        }
         item.appendChild(det);
       }
       list.appendChild(item);

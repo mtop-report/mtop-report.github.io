@@ -62,12 +62,26 @@ def test_categorical_mappings():
     raw.loc[4, "TICI"] = "2"
     raw.loc[5, "Occlusion site"] = "ACI-odstup +T typ"
     clean, _ = clean_registry(raw)
-    assert clean.loc[0, "technique"] == "combined"          # Solumbra is combined whatever the device field says
-    assert clean.loc[1, "technique"] == "aspiration"        # combined procedure: technique from device
+    assert clean.loc[0, "technique"] == "solumbra"          # Solumbra (aspiration + stent retriever) whatever the device says
+    assert clean.loc[1, "technique"] == "combined"          # kombinovaný výkon: two or more techniques, its own category
     assert clean.loc[2, "diagnostic_only"] == 1 and clean.loc[2, "technique"] == "diagnostic"   # PAG kept as its own category
     assert np.isnan(clean.loc[3, "transfer"])               # missing stays missing (not "transferred")
     assert clean.loc[4, "tici"] == 2.5 and np.isnan(clean.loc[4, "reperfusion_2b3"])
-    assert clean.loc[5, "occlusion"] == "cervical_ICA"
+    assert clean.loc[5, "occlusion_detail"] == "tandem"    # cervical ICA + carotid T = tandem
+    assert clean.loc[5, "occlusion"] == "tandem"
+
+
+def test_rare_occlusion_codes_are_pooled_for_models():
+    from mtop.clean import pool_occlusion
+
+    detail = pd.Series(["M3", "ACA", "tandem_cca", "CCA", "basilar_vertebral", "vertebral", "PCA", "M1", None])
+    counts = pd.Series({"M3": 5, "ACA": 3, "tandem_cca": 4, "CCA": 6, "basilar_vertebral": 27, "vertebral": 24, "PCA": 4, "M1": 600})
+    allowed = {"ICA", "tandem", "cervical_ICA", "M1", "M2", "basilar", "other_posterior"}
+    out = pool_occlusion(detail, counts, 30, allowed).tolist()
+    assert out[:8] == ["M2", "M2", "tandem", "cervical_ICA", "basilar", "other_posterior", "other_posterior", "M1"]
+    assert pd.isna(out[8])
+    # a code that reaches the threshold but is not yet a model option keeps being pooled
+    assert pool_occlusion(pd.Series(["M3"]), pd.Series({"M3": 40}), 30, allowed).tolist() == ["M2"]
 
 
 def test_onset_time_formats():

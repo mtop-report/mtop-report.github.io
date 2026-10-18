@@ -37,7 +37,7 @@ def _cohort(n=400, seed=0):
         "aspects": rng.integers(0, 11, n).astype(float), "glucose": rng.normal(7.5, 2.5, n).round(1).clip(3, 25),
         "htn": rng.integers(0, 2, n).astype(float), "dm": rng.integers(0, 2, n).astype(float),
         "arrhythmia": rng.integers(0, 2, n).astype(float), "mrs_pre": rng.integers(0, 4, n).astype(float),
-        "occlusion": rng.choice(["ICA", "M1", "distal", "cervical_ICA", "basilar", "other_posterior"], n),
+        "occlusion": rng.choice(["ICA", "tandem", "M1", "M2", "cervical_ICA", "basilar", "other_posterior"], n),
         "tici": rng.choice([0.0, 1.0, 2.0, 2.5, 3.0, 4.0], n), "nihss_24h": rng.integers(0, 42, n).astype(float),
         "sich": rng.integers(0, 2, n).astype(float), "nihss_7d": rng.integers(0, 42, n).astype(float),
         "onset_to_puncture": rng.integers(40, 900, n).astype(float), "stroke_prior": rng.integers(0, 2, n).astype(float),

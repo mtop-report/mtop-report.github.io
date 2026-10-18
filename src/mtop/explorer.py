@@ -93,12 +93,14 @@ LABELS = {
                   "241–360": ("241–360 min", "241–360 min"), "361–720": ("6–12 h", "6–12 h"), ">720": (">12 h", ">12 h")},
     "tici_group": {"0–1": ("0–1", "0–1"), "2a": ("2a", "2a"), "2": ("2 (not subgraded)", "2 (bez podskupiny)"),
                    "2b": ("2b", "2b"), "3": ("3", "3")},
-    "occlusion": {"ICA": ("Intracranial ICA / T", "Intrakraniální ACI / T"), "M1": ("MCA M1", "ACM M1"),
-                  "distal": ("MCA M2–M3 / ACA", "ACM M2–M3 / ACA"), "cervical_ICA": ("Cervical ICA/CCA (± tandem)", "Krční ACI/ACC (± tandem)"),
+    "occlusion": {"ICA": ("Intracranial ICA", "Intrakraniální ACI"), "tandem": ("Tandem (cervical ICA/CCA + intracranial)", "Tandem (krční ACI/ACC + intrakraniální)"),
+                  "cervical_ICA": ("Cervical ICA / CCA", "Krční ACI / ACC"), "M1": ("MCA M1", "ACM M1"),
+                  "M2": ("MCA M2 or more distal", "ACM M2 nebo distálněji"),
                   "basilar": ("Basilar", "Basilaris"), "other_posterior": ("Vertebral / PCA", "AV / ACP")},
     "technique": {"aspiration": ("Thrombectomy: aspiration (ADAPT)", "Trombektomie: aspirace (ADAPT)"),
                   "stent_retriever": ("Thrombectomy: stent retriever", "Trombektomie: stentriever"),
-                  "combined": ("Thrombectomy: combined", "Trombektomie: kombinovaná"),
+                  "solumbra": ("Thrombectomy: Solumbra", "Trombektomie: Solumbra"),
+                  "combined": ("Combined procedure (2+ techniques)", "Kombinovaný výkon (2+ techniky)"),
                   "none": ("No thrombectomy: stent, PTA or IA lysis", "Bez trombektomie: stent, PTA nebo IA lýza"),
                   "diagnostic": ("Diagnostic angiography only", "Pouze diagnostická angiografie")},
     "anesthesia": {"general": ("General", "Celková"), "sedation": ("Conscious sedation", "Analgosedace"), "local": ("Local only", "Lokální")},
@@ -178,7 +180,8 @@ def _trend_rows(d: pd.DataFrame, min_cell: int) -> list[dict]:
             "tici2b3": _pct(g["reperfusion_2b3"].mean()),
             "ga": _pct((g["anesthesia"] == "general").mean()) if g["anesthesia"].notna().mean() > 0.5 else None,
             "aspiration": _pct((mt == "aspiration").mean()), "stent_retriever": _pct((mt == "stent_retriever").mean()),
-            "combined": _pct((mt == "combined").mean()), "stenting": _pct(g["stenting"].mean()),
+            "solumbra": _pct((mt == "solumbra").mean()), "combined": _pct((mt == "combined").mean()),
+            "stenting": _pct(g["stenting"].mean()),
             "age80": _pct((g["age"] >= 80).mean()),
             "sich": _pct(g["sich"].mean()),
             "proc": _med(g["procedure_min"]),
@@ -267,7 +270,7 @@ def _table1(base: pd.DataFrame, min_cell: int) -> dict:
 
     yn = lambda col: (lambda g: g[col])  # noqa: E731
     cat = lambda col, val: (lambda g: (g[col] == val).astype(float).where(g[col].notna()))  # noqa: E731
-    mt = lambda g: g["technique"].isin(["aspiration", "stent_retriever", "combined"]).astype(float).where(g["technique"].notna())  # noqa: E731
+    mt = lambda g: g["technique"].isin(["aspiration", "stent_retriever", "solumbra", "combined"]).astype(float).where(g["technique"].notna())  # noqa: E731
     rows = [
         {"section": {"en": "Patient", "cs": "Pacient"}},
         cont("age", "Age, years", "Věk, roky", "age"),
@@ -277,7 +280,8 @@ def _table1(base: pd.DataFrame, min_cell: int) -> dict:
         cont("nihss", "NIHSS on admission", "NIHSS při přijetí", "nihss_adm"),
         cont("aspects", "ASPECTS (anterior circulation)", "ASPECTS (přední povodí)", "aspects_anterior"),
         prop("posterior", "Posterior circulation", "Zadní povodí", lambda g: g["occlusion"].isin(["basilar", "other_posterior"]).astype(float).where(g["occlusion"].notna())),
-        prop("ica", "ICA or carotid T occlusion", "Uzávěr ACI nebo karotického T", lambda g: g["occlusion"].isin(["ICA", "cervical_ICA"]).astype(float).where(g["occlusion"].notna())),
+        prop("ica", "Intracranial ICA occlusion", "Uzávěr intrakraniální ACI", cat("occlusion", "ICA")),
+        prop("tandem", "Tandem occlusion", "Tandemový uzávěr", cat("occlusion", "tandem")),
         {"section": {"en": "History and medication", "cs": "Anamnéza a medikace"}},
         prop("htn", "Hypertension", "Hypertenze", yn("htn")),
         prop("dm", "Diabetes mellitus", "Diabetes mellitus", yn("dm")),

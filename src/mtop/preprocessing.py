@@ -30,7 +30,7 @@ RAW_MAP = {
     "Age": (["age"], "predictor"),
     "Sex": (["sex_male"], "predictor"),
     "ASPECTS": (["aspects"], "predictor"),
-    "Occlusion site": (["occlusion"], "predictor"),
+    "Occlusion site": (["occlusion_detail", "occlusion"], "predictor"),
     "Hemisphere": (["side_left"], "predictor"),
     "Intervention procedure": (["technique", "stenting", "angioplasty", "ia_lysis"], "predictor"),
     "Stent combo": (["stenting"], "source"),
@@ -133,8 +133,10 @@ def cohort_flow(clean: pd.DataFrame, min_cell: int) -> dict:
 
 # ------------------------------------------------------------------------------- variables
 def variable_map(clean: pd.DataFrame, raw_prof: dict | None) -> list[dict]:
-    """Registry column -> MTOP variables, role, completeness and the coding of its values."""
+    """Registry column -> MTOP variables, role, completeness and the coding of its values. For the
+    occlusion site also the model category each detailed code is pooled into."""
     prof = {c["column"]: c for c in (raw_prof or {}).get("columns", [])}
+    occ_model = clean.dropna(subset=["occlusion_detail"]).groupby("occlusion_detail")["occlusion"].first().to_dict()
     used_at = {f.key: f.stage for f in features()}
     rows = []
     for col, (vars_, role) in RAW_MAP.items():
@@ -145,7 +147,8 @@ def variable_map(clean: pd.DataFrame, raw_prof: dict | None) -> list[dict]:
         if col in CODINGS:
             counts = {v["value"]: v for v in p.get("values", [])}
             r["coding"] = [{"value": k, "to": v, "n": counts.get(k, {}).get("n"), "small": counts.get(k, {}).get("small", False),
-                            "present": k in counts} for k, v in CODINGS[col].items()]
+                            "present": k in counts, **({"model": occ_model.get(v)} if col == "Occlusion site" else {})}
+                           for k, v in CODINGS[col].items()]
         rows.append(r)
     return rows
 
@@ -309,6 +312,7 @@ def build_preprocessing(clean: pd.DataFrame) -> dict:
         "cholesterol": cholesterol_table(base, min_cell),
         "eras": [e[2] for e in ERAS],
         "ranges": {k: [float(a), float(b)] for k, (a, b) in RANGES.items()},
+        "min_category": int(cfg["cohort"].get("min_category", 30)),
     }
     with open(PUBLIC / "preprocessing.json", "w", encoding="utf-8") as fh:
         json.dump(out, fh, ensure_ascii=False, separators=(",", ":"))

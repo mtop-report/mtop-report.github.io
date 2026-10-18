@@ -46,16 +46,36 @@ RAW_COLUMNS = [
     "Decompression surgery", "Anesthesia",
 ]
 
-OCCLUSION = {
-    "M1-ACM": "M1",
-    "M2-ACM": "distal", "M3-ACM": "distal", "ACA": "distal",
-    "ACI-Intracranial": "ICA", "ACI+ACM": "ICA",
-    "ACI-odstup": "cervical_ICA", "ACI-odstup +T typ": "cervical_ICA",
-    "ACC": "cervical_ICA", "ACC+ACI+ACM": "cervical_ICA",
-    "AB": "basilar", "AB+AV": "basilar",
-    "AV": "other_posterior", "ACP": "other_posterior",
+# Occlusion site as recorded, every registry value kept apart (the Registry page and future models use
+# this detail): tandem = cervical ICA/CCA lesion + intracranial occlusion (FNO coding).
+OCCLUSION_DETAIL = {
+    "M1-ACM": "M1", "M2-ACM": "M2", "M3-ACM": "M3", "ACA": "ACA",
+    "ACI-Intracranial": "ICA",
+    "ACI+ACM": "tandem", "ACI-odstup +T typ": "tandem",
+    "ACC+ACI+ACM": "tandem_cca",          # CCA + ICA + MCA: complete carotid occlusion reaching the MCA
+    "ACI-odstup": "cervical_ICA", "ACC": "CCA",
+    "AB": "basilar", "AB+AV": "basilar_vertebral", "AV": "vertebral", "ACP": "PCA",
     "Rekanalizace": None,  # already recanalised at angiography: no occlusion to classify
 }
+# The models need enough patients per category (estimable effects, and no coefficient that describes
+# fewer than privacy.min_cell patients): a detailed category with fewer than cohort.min_category
+# patients is pooled into its clinical parent until it reaches that size.
+OCCLUSION_PARENT = {"M3": "M2", "ACA": "M2", "tandem_cca": "tandem", "CCA": "cervical_ICA",
+                    "basilar_vertebral": "basilar", "vertebral": "other_posterior", "PCA": "other_posterior"}
+OCCLUSION = dict(OCCLUSION_DETAIL)      # raw value -> detailed code (pooled for the models in clean_registry)
+
+
+def pool_occlusion(detail: pd.Series, counts: pd.Series, min_n: int, allowed) -> pd.Series:
+    """Model category for each detailed occlusion code: rare codes go to their parent (repeatedly)
+    until the category has >= min_n patients and is one of the model's options (`allowed`)."""
+    def group(v):
+        if _null(v):
+            return None
+        while (counts.get(v, 0) < min_n or v not in allowed) and v in OCCLUSION_PARENT:
+            v = OCCLUSION_PARENT[v]
+        return v
+    return detail.map(group)
+
 
 SIDE = {"levá hemisféra": "left", "pravá hemisféra": "right", "zadní povodí": "posterior"}
 
@@ -78,10 +98,13 @@ PROCEDURE = {
     "cPTA+LIAT": (0, 0, 1, 1, 0),
     "PAG": (0, 0, 0, 0, 1),
 }
-# Explicit first-line technique. "kombinovaný výkon" (combined procedure) is mostly MT plus
-# carotid stenting, so its technique is taken from the extraction device instead.
+# Technique. Explicit procedure labels first: ADAPT (aspiration), MT-stent retriever, Solumbra
+# (aspiration + stent retriever together) and "kombinovaný výkon" (combined procedure: two or more of
+# the techniques). Otherwise (MT+stent, mechanická extrakce+cPTA) the extraction device decides:
+# PENUMBRA = aspiration, a stent retriever alone = stent retriever, PENUMBRA + a stent retriever = Solumbra.
 PROCEDURE_TECHNIQUE = {
-    "ADAPT": "aspiration", "MT-stent retriever": "stent_retriever", "Solumbra": "combined",
+    "ADAPT": "aspiration", "MT-stent retriever": "stent_retriever", "Solumbra": "solumbra",
+    "kombinovaný výkon": "combined",      # two or more techniques in one procedure
 }
 
 DEVICE = {
@@ -89,8 +112,8 @@ DEVICE = {
     "Catch": "stent_retriever", "Preset": "stent_retriever", "Solitaire": "stent_retriever",
     "TIGERTRIEVER": "stent_retriever", "Embotrap": "stent_retriever", "Bonnet": "stent_retriever",
     "Merci": "stent_retriever",
-    "PENUMBRA + Catch": "combined", "PENUMBRA + Preset": "combined",
-    "PENUMBRA + TIGERTRIEVER": "combined",
+    "PENUMBRA + Catch": "solumbra", "PENUMBRA + Preset": "solumbra",
+    "PENUMBRA + TIGERTRIEVER": "solumbra",
     "žádný": "none",
 }
 
@@ -312,7 +335,7 @@ def _nihss_followup(raw: pd.Series, name: str, ids: pd.Series, log: IssueLog):
 
 
 POSTERIOR_OCCLUSIONS = ("basilar", "other_posterior")
-ANTERIOR_OCCLUSIONS = ("M1", "ICA", "distal", "cervical_ICA")
+ANTERIOR_OCCLUSIONS = ("M1", "M2", "ICA", "tandem", "cervical_ICA")
 
 
 def consistency_flags(c: pd.DataFrame, ids: pd.Series, log: IssueLog) -> None:
@@ -438,7 +461,7 @@ def clean_registry(raw: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     # --- admission status and imaging ------------------------------------------------------
     c["nihss_adm"] = _range(_num(raw["Admission NIHSS"], "nihss_adm", ids, log), "nihss_adm", ids, log)
     c["aspects"] = _range(_num(raw["ASPECTS"], "aspects", ids, log), "aspects", ids, log)
-    c["occlusion"] = _map(raw["Occlusion site"], OCCLUSION, "occlusion", ids, log)
+    c["occlusion_detail"] = _map(raw["Occlusion site"], OCCLUSION, "occlusion", ids, log)
     c["occlusion_raw"] = raw["Occlusion site"].map(_s)
     c["recanalised_at_angio"] = (raw["Occlusion site"].map(_s) == "Rekanalizace").astype("float64")
     c["side"] = _map(raw["Hemisphere"], SIDE, "side", ids, log)
@@ -510,7 +533,7 @@ def clean_registry(raw: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     tech[c["diagnostic_only"] == 1] = "diagnostic"
     c["technique"] = tech
     c["mt_performed"] = tech.map(
-        lambda v: np.nan if _null(v) else float(v in ("aspiration", "stent_retriever", "combined"))
+        lambda v: np.nan if _null(v) else float(v in ("aspiration", "stent_retriever", "solumbra", "combined"))
     ).astype("float64")
     c.loc[c["mt_performed"].isna() & (c["mt_label"] == 1), "mt_performed"] = 1.0
 
@@ -566,6 +589,13 @@ def clean_registry(raw: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     # IVT given in another hospital before transfer ("drip-and-ship" thrombolysis): a referring
     # hospital's name = yes; "FNO" or "žádné" (none) = no
     c["ivt_external"] = c["ivt_location"].map(lambda v: np.nan if _null(v) else float(v not in ("FNO", "žádné"))).astype("float64")
+    # model category of the occlusion site: rare codes pooled (counts among adults with a 90-day mRS)
+    from .config import features, settings
+    occ_f = next(f for f in features() if f.key == "occlusion")
+    allowed = {o["value"] for o in occ_f.spec["options"]}
+    eligible = c["mrs90"].notna() & ~(c["age"] < 18)
+    counts = c.loc[eligible, "occlusion_detail"].value_counts()
+    c["occlusion"] = pool_occlusion(c["occlusion_detail"], counts, int(settings()["cohort"].get("min_category", 30)), allowed)
     consistency_flags(c, ids, log)
     c = c.drop(columns=["ivt_location"])
     c["weekend"] = c["onset_date"].dt.dayofweek.map(lambda d: np.nan if _null(d) else float(d >= 5)).astype("float64")

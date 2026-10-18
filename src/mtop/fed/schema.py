@@ -24,13 +24,13 @@ BIN = {"1": 1, "0": 0, "yes": 1, "no": 0, "y": 1, "n": 0, "true": 1, "false": 0,
 SEX = {"1": 1, "0": 0, "m": 1, "male": 1, "man": 1, "muz": 1, "f": 0, "female": 0, "woman": 0, "w": 0, "z": 0, "zena": 0}
 SIDE = {"1": 1, "0": 0, "left": 1, "l": 1, "leva": 1, "right": 0, "r": 0, "prava": 0}
 CAT = {
-    "occlusion": {"ica": "ICA", "icat": "ICA", "t": "ICA", "intracranialica": "ICA", "m1": "M1", "m2": "distal",
-                  "m3": "distal", "aca": "distal", "distal": "distal", "cervicalica": "cervical_ICA",
-                  "tandem": "cervical_ICA", "cca": "cervical_ICA", "basilar": "basilar", "ba": "basilar",
-                  "vertebral": "other_posterior", "va": "other_posterior", "pca": "other_posterior",
-                  "otherposterior": "other_posterior"},
+    "occlusion": {"ica": "ICA", "intracranialica": "ICA", "m1": "M1", "m2": "M2", "m3": "M2", "aca": "M2",
+                  "distal": "M2", "tandem": "tandem", "cervicalica": "cervical_ICA", "cca": "cervical_ICA",
+                  "basilar": "basilar", "ba": "basilar", "vertebral": "other_posterior", "va": "other_posterior",
+                  "pca": "other_posterior", "otherposterior": "other_posterior"},
     "technique": {"aspiration": "aspiration", "adapt": "aspiration", "stentretriever": "stent_retriever",
-                  "sr": "stent_retriever", "combined": "combined", "solumbra": "combined", "none": "none"},
+                  "sr": "stent_retriever", "solumbra": "solumbra", "combined": "combined", "none": "none",
+                  "diagnostic": "diagnostic", "pag": "diagnostic"},
     "anesthesia": {"general": "general", "ga": "general", "sedation": "sedation", "cs": "sedation",
                    "consciousseda": "sedation", "local": "local", "la": "local"},
 }
