@@ -90,13 +90,14 @@ def _fit(X: pd.DataFrame, y: np.ndarray):
 
 def unadjusted(X: pd.DataFrame, y: np.ndarray) -> dict:
     out = {}
-    occ = X[OCC_COLS]
+    occ_cols = [c for c in OCC_COLS if c in X.columns]
+    occ = X[occ_cols]
     ok = occ.notna().all(axis=1).to_numpy()
     b, V = _fit(occ[ok], y[ok])
-    for c in OCC_COLS:
+    for c in occ_cols:
         out[c] = (b[c], np.sqrt(V.loc[c, c]), int(ok.sum()))
     for c in X.columns:
-        if c in OCC_COLS:
+        if c in occ_cols:
             continue
         ok = X[c].notna().to_numpy()
         b, V = _fit(X.loc[ok, [c]], y[ok])
@@ -112,24 +113,27 @@ def adjusted(X: pd.DataFrame, ys: dict[str, np.ndarray], aux: np.ndarray, m: int
     data = np.column_stack([X.to_numpy(), aux])
     lo = np.nanmin(data, axis=0)
     hi = np.nanmax(data, axis=0)
-    miss_occ = X[OCC_COLS].isna().any(axis=1).to_numpy()
+    occ_cols = [c for c in OCC_COLS if c in X.columns]
+    binary = [c for c in BINARY if c in X.columns]
+    miss_occ = X[occ_cols].isna().any(axis=1).to_numpy()
     est = {t: [] for t in ys}
     var = {t: [] for t in ys}
     for k in range(m):
         imp = IterativeImputer(sample_posterior=True, max_iter=15, random_state=seed + k, min_value=lo, max_value=hi)
         Z = pd.DataFrame(imp.fit_transform(data)[:, :-1], columns=X.columns, index=X.index)
-        for c in BINARY:
+        for c in binary:
             Z[c] = (Z[c] >= 0.5).astype(float)
         if miss_occ.any():                    # an imputed occlusion site: at most one category
-            occ = Z[OCC_COLS].to_numpy().copy()
+            occ = Z[occ_cols].to_numpy().copy()
             part = occ[miss_occ]
             top = part.argmax(axis=1)
             keep = part.max(axis=1) >= 0.5
             filled = np.zeros_like(part)
             filled[np.arange(len(top))[keep], top[keep]] = 1.0
             occ[miss_occ] = filled
-            Z[OCC_COLS] = occ
-        Z["aspects"] = Z["aspects"].round()
+            Z[occ_cols] = occ
+        if "aspects" in Z:
+            Z["aspects"] = Z["aspects"].round()
         for t, y in ys.items():
             b, V = _fit(Z, y)
             est[t].append(b.to_numpy())
@@ -157,6 +161,10 @@ def build(base: pd.DataFrame, min_cell: int, m: int = 20, seed: int = 20261016) 
     X = covariates(d)
     out = {"n": int(len(d)), "imputations": m, "min_cell": min_cell, "terms": [], "outcomes": {}}
     groups = {"patient": ("Patient", "Pacient"), "stroke": ("Stroke", "Iktus"), "treatment": ("Treatment", "Léčba")}
+    # A factor or occlusion category with fewer than min_cell patients on either side is neither
+    # estimable nor publishable, so it leaves the model. Patients of a dropped occlusion category
+    # count as an unknown site (imputed), not as the reference M1.
+    keep = []
     for key, en, cs, unit, grp, kind in TERMS:
         x = X[key]
         term = {"key": key, "label": {"en": en, "cs": cs}, "unit": {"en": unit[0], "cs": unit[1]} if unit else None,
@@ -164,9 +172,15 @@ def build(base: pd.DataFrame, min_cell: int, m: int = 20, seed: int = 20261016) 
         if kind in ("bin", "occ"):
             n1, n0 = int((x == 1).sum()), int((x == 0).sum())
             if min(n1, n0) < min_cell:
+                if kind == "occ" and n1:
+                    X.loc[x == 1, OCC_COLS] = np.nan
                 continue
             term["n1"], term["n0"] = n1, n0
+        elif x.nunique(dropna=True) < 2:
+            continue
+        keep.append(key)
         out["terms"].append(term)
+    X = X[keep]
     out["groups"] = {k: {"en": v[0], "cs": v[1]} for k, v in groups.items()}
     ys = {t: d[t].to_numpy(float) for t in ("good_outcome", "death90")}
     ad = adjusted(X, ys, d["mrs90"].to_numpy(float), m, seed)
