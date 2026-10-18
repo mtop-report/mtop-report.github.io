@@ -469,7 +469,7 @@
     // A draft stays in this browser. Only the MTOP team adds results to the reviewed pool that
     // everyone sees, after an agreement with the centre; demo results are never pooled.
     const addPool = h("button", { class: "btn btn-primary", type: "button", disabled: NS.demo ? true : null },
-      tx("Add to my draft pool (this browser only)", "Přidat do mého návrhu souhrnu (jen v tomto prohlížeči)"));
+      tx("Add to my drafts", "Přidat do mých návrhů"));
     addPool.addEventListener("click", () => {
       if (NS.demo) return;
       NS.imports.push(Object.assign(JSON.parse(exportJSON()), { _draft: true }));
@@ -481,8 +481,8 @@
       h("p", { class: "note", text: NS.demo
         ? tx("These are results on the synthetic demo cohort. They show how the tool works and cannot be added to any pool.",
           "Jde o výsledky na syntetické ukázkové kohortě. Ukazují, jak nástroj funguje, a nelze je přidat do žádného souhrnu.")
-        : tx(`To have your results in the reviewed pool that everyone sees, send this file with the signed data-sharing agreement to ${(A.DATA.site || {}).contact || "the MTOP team"}. Drafts you add here are not saved or shared.`,
-          `Aby se vaše výsledky objevily v ověřeném souhrnu, který vidí všichni, pošlete tento soubor s podepsanou smlouvou o sdílení dat na ${(A.DATA.site || {}).contact || "tým MTOP"}. Návrhy přidané zde se neukládají ani nesdílejí.`) })));
+        : tx(`Drafts stay in this browser and are not saved or shared. To have your results in the reviewed pool that everyone sees, send this file with the signed data-sharing agreement to ${(A.DATA.site || {}).contact || "the MTOP team"}.`,
+          `Návrhy zůstávají v tomto prohlížeči a neukládají se ani nesdílejí. Aby se vaše výsledky objevily v ověřeném souhrnu, který vidí všichni, pošlete tento soubor s podepsanou smlouvou o sdílení dat na ${(A.DATA.site || {}).contact || "tým MTOP"}.`) })));
 
     // predictions preview
     const det = h("details", { class: "template" });
