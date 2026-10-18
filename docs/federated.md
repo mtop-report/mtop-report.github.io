@@ -13,7 +13,7 @@ and IT staff, and the data protection officer.
 ## What the demo shows
 
 No other hospital is involved yet: the four centres are FNO's own patients, split by treatment
-years into four virtual centres (A 2005–2014, B 2015–2017, C 2018–2020, D 2021–2025, 316–378
+years into four virtual centres (A 2005–2014, B 2015–2017, C 2018–2020, D 2021–2025, 349–379
 patients each). Each centre's data were exported in the MTOP
 template and read by its own node. Inside every centre, 5-fold cross-validation kept a fifth of the
 patients aside, and each centre scored its own held-out patients with three options: a model
@@ -24,28 +24,35 @@ and the shared model plus 10 boosting steps on the centre's own patients, done l
 
 | Admission model, mean AUROC over the 4 centres | Alone | Network | Adapted |
 |---|---|---|---|
-| Death within 90 days | 0.742 | **0.780** | 0.778 |
-| Functional independence (mRS 0–2) | 0.733 | 0.747 | **0.755** |
+| Death within 90 days | 0.750 | **0.771** | 0.774 |
+| Functional independence (mRS 0–2) | 0.741 | 0.744 | **0.749** |
 
-- **Death**: every centre gained (+0.02 to +0.07); significant at two centres. Death is the outcome
-  with the fewest events per centre, which is where a single centre's data run out first.
-- **Small centres**: a centre with only 50 patients reached AUROC 0.59 (mRS 0–2) or 0.57 (death)
-  alone, and 0.74 or 0.77 in the network.
+The same comparison for the regressions, fitted exactly across the centres by federated Newton steps:
+
+| Admission model, mean AUROC | Alone | Network |
+|---|---|---|
+| Regression with splines, death | 0.669 | **0.755** |
+| Regression with splines, mRS 0–2 | 0.711 | **0.749** |
+| Linear regression, death | 0.679 | **0.758** |
+| Linear regression, mRS 0–2 | 0.713 | **0.749** |
+
+- **Regressions gain most**: with 33 predictors a regression fitted on one centre's few hundred
+  patients overfits; fitted across the network it matches the boosted trees.
+- **Small centres**: a centre with only 50 patients reached AUROC 0.61 (mRS 0–2) or 0.56 (death)
+  alone, and 0.73 or 0.76 in the network.
 - **All settings**: across five stage/outcome settings and four centres, the network (or its local
-  adaptation) did better than the centre alone in 19 of 20 comparisons. The exception is
-  functional independence at admission for centre D, FNO's most recent era, whose outcomes changed
-  after 2020; local adaptation narrows that gap.
+  adaptation) did better than the centre alone in 18 of 20 comparisons.
 - **Validation without moving data**: a network of three trained the model and the fourth tested it
-  at home (AUROC 0.69–0.77 for mRS 0–2, 0.75–0.78 for death). Calibration differs between centres,
+  at home (AUROC 0.70–0.76 for mRS 0–2, 0.76–0.79 for death). Calibration differs between centres,
   which each centre can measure and correct locally.
 - **Exactness**: the federated model's 100 trees are identical to pooled training, split for split;
-  the spline logistic regression matches pooled fitting to 6 × 10⁻⁸. Over real HTTP connections the
-  training took 301 rounds and 5 s, with about 2 MB sent per centre.
+  the spline logistic regression matches pooled fitting to 3e-08. Over real HTTP connections the
+  training took 301 rounds and 7 s, with about 3.5 MB sent per centre.
 
 Real partner centres differ more in case mix and practice than FNO's eras do. Measuring and
 handling that is what the network is for.
 
-Reproduce: `python -m mtop fed-demo` (about 15 minutes; `--quick` for a short run). Results go to
+Reproduce: `python -m mtop fed-demo` (about 30 minutes; `--quick` for a short run). Results go to
 `artifacts/public/federated.json` (aggregates only) and `reports/federated.md`.
 
 ## How it works
