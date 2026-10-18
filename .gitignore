@@ -6,6 +6,7 @@
 data/raw/*
 !data/raw/README.md
 data/processed/
+data/studio/
 artifacts/private/
 reports/*
 !reports/README.md

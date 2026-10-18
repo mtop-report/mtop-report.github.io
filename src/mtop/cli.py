@@ -22,6 +22,8 @@
   site      build the self-contained web app (site/index.html)
   all       everything above, in order
   synth     write a synthetic registry with the same schema (data/synthetic)
+  studio    the local data studio (FNO only): every version of the registry with the findings
+            marked, corrections recorded with an audit trail (--set-password first; needs .[studio])
 """
 from __future__ import annotations
 
@@ -42,31 +44,55 @@ def _load_clean() -> pd.DataFrame:
     return pd.read_parquet(f)
 
 
-def cmd_clean(args):
+def pipeline_clean(src: Path, use_corrections: bool = True) -> dict:
+    """Clean the registry export: apply the corrections file (data/studio/corrections.csv, if any),
+    run the cleaning rules and write data/processed/clean.parquet, reports/data_quality.xlsx and the
+    public aggregates (raw_profile.json, data_checks.json). Also used by the local data studio."""
     import json
 
     from .clean import check_summary, clean_registry, load_raw, raw_profile
     from .cohort import flow
     from .config import settings
+    from .corrections import apply_corrections, corrections_file, load_corrections
 
-    src = Path(args.input) if args.input else paths.DEFAULT_RAW_FILE
-    if not src.exists():
-        raise SystemExit(f"Raw file not found: {src}. Put the registry export in data/raw/ "
-                         "or pass --input (use --input data/synthetic/registry_synthetic.xlsx to test).")
     raw = load_raw(src)
+    report = None
+    if use_corrections and corrections_file().exists():
+        raw, report = apply_corrections(raw, load_corrections())
     clean, issues = clean_registry(raw)
-    prof = raw_profile(raw, int(settings()["privacy"]["min_cell"]))
+    min_cell = int(settings()["privacy"]["min_cell"])
+    prof = raw_profile(raw, min_cell)
     (paths.PUBLIC / "raw_profile.json").write_text(json.dumps(prof, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
     clean.to_parquet(paths.PROCESSED / "clean.parquet", index=False)
     with pd.ExcelWriter(paths.REPORTS / "data_quality.xlsx") as xw:
         summary = issues.groupby(["column", "action"]).size().rename("n").reset_index()
         summary.to_excel(xw, sheet_name="summary", index=False)
         issues.to_excel(xw, sheet_name="issues", index=False)
-    checks = check_summary(issues, len(clean), int(settings()["privacy"]["min_cell"]))
+        if report is not None and len(report):
+            report.to_excel(xw, sheet_name="corrections", index=False)
+    checks = check_summary(issues, len(clean), min_cell)
+    if report is not None and len(report):
+        n = int((report["result"] == "applied").sum())
+        checks["corrections_applied"] = n if n >= min_cell or n == 0 else None
     (paths.PUBLIC / "data_checks.json").write_text(json.dumps(checks, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
     _, steps = flow(clean)
-    print(f"clean: {len(clean)} rows, {len(issues)} logged issues")
-    for s in steps:
+    return {"clean": clean, "issues": issues, "steps": steps, "report": report}
+
+
+def cmd_clean(args):
+    src = Path(args.input) if args.input else paths.DEFAULT_RAW_FILE
+    if not src.exists():
+        raise SystemExit(f"Raw file not found: {src}. Put the registry export in data/raw/ "
+                         "or pass --input (use --input data/synthetic/registry_synthetic.xlsx to test).")
+    out = pipeline_clean(src, use_corrections=not getattr(args, "no_corrections", False))
+    rep = out["report"]
+    if rep is not None and len(rep):
+        counts = rep["result"].value_counts().to_dict()
+        print("corrections: " + ", ".join(f"{k} {v}" for k, v in counts.items()))
+        if counts.get("conflict"):
+            print("  some corrections no longer match the export (see reports/data_quality.xlsx, sheet corrections)")
+    print(f"clean: {len(out['clean'])} rows, {len(out['issues'])} logged issues")
+    for s in out["steps"]:
         print(f"  {s['step']:<36} {s['n']:>5}")
 
 
@@ -176,6 +202,12 @@ def cmd_fed_demo(args):
     print(f"fed-demo: federated trees identical to pooled: {out['equivalence']['gbdt']['identical']}")
 
 
+def cmd_studio(args):
+    from .studio import main as studio_main
+
+    studio_main(args)
+
+
 def cmd_all(args):
     t = time.time()
     cmd_clean(args)
@@ -204,11 +236,18 @@ def main(argv=None):
                      ("extras", cmd_extras), ("adaptive", cmd_adaptive), ("fed-demo", cmd_fed_demo),
                      ("explorer", cmd_explorer), ("preprocessing", cmd_preprocessing), ("reporting", cmd_reporting),
                      ("associations", cmd_associations), ("report", cmd_report), ("site", cmd_site),
-                     ("all", cmd_all), ("synth", cmd_synth)]:
+                     ("all", cmd_all), ("synth", cmd_synth), ("studio", cmd_studio)]:
         p = sub.add_parser(name)
         p.set_defaults(fn=fn)
-        if name in ("clean", "all"):
+        if name in ("clean", "all", "studio"):
             p.add_argument("--input", help="registry Excel file (default: data/raw/mt_patients_master.xlsx)")
+        if name in ("clean", "all"):
+            p.add_argument("--no-corrections", action="store_true",
+                           help="ignore data/studio/corrections.csv (clean the export exactly as recorded)")
+        if name == "studio":
+            p.add_argument("--port", type=int, default=8765)
+            p.add_argument("--set-password", action="store_true", help="set or change the studio password")
+            p.add_argument("--no-browser", action="store_true", help="do not open a browser window")
         if name in ("train", "nested", "extras", "all", "fed-demo", "associations"):
             p.add_argument("--quick", action="store_true", help="fewer tuning trials / bootstrap refits, for testing")
         if name == "train":

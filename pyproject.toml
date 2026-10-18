@@ -27,6 +27,7 @@ dependencies = [
 
 [project.optional-dependencies]
 federated = ["cryptography>=41"]
+studio = ["streamlit>=1.40"]
 dev = ["pytest>=8", "cryptography>=41"]
 
 [project.scripts]
