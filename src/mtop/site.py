@@ -14,8 +14,8 @@ from . import __version__
 from .config import settings
 from .paths import PUBLIC, SITE, WEB
 
-JS_FILES = ["i18n.js", "model.js", "models_extra.js", "metrics.js", "charts.js", "app.js",
-            "view_adaptive.js", "view_network.js", "view_federated.js", "view_roadmap.js", "view_dictionary.js", "boot.js"]
+JS_FILES = ["i18n.js", "model.js", "models_extra.js", "metrics.js", "charts.js", "app.js", "view_preprocessing.js",
+            "view_adaptive.js", "view_network.js", "view_federated.js", "view_reporting.js", "view_roadmap.js", "boot.js"]
 ASSETS = ["icon-192.png", "icon-512.png", "icon-maskable-512.png", "apple-touch-icon.png", "mark.svg"]
 
 # Instrument Sans (SIL OFL 1.1, web/assets/fonts/OFL.txt), self-hosted and inlined so the page makes
@@ -103,11 +103,11 @@ def build_site():
         "data_checks": _load("data_checks.json"),
         "extras": _load("extras.json", {}),
         "adaptive": _load("adaptive.json"),
-        "subgroups": _load("subgroups.json", []),
+        "preprocessing": _load("preprocessing.json"),
+        "reporting": _load("reporting.json"),
         "demo_csv": _load("demo_synthetic.csv", ""),
         "qr_svg": (WEB / "assets" / "qr.svg").read_text(encoding="utf-8") if (WEB / "assets" / "qr.svg").exists() else "",
         "logo_svg": logo.read_text(encoding="utf-8").strip() if logo.exists() else "",
-        "reconciliation": _load("reconciliation.json"),
         "federated": _load("federated.json"),
         "site": site_cfg,
     }

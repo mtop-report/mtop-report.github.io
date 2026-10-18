@@ -64,7 +64,7 @@ def test_categorical_mappings():
     clean, _ = clean_registry(raw)
     assert clean.loc[0, "technique"] == "combined"          # Solumbra is combined whatever the device field says
     assert clean.loc[1, "technique"] == "aspiration"        # combined procedure: technique from device
-    assert clean.loc[2, "diagnostic_only"] == 1 and clean.loc[2, "technique"] == "none"
+    assert clean.loc[2, "diagnostic_only"] == 1 and clean.loc[2, "technique"] == "diagnostic"   # PAG kept as its own category
     assert np.isnan(clean.loc[3, "transfer"])               # missing stays missing (not "transferred")
     assert clean.loc[4, "tici"] == 2.5 and np.isnan(clean.loc[4, "reperfusion_2b3"])
     assert clean.loc[5, "occlusion"] == "cervical_ICA"

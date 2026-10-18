@@ -1,12 +1,14 @@
-"""Export trained models and validation results for the browser.
+"""Export the deployed models and the validation results for the browser.
 
-model_bundle.json  — everything the calculator needs: UI metadata from config/, and for each
-                     stage x target the LightGBM trees in a compact array form.
-validation.json    — aggregate validation results (no row-level data).
+model_bundle.json  — everything the calculator needs: UI metadata from config/, the registry values
+                     used to average over unknown inputs, and for each stage x target every
+                     publishable learner (regression with splines, linear regression, LightGBM,
+                     XGBoost) with its recent-era intercept, plus which one the pre-specified rule chose.
+validation.json    — aggregate validation results for both temporal splits, nested cross-validation,
+                     the model choice and the deployed models' summaries (no row-level data).
 
-Privacy: trees are grown with min_child_samples >= privacy.min_leaf (default 20), so every
-split side and leaf summarises at least that many patients. Training-data feature ranges
-(LightGBM's feature_infos) are deliberately not exported.
+Privacy: tree leaves summarise >= privacy.min_leaf patients (checked here); every published count
+is >= privacy.min_cell or suppressed; training-data feature ranges are not exported.
 """
 from __future__ import annotations
 
@@ -14,68 +16,34 @@ import copy
 import datetime as dt
 import hashlib
 import json
+import math
 
-import lightgbm as lgb
 import numpy as np
 import pandas as pd
 
 from . import __version__
+from . import learners as Lr
+from .cohort import flow, stage_cohort
 from .config import features, settings, stage_ids, targets
-from .features import column_to_feature, feature_columns
-from .cohort import flow
-from .paths import CONFIG, PRIVATE, PROCESSED, PUBLIC
-
-MISSING = {"None": 0, "Zero": 1, "NaN": 2}
+from .features import column_to_feature, design_matrix, feature_columns
+from .paths import PRIVATE, PROCESSED, PUBLIC
+from .train import load_deployed, load_results, subgroup_auroc_ci
 
 
-def _sig(x: float, digits: int = 10) -> float:
-    return float(f"{x:.{digits}g}")
-
-
-def flatten_tree(node: dict) -> dict:
-    """Pre-order arrays: f feature (-1 leaf), t threshold, l/r children, d default-left,
-    m missing type (0 None, 1 Zero, 2 NaN), v leaf value, c sample count."""
-    arr = {k: [] for k in "ftlrdmvc"}
-
-    def visit(n):
-        i = len(arr["f"])
-        for k in arr:
-            arr[k].append(0)
-        if "split_feature" in n:
-            if n.get("decision_type", "<=") != "<=":
-                raise ValueError("categorical splits are not supported by the browser model")
-            arr["f"][i] = int(n["split_feature"])
-            arr["t"][i] = float(n["threshold"])
-            arr["d"][i] = 1 if n["default_left"] else 0
-            arr["m"][i] = MISSING[n["missing_type"]]
-            arr["c"][i] = int(n["internal_count"])
-            arr["l"][i] = visit(n["left_child"])
-            arr["r"][i] = visit(n["right_child"])
-        else:
-            arr["f"][i] = -1
-            arr["l"][i] = arr["r"][i] = -1
-            arr["v"][i] = _sig(float(n["leaf_value"]))
-            arr["c"][i] = int(n.get("leaf_count", 0))
-        return i
-
-    visit(node)
-    return arr
-
-
-def booster_to_json(booster: lgb.Booster) -> dict:
-    dump = booster.dump_model()
-    obj = dump["objective"]
-    sigmoid = 1.0
-    if "sigmoid:" in obj:
-        sigmoid = float(obj.split("sigmoid:")[1].split()[0])
-    trees = [flatten_tree(t["tree_structure"]) for t in dump["tree_info"]]
-    return {"feature_names": dump["feature_names"], "sigmoid": sigmoid, "trees": trees}
-
-
-def min_leaf_count(model_json: dict) -> int:
-    """Smallest leaf among trees with at least one split (single-leaf trees summarise everyone)."""
-    counts = [c for t in model_json["trees"] if len(t["f"]) > 1 for f, c in zip(t["f"], t["c"]) if f == -1]
-    return min(counts) if counts else 10**9
+def clean_json(o):
+    """NaN and infinities become null (JSON has no NaN); numpy scalars become Python numbers."""
+    if isinstance(o, dict):
+        return {k: clean_json(v) for k, v in o.items()}
+    if isinstance(o, (list, tuple)):
+        return [clean_json(v) for v in o]
+    if isinstance(o, (np.floating, float)):
+        f = float(o)
+        return None if math.isnan(f) or math.isinf(f) else f
+    if isinstance(o, np.integer):
+        return int(o)
+    if isinstance(o, np.bool_):
+        return bool(o)
+    return o
 
 
 def _ui_features() -> list[dict]:
@@ -108,47 +76,25 @@ def imputation_values(base, k: int = IMPUTE_K) -> dict:
             step = float(f.spec.get("step", 1))
             vals = [float(round(round(v / step) * step, 4)) for v in q]
             out[f.key] = {"type": "numeric", "values": vals}
-        elif f.type == "categorical":
-            freq = s.value_counts(normalize=True)
+        elif f.type in ("categorical", "binary"):
+            freq = s.astype(str if f.type == "categorical" else float).value_counts(normalize=True)
             counts = np.floor(freq.to_numpy() * k).astype(int)
             while counts.sum() < k:
                 counts[np.argmax(freq.to_numpy() * k - counts)] += 1
-            vals = [str(c) for c, n in zip(freq.index, counts) for _ in range(n)]
-            out[f.key] = {"type": "categorical", "values": vals}
+            vals = [(str(c) if f.type == "categorical" else float(c)) for c, n in zip(freq.index, counts) for _ in range(n)]
+            out[f.key] = {"type": f.type, "values": vals}
     return out
-
-
-THRESHOLDS = (0.2, 0.3, 0.4, 0.5, 0.6, 0.7)
-
-
-def threshold_table(y, p, min_cell: int) -> list[dict]:
-    """Sensitivity, specificity, PPV and NPV at fixed risk thresholds (positive = estimate >= t).
-    A threshold is published only if every cell of its 2x2 table holds >= min_cell patients, so
-    no count can be recovered for a small group."""
-    y = np.asarray(y, float)
-    p = np.asarray(p, float)
-    rows = []
-    for t in THRESHOLDS:
-        pos = p >= t
-        tp, fp = int(((y == 1) & pos).sum()), int(((y == 0) & pos).sum())
-        fn, tn = int(((y == 1) & ~pos).sum()), int(((y == 0) & ~pos).sum())
-        if min(tp, fp, fn, tn) < min_cell:
-            rows.append({"t": t, "suppressed": True})
-            continue
-        rows.append({"t": t, "sens": round(tp / (tp + fn), 3), "spec": round(tn / (tn + fp), 3),
-                     "ppv": round(tp / (tp + fp), 3), "npv": round(tn / (tn + fn), 3), "pos": round((tp + fp) / len(y), 3)})
-    return rows
 
 
 def export_all() -> None:
     PUBLIC.mkdir(parents=True, exist_ok=True)
-    with open(PRIVATE / "train_results.json") as fh:
-        res = json.load(fh)
     cfg = settings()
     min_leaf = int(cfg["privacy"]["min_leaf"])
-    min_cell = int(cfg["privacy"]["min_cell"])
-    pred_file = PRIVATE / "temporal_predictions.parquet"
-    temporal_preds = pd.read_parquet(pred_file) if pred_file.exists() else None
+    results = load_results(PRIVATE)
+    dep = json.loads((PRIVATE / "deployment.json").read_text())
+    nested_path = PRIVATE / "nested_cv.json"
+    nested = json.loads(nested_path.read_text()) if nested_path.exists() else None
+    base, _ = flow(pd.read_parquet(PROCESSED / "clean.parquet"))
 
     bundle = {
         "app": "MTOP",
@@ -158,60 +104,55 @@ def export_all() -> None:
         "targets": targets(),
         "features": _ui_features(),
         "recent_era_from_year": cfg["split"]["recent_era_from_year"],
-        "impute": {},
+        "reference": Lr.REFERENCE,
+        "impute": imputation_values(base),
         "models": {},
     }
-    clean_file = PROCESSED / "clean.parquet"
-    if clean_file.exists():
-        base, _ = flow(pd.read_parquet(clean_file))
-        bundle["impute"] = imputation_values(base)
-    validation = {"generated": bundle["generated"], "version": __version__, "meta": res["meta"], "stages": {}}
-
     for stage in stage_ids():
-        sres = res["stages"][stage]
+        d = stage_cohort(base, stage)
+        X_all = design_matrix(d, stage)
+        cols = feature_columns(stage)
+        if list(X_all.columns) != cols:
+            raise ValueError(f"column mismatch for {stage}")
+        c2f = column_to_feature(stage)
         bundle["models"][stage] = {}
-        validation["stages"][stage] = {k: sres[k] for k in ("n_all", "n_dev", "n_test")}
-        validation["stages"][stage]["targets"] = {}
         for target in targets():
-            tres = sres["targets"][target]
-            booster = lgb.Booster(model_file=str(PRIVATE / f"lgbm_{stage}_{target}.txt"))
-            mj = booster_to_json(booster)
-            cols = feature_columns(stage)
-            if mj["feature_names"] != cols:
-                raise ValueError(f"column mismatch for {stage}/{target}")
-            ml = min_leaf_count(mj)
-            if ml < min_leaf:
-                raise ValueError(f"{stage}/{target}: a leaf summarises only {ml} patients (< {min_leaf})")
-            c2f = column_to_feature(stage)
+            pk = load_deployed(PRIVATE, stage, target)
+            if pk["columns"] != cols:
+                raise ValueError(f"deployed columns differ for {stage}/{target}")
+            learners = {name: Lr.export(m["fitted"], m["shift"], X_all, min_leaf) for name, m in pk["models"].items()}
             bundle["models"][stage][target] = {
-                "columns": cols,
-                "column_feature": [c2f[c] for c in cols],
-                "sigmoid": mj["sigmoid"],
-                "intercept_recent": round(float(tres["deployed"]["intercept_recent"]), 6),
-                "n_train": int(sres["n_all"]),
-                "min_leaf_count": int(ml),
-                "trees": mj["trees"],
+                "chosen": pk["chosen"], "columns": cols, "column_feature": [c2f[c] for c in cols],
+                "n_train": int(len(d)), "learners": learners,
             }
-            v = {k: tres[k] for k in ("internal", "temporal", "curves", "recalibration", "explain")}
-            v["deployed"] = tres["deployed"]
-            v["params"] = tres["params"]
-            v["rounds_dev"] = tres["rounds_dev"]
-            if "settings" in tres:
-                v["settings"] = tres["settings"]
-            if temporal_preds is not None:
-                tp = temporal_preds[(temporal_preds["stage"] == stage) & (temporal_preds["target"] == target)
-                                    & (temporal_preds["model"] == "LightGBM")]
-                if len(tp):
-                    v["thresholds"] = threshold_table(tp["y"].to_numpy(), tp["p"].to_numpy(), min_cell)
-            validation["stages"][stage]["targets"][target] = v
 
+    # bootstrap CIs for the subgroup AUROCs, from the saved test predictions
+    min_cell = int(cfg["privacy"]["min_cell"])
+    for label, r in results.items():
+        f = PRIVATE / f"predictions_{label}.parquet"
+        if not f.exists():
+            continue
+        cis = subgroup_auroc_ci(base, pd.read_parquet(f), min_cell, n_boot=1000, seed=int(cfg["seed"]))
+        for stage, sres in r["stages"].items():
+            for target, tres in sres["targets"].items():
+                for model, rows in tres.get("subgroups", {}).items():
+                    c = cis.get((stage, target, model), {})
+                    for row in rows:
+                        key = (row.get("dim"), row.get("group"))
+                        if "auroc" in row and key in c:
+                            row["auroc_ci"] = c[key]
+
+    validation = {
+        "generated": bundle["generated"], "version": __version__,
+        "meta": results["primary"]["meta"] if "primary" in results else {},
+        "selection": dep["selection"], "nested": nested,
+        "splits": {label: {"test_from_year": r["test_from_year"], "stages": r["stages"]} for label, r in results.items()},
+        "deployed": dep["deployed"],
+    }
     canon = json.dumps(bundle["models"], sort_keys=True, separators=(",", ":")).encode("utf-8")
     bundle["fingerprint"] = hashlib.sha256(canon).hexdigest()
-    with open(PUBLIC / "model_bundle.json", "w", encoding="utf-8") as fh:
-        json.dump(bundle, fh, ensure_ascii=False, separators=(",", ":"))
-    with open(PUBLIC / "validation.json", "w", encoding="utf-8") as fh:
-        json.dump(validation, fh, ensure_ascii=False, separators=(",", ":"))
-    size = (PUBLIC / "model_bundle.json").stat().st_size / 1e6
-    print(f"export: model_bundle.json {size:.2f} MB, validation.json "
-          f"{(PUBLIC / 'validation.json').stat().st_size / 1e3:.0f} kB")
-    _ = CONFIG  # config files are embedded via _ui_features()
+    for name, obj in (("model_bundle.json", bundle), ("validation.json", validation)):
+        with open(PUBLIC / name, "w", encoding="utf-8") as fh:
+            json.dump(clean_json(obj), fh, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+    print(f"export: model_bundle.json {(PUBLIC / 'model_bundle.json').stat().st_size / 1e6:.2f} MB, "
+          f"validation.json {(PUBLIC / 'validation.json').stat().st_size / 1e6:.2f} MB")

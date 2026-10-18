@@ -18,11 +18,20 @@
     age: ["age", "vek"], sex_male: ["sexmale", "male", "sex", "pohlavi", "gender"], mrs_pre: ["mrspre", "premrs", "mrsbefore", "prestrokemrs"],
     nihss_adm: ["nihssadm", "nihss", "admissionnihss", "baselinenihss", "nihss0"], aspects: ["aspects"], occlusion: ["occlusion", "occlusionsite", "okluze"],
     side_left: ["sideleft", "leftside", "hemisphereleft"], onset_to_puncture: ["onsettopuncture", "otp", "onsettopuncturemin", "strokeonsettopuncturemin"],
-    ivt: ["ivt", "ivthrombolysis"], transfer: ["transfer", "dripandship", "transferred"], glucose: ["glucose", "glycemia", "glykemie"], sbp: ["sbp", "systolicbp"],
-    htn: ["htn", "hypertension"], dm: ["dm", "diabetes"], arrhythmia: ["arrhythmia", "af", "atrialfibrillation"], stroke_prior: ["strokeprior", "priorstroke", "previousstroke"],
-    anticoag: ["anticoag", "anticoagulation"], tici: ["tici", "mtici", "etici", "finaltici"], procedure_min: ["proceduremin", "procedureduration"], technique: ["technique", "firstlinetechnique"],
-    stenting: ["stenting", "acutestenting"], anesthesia: ["anesthesia", "anaesthesia"], nihss_24h: ["nihss24h", "nihss24"], sich: ["sich"], nihss_7d: ["nihss7d", "nihss7"],
-    edema: ["edema", "oedema", "cerebraledema"], mrs90: ["mrs90", "90daymrs", "mrs3m", "mrs3months"],
+    ivt: ["ivt", "ivthrombolysis"], ivt_external: ["ivtexternal", "ivtotherhospital", "ivtindifferenthospital", "dripandshipivt"],
+    onset_to_ivt: ["onsettoivt", "otn", "onsettoneedle", "strokeonsettoivtmin"], transfer: ["transfer", "dripandship", "transferred"],
+    onset_hour: ["onsethour", "hourofonset"], weekend: ["weekend", "weekendonset"],
+    glucose: ["glucose", "glycemia", "glykemie"], sbp: ["sbp", "systolicbp"], dbp: ["dbp", "diastolicbp"], bmi: ["bmi"],
+    htn: ["htn", "hypertension"], dm: ["dm", "diabetes"], hld: ["hld", "hyperlipidemia", "dyslipidemia"], arrhythmia: ["arrhythmia", "af", "atrialfibrillation"],
+    stroke_prior: ["strokeprior", "priorstroke", "previousstroke"], tia_prior: ["tiaprior", "priortia", "previoustia"], smoking: ["smoking", "smoker"],
+    alcohol: ["alcohol", "alcoholabuse"], statin: ["statin", "statins", "statinsbefore"], heart3: ["heart3", "heartcondition", "heartdisease"],
+    antithrombotic: ["antithrombotic", "antithromboticsbefore", "antithrombotics"],
+    tici: ["tici", "mtici", "etici", "finaltici"], technique: ["technique", "firstlinetechnique"], stenting: ["stenting", "acutestenting", "stent"],
+    angioplasty: ["angioplasty", "pta"], ia_lysis: ["ialysis", "iat", "intraarteriallysis"], procedure_min: ["proceduremin", "procedureduration"],
+    onset_to_recan: ["onsettorecan", "onsettorecanalization", "onsettoreperfusion"], anesthesia: ["anesthesia", "anaesthesia"],
+    nihss_24h: ["nihss24h", "nihss24"], sich: ["sich"], ich_other: ["ichother", "nonsich", "asymptomaticich"], nihss_7d: ["nihss7d", "nihss7"],
+    edema: ["edema", "oedema", "cerebraledema"], decompression: ["decompression", "decompressivecraniectomy", "hemicraniectomy"],
+    mrs90: ["mrs90", "90daymrs", "mrs3m", "mrs3months"],
   };
   const BIN = { "1": 1, "0": 0, yes: 1, no: 0, y: 1, n: 0, true: 1, false: 0, ano: 1, ne: 0 };
   const SEX = { "1": 1, "0": 0, m: 1, male: 1, man: 1, muz: 1, f: 0, female: 0, woman: 0, w: 0, z: 0, zena: 0 };
@@ -30,7 +39,11 @@
   const CAT = {
     occlusion: { ica: "ICA", icat: "ICA", t: "ICA", intracranialica: "ICA", m1: "M1", m2: "distal", m3: "distal", aca: "distal", distal: "distal",
       cervicalica: "cervical_ICA", tandem: "cervical_ICA", cca: "cervical_ICA", basilar: "basilar", ba: "basilar", vertebral: "other_posterior", va: "other_posterior", pca: "other_posterior", otherposterior: "other_posterior" },
-    technique: { aspiration: "aspiration", adapt: "aspiration", stentretriever: "stent_retriever", sr: "stent_retriever", combined: "combined", solumbra: "combined", none: "none" },
+    technique: { aspiration: "aspiration", adapt: "aspiration", stentretriever: "stent_retriever", sr: "stent_retriever", combined: "combined", solumbra: "combined", none: "none",
+      diagnostic: "diagnostic", pag: "diagnostic", diagnosticangiography: "diagnostic" },
+    heart3: { none: "none", no: "none", zadne: "none", coronary: "coronary", chd: "coronary", cad: "coronary", ichs: "coronary", other: "other" },
+    antithrombotic: { none: "none", no: "none", zadna: "none", antiplatelet: "antiplatelet", asa: "antiplatelet", aspirin: "antiplatelet", clopidogrel: "antiplatelet",
+      anticoagulant: "anticoagulant", anticoagulation: "anticoagulant", warfarin: "anticoagulant", noac: "anticoagulant", doac: "anticoagulant", lmwh: "anticoagulant" },
     anesthesia: { general: "general", ga: "general", sedation: "sedation", cs: "sedation", consciousseda: "sedation", local: "local", la: "local" },
   };
   const TICI = { "0": 0, "1": 1, "2a": 2, "2": 2.5, "2b": 3, "2c": 4, "3": 4 };
@@ -128,8 +141,16 @@
 
   // ------------------------------------------------------------------ validation run
   const tick = () => new Promise((r) => setTimeout(r, 0));
-  const eligible = (x, st) => x.mrs90 !== null
-    && (A.idx(st) < 1 || x.tici !== null) && (A.idx(st) < 2 || x.nihss_24h !== null) && (A.idx(st) < 3 || x.nihss_7d !== null);
+  const eligible = (x, st) => x.mrs90 !== null && (A.idx(st) < 1 || x.tici !== null)
+    && (st !== "h24" || x.nihss_24h !== null) && (st !== "d7" || x.nihss_7d !== null);
+  // every published learner of a stage and outcome (the calculator's choice first)
+  const learnersOf = (st, tg) => {
+    const e = A.entryOf(st, tg);
+    return [e.chosen].concat(Object.keys(e.learners).filter((k) => k !== e.chosen));
+  };
+  const ALL_LEARNERS = Array.from(new Set(STAGES.flatMap((st) => A.TARGETS.flatMap((tg) => Object.keys(A.entryOf(st, tg).learners)))));
+  S.netLearner = S.netLearner || null;
+  const netLearner = (st, tg) => (S.netLearner && A.entryOf(st, tg).learners[S.netLearner] ? S.netLearner : A.chosenOf(st, tg));
 
   async function run(root) {
     NS.running = true; NS.progress = 0; NS.results = null; render(root);
@@ -140,10 +161,16 @@
     for (const st of STAGES) {
       for (let i = 0; i < recs.length; i++) {
         if (eligible(recs[i], st)) {
-          preds[i][st] = { good: A.predictStage(st, recs[i], "good_outcome").p, death: A.predictStage(st, recs[i], "death90").p };
+          const x = recs[i];
+          const row = {};
+          for (const tg of A.TARGETS) {
+            row[tg] = {};
+            for (const nm of learnersOf(st, tg)) row[tg][nm] = A.predictStage(st, x, tg, nm).p;
+          }
+          preds[i][st] = row;
         }
         done++;
-        if (done % 40 === 0) { NS.progress = done / total; updateProgress(root); await tick(); }
+        if (done % 10 === 0) { NS.progress = done / total; updateProgress(root); await tick(); }
       }
     }
     const results = {};
@@ -151,10 +178,13 @@
       results[st] = {};
       const idxs = recs.map((x, i) => i).filter((i) => preds[i][st]);
       for (const tg of A.TARGETS) {
+        results[st][tg] = {};
         const y = idxs.map((i) => (tg === "good_outcome" ? (recs[i].mrs90 <= 2 ? 1 : 0) : (recs[i].mrs90 === 6 ? 1 : 0)));
-        const p = idxs.map((i) => preds[i][st][tg === "good_outcome" ? "good" : "death"]);
-        results[st][tg] = idxs.length >= 20 ? MX.summary(y, p, { B: 500, minCell: 10 }) : { n: idxs.length, insufficient: true };
-        await tick();
+        for (const nm of learnersOf(st, tg)) {
+          const p = idxs.map((i) => preds[i][st][tg][nm]);
+          results[st][tg][nm] = idxs.length >= 20 ? MX.summary(y, p, { B: 500, minCell: 10 }) : { n: idxs.length, insufficient: true };
+          await tick();
+        }
       }
     }
     NS.preds = preds;
@@ -168,22 +198,34 @@
     if (bar) bar.style.width = `${Math.round(NS.progress * 100)}%`;
   }
 
+  // results file: every published learner per stage and outcome (format 2); "chosen" names the
+  // calculator's model, whose numbers also sit at the stage level for readers of format 1
   function exportJSON() {
     const out = {
-      format: "mtop-validation/1", model_version: B.version, model_fingerprint: B.fingerprint || null,
+      format: "mtop-validation/2", model_version: B.version, model_fingerprint: B.fingerprint || null,
       site: NS.label || "unnamed site", generated: new Date().toISOString().slice(0, 10),
       rows: NS.records.length, columns_found: Object.keys(NS.map || {}), stages: {},
     };
+    const pick = (r) => (r.insufficient ? { n: r.n, insufficient: true }
+      : { n: r.n, events: r.events, auroc: r.auroc, auroc_ci: r.auroc_ci, se_logit: r.se_logit, brier: r.brier, citl: r.citl, slope: r.slope, calibration: r.calibration });
     for (const st of STAGES) {
       out.stages[st] = {};
       for (const tg of A.TARGETS) {
-        const r = NS.results[st][tg];
-        out.stages[st][tg] = r.insufficient ? { n: r.n, insufficient: true }
-          : { n: r.n, events: r.events, auroc: r.auroc, auroc_ci: r.auroc_ci, se_logit: r.se_logit, brier: r.brier, citl: r.citl, slope: r.slope, calibration: r.calibration };
+        const ch = A.chosenOf(st, tg);
+        const per = {};
+        for (const [nm, r] of Object.entries(NS.results[st][tg])) per[nm] = pick(r);
+        out.stages[st][tg] = Object.assign({ chosen: ch, models: per }, per[ch]);
       }
     }
     return JSON.stringify(out, null, 1);
   }
+  // a site's result for one learner from either file format
+  const siteResult = (j, st, tg, nm) => {
+    const r = (j.stages[st] || {})[tg];
+    if (!r) return null;
+    if (r.models) return r.models[nm] || null;
+    return nm === A.chosenOf(st, tg) ? r : null;
+  };
 
   function copyText(text, btn) {
     const ok = () => { const old = btn.textContent; btn.textContent = tx("Copied", "Zkopírováno"); setTimeout(() => (btn.textContent = old), 1500); };
@@ -345,25 +387,45 @@
       A.TARGETS.map((k) => h("button", { type: "button", "aria-pressed": String(S.netTarget === k), onclick: () => { S.netTarget = k; render(root); } }, k === "good_outcome" ? A.t().targetGood : A.t().targetDeath)));
     box.appendChild(h("div", { class: "controls" }, h("b", { text: tx("Results", "Výsledky") }), seg));
     const tg = S.netTarget;
-    const ref = (st) => A.V.stages[st].targets[tg].temporal.LightGBM;
+    const lnSel = h("select", { class: "sel", id: "lv-learner" });
+    lnSel.appendChild(h("option", { value: "", selected: S.netLearner ? null : true }, tx("Calculator's model for each stage", "Model kalkulačky pro každou fázi")));
+    for (const k of ALL_LEARNERS) lnSel.appendChild(h("option", { value: k, selected: S.netLearner === k ? true : null }, A.mname(k)));
+    lnSel.addEventListener("change", () => { S.netLearner = lnSel.value || null; render(root); });
+    box.appendChild(h("div", { class: "controls" }, h("label", { for: "lv-learner" }, tx("Model", "Model")), lnSel));
+    const fnoYrs = A.yearsOf("primary");
+    const ref = (st) => A.V.splits.primary.stages[st].targets[tg].models[netLearner(st, tg)];
     const tbl = h("table", { class: "data" },
-      h("thead", null, h("tr", null, [tx("Stage", "Fáze"), "n", tx("Events", "Události"), "AUROC (95% CI)", "Brier", tx("Cal. intercept", "Kal. intercept"), tx("Cal. slope", "Kal. sklon"), tx("FNO 2021–2025", "FNO 2021–2025")].map((x) => h("th", { scope: "col", text: x })))),
+      h("thead", null, h("tr", null, [tx("Stage", "Fáze"), tx("Model", "Model"), "n", tx("Events", "Události"), "AUROC (95% CI)", "Brier", tx("Cal. intercept", "Kal. intercept"), tx("Cal. slope", "Kal. sklon"), `FNO ${fnoYrs}`].map((x) => h("th", { scope: "col", text: x })))),
       h("tbody", null, STAGES.map((st) => {
-        const r = NS.results[st][tg];
+        const r = NS.results[st][tg][netLearner(st, tg)];
         const cells = r.insufficient
           ? [h("td", { text: num(r.n) }), h("td", { text: "–" }), h("td", { colspan: 4, text: tx("too few patients or events", "příliš málo pacientů nebo událostí") })]
           : [h("td", { text: num(r.n) }), h("td", { text: num(r.events) }),
             h("td", null, `${num(r.auroc, 3)} `, h("span", { class: "ci", text: `${num(r.auroc_ci[0], 3)}–${num(r.auroc_ci[1], 3)}` })),
             h("td", { text: num(r.brier, 3) }), h("td", { text: signed(r.citl) }), h("td", { text: num(r.slope, 2) })];
-        return h("tr", null, h("th", { scope: "row", text: A.stageLabel(st) }), ...cells, h("td", { text: num(ref(st).auroc, 3) }));
+        return h("tr", null, h("th", { scope: "row", text: A.stageLabel(st) }), h("td", { text: A.mname(netLearner(st, tg)) }), ...cells, h("td", { text: ref(st) ? num(ref(st).auroc, 3) : "–" }));
       })));
     box.appendChild(h("div", { class: "table-scroll" }, tbl));
+    // every learner at the selected stage
+    const cmpRows = learnersOf(S.netStage, tg).map((nm) => {
+      const r = NS.results[S.netStage][tg][nm];
+      const f = A.V.splits.primary.stages[S.netStage].targets[tg].models[nm];
+      return h("tr", { class: nm === A.chosenOf(S.netStage, tg) ? "chosen" : "" },
+        h("th", { scope: "row" }, h("span", { class: "dot", style: `background:${A.mcolor(nm)}` }), A.mname(nm), nm === A.chosenOf(S.netStage, tg) ? h("span", { class: "tag", text: tx("calculator", "kalkulačka") }) : null),
+        ...(r.insufficient ? [h("td", { colspan: 4, text: tx("too few patients or events", "příliš málo pacientů nebo událostí") })]
+          : [h("td", null, `${num(r.auroc, 3)} `, h("span", { class: "ci", text: `${num(r.auroc_ci[0], 3)}–${num(r.auroc_ci[1], 3)}` })), h("td", { text: num(r.brier, 3) }), h("td", { text: signed(r.citl) }), h("td", { text: num(r.slope, 2) })]),
+        h("td", { text: f ? num(f.auroc, 3) : "–" }));
+    });
+    box.appendChild(h("div", { class: "chart-sub", style: "margin-top:14px", text: tx(`Every published model at ${A.stageLabel(S.netStage).toLowerCase()}`, `Všechny zveřejněné modely ve fázi ${A.stageLabel(S.netStage).toLowerCase()}`) }));
+    box.appendChild(h("div", { class: "table-scroll" }, h("table", { class: "data comp" },
+      h("thead", null, h("tr", null, [tx("Model", "Model"), "AUROC (95% CI)", "Brier", tx("Cal. intercept", "Kal. intercept"), tx("Cal. slope", "Kal. sklon"), `FNO ${fnoYrs}`].map((x) => h("th", { scope: "col", text: x })))),
+      h("tbody", null, cmpRows))));
 
     // calibration for the selected stage
     const stSel = h("select", { class: "sel", id: "lv-stage" });
     for (const st of STAGES) stSel.appendChild(h("option", { value: st, selected: st === S.netStage ? true : null }, A.stageLabel(st)));
     stSel.addEventListener("change", () => { S.netStage = stSel.value; render(root); });
-    const r = NS.results[S.netStage][tg];
+    const r = NS.results[S.netStage][tg][netLearner(S.netStage, tg)];
     const calBox = h("div", { class: "card-inner" });
     calBox.appendChild(h("div", { class: "controls" }, h("label", { for: "lv-stage" }, tx("Calibration at", "Kalibrace ve fázi")), stSel));
     if (!r.insufficient && r.calibration.length) {
@@ -393,8 +455,8 @@
     // predictions preview
     const det = h("details", { class: "template" });
     det.appendChild(h("summary", { text: tx("Predictions for each row (stay on this computer)", "Predikce pro každý řádek (zůstávají v tomto počítači)") }));
-    const head = ["#"].concat(STAGES.map((st) => `${A.stageLabel(st)} · mRS 0–2`)).concat(["mrs90"]);
-    const lines = NS.records.map((x, i) => [i + 1].concat(STAGES.map((st) => (NS.preds[i][st] ? NS.preds[i][st].good.toFixed(3) : ""))).concat([x.mrs90 === null ? "" : x.mrs90]));
+    const head = ["#"].concat(STAGES.map((st) => `${A.stageLabel(st)} · mRS 0–2 · ${A.mname(netLearner(st, "good_outcome"))}`)).concat(["mrs90"]);
+    const lines = NS.records.map((x, i) => [i + 1].concat(STAGES.map((st) => (NS.preds[i][st] ? NS.preds[i][st].good_outcome[netLearner(st, "good_outcome")].toFixed(3) : ""))).concat([x.mrs90 === null ? "" : x.mrs90]));
     const cp = h("button", { class: "btn", type: "button" }, tx("Copy all as CSV", "Kopírovat vše jako CSV"));
     cp.addEventListener("click", () => copyText([head.join(",")].concat(lines.map((l) => l.join(","))).join("\n"), cp));
     det.appendChild(h("div", { class: "tool-actions" }, cp));
@@ -423,7 +485,7 @@
       for (const f of fileIn.files) {
         try {
           const j = JSON.parse(await f.text());
-          if (j.format === "mtop-validation/1" && j.stages) NS.imports.push(j);
+          if (/^mtop-validation\/[12]$/.test(j.format || "") && j.stages) NS.imports.push(j);
         } catch (e) { /* ignore unreadable files */ }
       }
       render(root);
@@ -436,12 +498,16 @@
       h("label", { class: "btn", for: "pool-files" }, tx("Add results files", "Přidat soubory výsledků")), fileIn));
 
     const rows = [];
-    const iecv = (((A.DATA.adaptive || {}).iecv || {})[st] || {})[tg];
+    const nm = netLearner(st, tg);
+    const AD = A.DATA.adaptive || {};
+    const iecvAll = ((AD.iecv || {})[st] || {})[tg];
+    const iecv = iecvAll ? (AD.learners ? iecvAll[nm] : iecvAll) : null;
+    card.appendChild(h("p", { class: "note", style: "margin-top:-6px", text: tx(`Model: ${A.mname(nm)} (change it in the results above)`, `Model: ${A.mname(nm)} (lze změnit ve výsledcích výše)`) }));
     if (NS.includeFno && iecv) {
       for (const e of iecv.eras) if (!e.suppressed) rows.push({ label: `FNO ${e.label}`, sub: `n ${e.n}`, est: e.auroc, lo: e.ci[0], hi: e.ci[1], logit: e.logit, se: e.se_logit, color: "var(--c1)" });
     }
     NS.imports.forEach((j) => {
-      const r = (j.stages[st] || {})[tg];
+      const r = siteResult(j, st, tg, nm);
       if (r && !r.insufficient && r.se_logit) rows.push({ label: j.site, sub: `n ${r.n}`, est: r.auroc, lo: r.auroc_ci[0], hi: r.auroc_ci[1], logit: Math.log(r.auroc / (1 - r.auroc)), se: r.se_logit, color: "var(--c2)" });
     });
     if (rows.length < 2) {

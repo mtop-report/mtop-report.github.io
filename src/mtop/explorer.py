@@ -96,8 +96,11 @@ LABELS = {
     "occlusion": {"ICA": ("Intracranial ICA / T", "Intrakraniální ACI / T"), "M1": ("MCA M1", "ACM M1"),
                   "distal": ("MCA M2–M3 / ACA", "ACM M2–M3 / ACA"), "cervical_ICA": ("Cervical ICA/CCA (± tandem)", "Krční ACI/ACC (± tandem)"),
                   "basilar": ("Basilar", "Basilaris"), "other_posterior": ("Vertebral / PCA", "AV / ACP")},
-    "technique": {"aspiration": ("Aspiration (ADAPT)", "Aspirace (ADAPT)"), "stent_retriever": ("Stent retriever", "Stentriever"),
-                  "combined": ("Combined", "Kombinovaná"), "none": ("No mechanical MT", "Bez mechanické MT")},
+    "technique": {"aspiration": ("Thrombectomy: aspiration (ADAPT)", "Trombektomie: aspirace (ADAPT)"),
+                  "stent_retriever": ("Thrombectomy: stent retriever", "Trombektomie: stentriever"),
+                  "combined": ("Thrombectomy: combined", "Trombektomie: kombinovaná"),
+                  "none": ("No thrombectomy: stent, PTA or IA lysis", "Bez trombektomie: stent, PTA nebo IA lýza"),
+                  "diagnostic": ("Diagnostic angiography only", "Pouze diagnostická angiografie")},
     "anesthesia": {"general": ("General", "Celková"), "sedation": ("Conscious sedation", "Analgosedace"), "local": ("Local only", "Lokální")},
     "ivt": {"yes": ("IVT", "IVT"), "no": ("No IVT", "Bez IVT")},
     "transfer": {"direct": ("Direct to FNO", "Přímo do FNO"), "transfer": ("Drip-and-ship", "Drip-and-ship")},
@@ -119,7 +122,7 @@ LABELS = {
 
 def _derive(d: pd.DataFrame) -> pd.DataFrame:
     d = d.copy()
-    d["era"] = pd.cut(d["year"], [0, 2014, 2017, 2020, 3000], labels=["2005–2014", "2015–2017", "2018–2020", "2021–2025"])
+    d["era"] = pd.cut(d["year"], [0, 2012, 2015, 2019, 2022, 3000], labels=["2005–2012", "2013–2015", "2016–2019", "2020–2022", "2023–2025"])
     d["age_group"] = pd.cut(d["age"], [0, 59.999, 69.999, 79.999, 200], labels=["<60", "60–69", "70–79", "≥80"])
     d["nihss_group"] = pd.cut(d["nihss_adm"], [-1, 9, 15, 20, 99], labels=["0–9", "10–15", "16–20", "≥21"])
     anterior = ~d["occlusion"].isin(["basilar", "other_posterior"])
@@ -236,20 +239,23 @@ def _smd_prop(a: pd.Series, b: pd.Series):
 
 
 def _table1(base: pd.DataFrame, min_cell: int) -> dict:
-    """Table 1 with the standardised mean difference (SMD) between the development (<= 2020) and
-    validation (2021+) cohorts; |SMD| > 0.1 is the usual mark of a relevant shift in case mix."""
+    """Table 1 with standardised mean differences (SMD): development (2005-2022) vs validation
+    (2023-2025) patients, and mRS 0-2 vs 3-6 (the earlier pipeline's baseline-by-outcome table).
+    |SMD| > 0.1 is the usual mark of a relevant difference."""
     base = base.assign(aspects_anterior=base["aspects"].where(~base["occlusion"].isin(["basilar", "other_posterior"])))
     dev, test = split_temporal(base)
-    groups = {"all": base, "dev": dev, "test": test,
-              "good": base[base["good_outcome"] == 1], "poor": base[base["good_outcome"] == 0]}
+    good, poor = base[base["good_outcome"] == 1], base[base["good_outcome"] == 0]
+    groups = {"all": base, "dev": dev, "test": test, "good": good, "poor": poor}
 
     def cont(name, en, cs, col, digits=0):
         return {"var": name, "label": {"en": en, "cs": cs}, "kind": "median", "smd": _smd_cont(dev[col], test[col]),
+                "smd_outcome": _smd_cont(poor[col], good[col]),
                 **{k: {"median": _med(g[col]), "iqr": _iqr(g[col]), "missing": _pct(g[col].isna().mean())}
                    for k, g in groups.items()}}
 
     def prop(name, en, cs, mask_fn):
-        out = {"var": name, "label": {"en": en, "cs": cs}, "kind": "pct", "smd": _smd_prop(mask_fn(dev), mask_fn(test))}
+        out = {"var": name, "label": {"en": en, "cs": cs}, "kind": "pct", "smd": _smd_prop(mask_fn(dev), mask_fn(test)),
+               "smd_outcome": _smd_prop(mask_fn(poor), mask_fn(good))}
         for k, g in groups.items():
             m = mask_fn(g)
             known = m.notna()
@@ -260,28 +266,59 @@ def _table1(base: pd.DataFrame, min_cell: int) -> dict:
         return out
 
     yn = lambda col: (lambda g: g[col])  # noqa: E731
+    cat = lambda col, val: (lambda g: (g[col] == val).astype(float).where(g[col].notna()))  # noqa: E731
+    mt = lambda g: g["technique"].isin(["aspiration", "stent_retriever", "combined"]).astype(float).where(g["technique"].notna())  # noqa: E731
     rows = [
+        {"section": {"en": "Patient", "cs": "Pacient"}},
         cont("age", "Age, years", "Věk, roky", "age"),
         prop("male", "Men", "Muži", yn("sex_male")),
+        prop("premrs01", "Pre-stroke mRS 0–1", "mRS před CMP 0–1", lambda g: (g["mrs_pre"] <= 1).astype(float).where(g["mrs_pre"].notna())),
+        {"section": {"en": "The stroke", "cs": "CMP"}},
         cont("nihss", "NIHSS on admission", "NIHSS při přijetí", "nihss_adm"),
         cont("aspects", "ASPECTS (anterior circulation)", "ASPECTS (přední povodí)", "aspects_anterior"),
-        prop("premrs01", "Pre-stroke mRS 0–1", "mRS před CMP 0–1", lambda g: (g["mrs_pre"] <= 1).astype(float).where(g["mrs_pre"].notna())),
+        prop("posterior", "Posterior circulation", "Zadní povodí", lambda g: g["occlusion"].isin(["basilar", "other_posterior"]).astype(float).where(g["occlusion"].notna())),
+        prop("ica", "ICA or carotid T occlusion", "Uzávěr ACI nebo karotického T", lambda g: g["occlusion"].isin(["ICA", "cervical_ICA"]).astype(float).where(g["occlusion"].notna())),
+        {"section": {"en": "History and medication", "cs": "Anamnéza a medikace"}},
         prop("htn", "Hypertension", "Hypertenze", yn("htn")),
         prop("dm", "Diabetes mellitus", "Diabetes mellitus", yn("dm")),
+        prop("hld", "Hyperlipidaemia", "Hyperlipidémie", yn("hld")),
         prop("af", "Atrial fibrillation / arrhythmia", "Fibrilace síní / arytmie", yn("arrhythmia")),
         prop("stroke_prior", "Previous stroke", "Předchozí CMP", yn("stroke_prior")),
-        prop("anticoag", "Anticoagulated before stroke", "Antikoagulace před CMP", yn("anticoag")),
+        prop("tia_prior", "Previous TIA", "Předchozí TIA", yn("tia_prior")),
+        prop("coronary", "Coronary heart disease", "ICHS", cat("heart3", "coronary")),
+        prop("smoking", "Smoker", "Kuřák", yn("smoking")),
+        prop("alcohol", "Alcohol abuse", "Abúzus alkoholu", yn("alcohol")),
+        prop("anticoag", "Anticoagulant before stroke", "Antikoagulancia před CMP", cat("antithrombotic", "anticoagulant")),
+        prop("antiplatelet", "Antiplatelet before stroke", "Antiagregancia před CMP", cat("antithrombotic", "antiplatelet")),
+        prop("statin", "Statin before stroke", "Statin před CMP", yn("statin")),
+        {"section": {"en": "On admission", "cs": "Při přijetí"}},
         cont("glucose", "Glucose, mmol/L", "Glykémie, mmol/l", "glucose"),
         cont("sbp", "Systolic BP, mmHg", "Systolický tlak, mmHg", "sbp"),
-        prop("posterior", "Posterior circulation", "Zadní povodí", lambda g: g["occlusion"].isin(["basilar", "other_posterior"]).astype(float).where(g["occlusion"].notna())),
+        cont("dbp", "Diastolic BP, mmHg", "Diastolický tlak, mmHg", "dbp"),
+        cont("bmi", "Body mass index, kg/m²", "BMI, kg/m²", "bmi"),
+        {"section": {"en": "Pathway", "cs": "Cesta pacienta"}},
         prop("ivt", "IV thrombolysis", "IV trombolýza", yn("ivt")),
-        prop("transfer", "Drip-and-ship", "Drip-and-ship", yn("transfer")),
+        prop("ivt_external", "IV thrombolysis in another hospital", "IV trombolýza v jiné nemocnici", yn("ivt_external")),
+        prop("transfer", "Transferred (drip-and-ship)", "Překlad (drip-and-ship)", yn("transfer")),
         cont("otp", "Onset to puncture, min", "Od vzniku do punkce, min", "onset_to_puncture"),
+        prop("night", "Onset at night (22–6 h)", "Vznik v noci (22–6 h)", lambda g: ((g["onset_hour"] >= 22) | (g["onset_hour"] < 6)).astype(float).where(g["onset_hour"].notna())),
+        prop("weekend", "Onset at the weekend", "Vznik o víkendu", yn("weekend")),
+        {"section": {"en": "Procedure", "cs": "Výkon"}},
+        prop("mt", "Mechanical thrombectomy", "Mechanická trombektomie", mt),
+        prop("diagnostic", "Diagnostic angiography only", "Pouze diagnostická angiografie", cat("technique", "diagnostic")),
+        prop("stenting", "Stent placed", "Zaveden stent", yn("stenting")),
+        prop("angioplasty", "Angioplasty", "Angioplastika", yn("angioplasty")),
+        prop("ia_lysis", "Intra-arterial thrombolysis", "Intraarteriální trombolýza", yn("ia_lysis")),
         cont("proc", "Procedure duration, min", "Délka výkonu, min", "procedure_min"),
         prop("ga", "General anaesthesia", "Celková anestezie", lambda g: (g["anesthesia"] == "general").astype(float).where(g["anesthesia"].notna())),
         prop("tici", "mTICI 2b–3", "mTICI 2b–3", yn("reperfusion_2b3")),
-        prop("sich", "Symptomatic ICH", "Symptomatické ICH", yn("sich")),
+        {"section": {"en": "Course and outcome", "cs": "Průběh a výsledek"}},
         cont("nihss24", "NIHSS at 24 h", "NIHSS za 24 h", "nihss_24h"),
+        prop("sich", "Symptomatic ICH", "Symptomatické ICH", yn("sich")),
+        prop("ich_other", "Asymptomatic ICH", "Asymptomatické ICH", yn("ich_other")),
+        cont("nihss7", "NIHSS on day 7", "NIHSS 7. den", "nihss_7d"),
+        prop("edema", "Cerebral oedema", "Mozkový edém", yn("edema")),
+        prop("decompression", "Decompressive craniectomy", "Dekompresivní kraniektomie", yn("decompression")),
         prop("good", "90-day mRS 0–2", "mRS 0–2 za 90 dní", yn("good_outcome")),
         prop("death", "90-day mortality", "Mortalita za 90 dní", yn("death90")),
     ]

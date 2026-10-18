@@ -602,5 +602,47 @@
     });
   }
 
-  root.MTOPCharts = { h, s, figure, dataTable, lineChart, grotta, hbars, tip, ticks, linear, forest, orForest, iconArray, heat };
+  // ------------------------------------------------------------------ column chart (histograms)
+  /**
+   * columns(body, { cats:[labels], values:[number|null], small:[bool], color, fmt:(v)=>str, smallLabel,
+   *                 valueLabel, height, aria })
+   * A value of null with small=true is a suppressed cell (fewer patients than the privacy limit):
+   * no bar is drawn and the cell is labelled smallLabel.
+   */
+  function columns(body, o) {
+    responsive(body, (W) => {
+      body.replaceChildren();
+      const n = o.cats.length;
+      const H = o.height || 170;
+      const m = { l: 4, r: 4, t: 18, b: 22 };
+      const svg = s("svg", { width: W, height: H, viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": o.aria || "" }, body);
+      const bw = (W - m.l - m.r) / Math.max(1, n);
+      const vals = o.values.filter((v) => v !== null && v !== undefined);
+      const max = o.max || (vals.length ? Math.max(...vals) : 1) || 1;
+      const Y = linear(0, max, H - m.b, m.t);
+      const narrow = bw < 34;
+      o.cats.forEach((c, i) => {
+        const v = o.values[i];
+        const x = m.l + i * bw;
+        const cx = x + bw / 2;
+        if (v !== null && v !== undefined) {
+          const y = Y(v);
+          const bar = s("rect", { x: x + bw * 0.14, y, width: Math.max(1, bw * 0.72), height: Math.max(0.5, H - m.b - y), rx: 3, style: `fill:${o.color || "var(--accent)"}` }, svg);
+          bar.setAttribute("tabindex", "0");
+          const show = (px, py) => tip.show(String(c), [{ label: o.valueLabel || "", color: o.color, value: o.fmt ? o.fmt(v) : String(v) }], px, py);
+          bar.addEventListener("pointermove", (ev) => show(ev.clientX, ev.clientY));
+          bar.addEventListener("pointerleave", () => tip.hide());
+          bar.addEventListener("focus", () => { const b = bar.getBoundingClientRect(); show(b.right, b.top); });
+          bar.addEventListener("blur", () => tip.hide());
+          if (!narrow || n <= 8) txt(svg, cx, y - 5, o.fmt ? o.fmt(v) : String(v), { "text-anchor": "middle", class: "lbl", style: narrow ? "font-size:9.5px" : null });
+        } else if (o.small && o.small[i]) {
+          txt(svg, cx, H - m.b - 5, o.smallLabel || "–", { "text-anchor": "middle", class: "lbl", style: "fill: var(--faint)" });
+        }
+        txt(svg, cx, H - m.b + 15, String(c), { "text-anchor": "middle", style: narrow ? "font-size:9.5px" : null });
+      });
+      s("line", { x1: m.l, x2: W - m.r, y1: H - m.b + 0.5, y2: H - m.b + 0.5, class: "axis" }, svg);
+    });
+  }
+
+  root.MTOPCharts = { h, s, figure, dataTable, lineChart, grotta, hbars, columns, tip, ticks, linear, forest, orForest, iconArray, heat };
 })(typeof globalThis !== "undefined" ? globalThis : this);

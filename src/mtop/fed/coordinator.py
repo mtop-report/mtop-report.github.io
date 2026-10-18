@@ -198,8 +198,10 @@ def fit_logreg(net: Network, design: dict, lam: float | None = None) -> dict:
 
 
 def federated_logreg(coord: Coordinator, sites: list[str], stage: str, target: str, subset: dict | None = None,
-                     lam: float | None = None) -> tuple[dict, Job]:
-    design = spline_spec(stage)
+                     lam: float | None = None, design: dict | None = None) -> tuple[dict, Job]:
+    """Penalised logistic regression across the centres. `design`: spline_spec(stage) by default;
+    {"kind": "spline", "stage": stage, "knots": {}} gives the linear regression."""
+    design = design or spline_spec(stage)
     spec = {"stage": stage, "target": target, "subset": subset or {"kind": "all"}, "design": design}
     job = coord.open("logreg", spec, sites, 1 + int(fed_settings()["logreg"]["iterations"]))
     model = fit_logreg(job, design, lam)

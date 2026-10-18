@@ -13,37 +13,43 @@
   ];
 
   function items() {
-    const V = A.V.stages;
-    const auc = (s) => num(V[s].targets.good_outcome.temporal.LightGBM.auroc, 2);
+    const SP = A.V.splits.primary.stages;
+    const ch = (s) => A.chosenOf(s, "good_outcome");
+    const auc = (s) => num(SP[s].targets.good_outcome.models[ch(s)].auroc, 2);
+    const yrs = A.yearsOf("primary");
     const AD = A.DATA.adaptive;
-    const pr = AD ? AD.results.admission.good_outcome.pooled : null;
+    const adm = AD ? (AD.learners ? (AD.results.admission.good_outcome[ch("admission")] || AD.results.admission.good_outcome[AD.learners[0]]) : AD.results.admission.good_outcome) : null;
+    const pr = adm ? adm.pooled : null;
+    const nL = (AD && AD.learners) ? AD.learners.length : 1;
     return [
       { s: "live", tab: "calc", t: ["Staged outcome calculator", "Postupná kalkulačka výsledku"],
-        d: [`Estimate updated at admission, end of MT, 24 h and day 7 (AUROC ${auc("admission")} → ${auc("d7")} in 2021–2025).`, `Odhad aktualizovaný při přijetí, na konci MT, za 24 h a 7. den (AUROC ${auc("admission")} → ${auc("d7")} v letech 2021–2025).`] },
-      { s: "live", tab: "calc", t: ["Exact explanations", "Přesná vysvětlení"], d: ["TreeSHAP contributions computed in the browser for every estimate.", "Příspěvky TreeSHAP počítané v prohlížeči pro každý odhad."] },
-      { s: "live", tab: "validation", t: ["Temporal validation and benchmarking", "Časová validace a srovnání"], d: ["Against logistic regression (linear and with splines), XGBoost, an MLP, the FNO bedside score, six published scores or predictor sets and NIHSS alone.", "Proti logistické regresi (lineární i se splajny), XGBoost, MLP, bedside skóre FNO, šesti publikovaným skóre či sadám prediktorů a samotnému NIHSS."] },
-      { s: "live", tab: "registry", t: ["Registry explorer", "Průzkumník registru"], d: ["Two decades of FNO thrombectomy outcomes, aggregated and privacy-protected.", "Dvě desetiletí výsledků trombektomií ve FNO, souhrnně a s ochranou soukromí."] },
+        d: [`Estimate updated before the procedure, at its end, at 24 h and on day 7 (AUROC ${auc("admission")} → ${auc("d7")} in ${yrs}).`, `Odhad aktualizovaný před výkonem, na jeho konci, za 24 h a 7. den (AUROC ${auc("admission")} → ${auc("d7")} v letech ${yrs}).`] },
+      { s: "live", tab: "calc", t: ["Exact explanations", "Přesná vysvětlení"], d: ["TreeSHAP for the tree models and exact linear contributions for the regressions, computed in the browser for every estimate.", "TreeSHAP u stromových modelů a přesné lineární příspěvky u regresí, počítané v prohlížeči pro každý odhad."] },
+      { s: "live", tab: "validation", t: ["Temporal validation of five learners", "Časová validace pěti modelů"], d: ["Regression with splines (reference), linear regression, LightGBM, XGBoost and an MLP with the same tuning budget; a rule fixed before testing picks the calculator's model. Benchmarked against the FNO bedside score, published scores and NIHSS alone.", "Regrese se splajny (reference), lineární regrese, LightGBM, XGBoost a MLP se stejným rozpočtem ladění; model kalkulačky vybírá pravidlo stanovené před testováním. Srovnáno s bedside skóre FNO, publikovanými skóre a samotným NIHSS."] },
+      { s: "live", tab: "registry", t: ["Registry explorer and data report", "Průzkumník registru a datová zpráva"], d: ["Two decades of FNO thrombectomy outcomes, with the full preprocessing report: patient flow, data checks, variable coding, missing data and Table 1.", "Dvě desetiletí výsledků trombektomií ve FNO s úplnou zprávou o předzpracování: tok pacientů, kontroly dat, kódování proměnných, chybějící data a tabulka 1."] },
+      { s: "live", tab: "reporting", t: ["Reporting standards", "Standardy reportování"], d: ["TRIPOD+AI item by item, a PROBAST+AI self-assessment and the sample-size criteria.", "TRIPOD+AI položku po položce, vlastní hodnocení PROBAST+AI a kritéria velikosti souboru."] },
       { s: "live", tab: "about", t: ["Open, private by design", "Otevřené a soukromé už z návrhu"], d: ["Open code and model, no patient data on the page, runs offline.", "Otevřený kód i model, žádná data pacientů na stránce, funguje offline."] },
       { s: "beta", tab: "calc", t: ["Full 90-day mRS distribution", "Celé rozložení mRS za 90 dní"], d: ["Single-grade prediction with a 100-patient view for explaining prognosis.", "Predikce jednotlivých stupňů se zobrazením 100 pacientů pro vysvětlení prognózy."] },
       { s: "beta", tab: "calc", t: ["Uncertainty ranges", "Rozpětí nejistoty"], d: ["How much an estimate moves when the model is refitted on resampled data.", "O kolik se odhad pohne při přetrénování modelu na převzorkovaných datech."] },
-      { s: "beta", tab: "calc", t: ["Other models side by side", "Další modely vedle sebe"], d: ["The FNO bedside score, THRIVE, THRIVE-c, SPAN-100, HIAT2, PRE and MR PREDICTS@24H for the same patient.", "Bedside skóre FNO, THRIVE, THRIVE-c, SPAN-100, HIAT2, PRE a MR PREDICTS@24H pro stejného pacienta."] },
+      { s: "beta", tab: "calc", t: ["Every model for the same patient", "Všechny modely pro stejného pacienta"], d: ["Each published learner, the FNO bedside score and the published scores side by side; any learner can drive the calculator.", "Každý zveřejněný model, bedside skóre FNO a publikovaná skóre vedle sebe; kalkulačku může řídit kterýkoli model."] },
       { s: "beta", tab: "adaptive", t: ["Adaptive updating lab", "Laboratoř adaptivní aktualizace"],
-        d: pr ? [`Six update strategies tested 2018–2025; refit + recalibration cut calibration-in-the-large from ${A.signed(pr.frozen.citl)} to ${A.signed(pr.refit_recal.citl)}.`, `Šest strategií aktualizace testováno 2018–2025; přetrénování + rekalibrace snížily kalibrační chybu z ${A.signed(pr.frozen.citl)} na ${A.signed(pr.refit_recal.citl)}.`]
+        d: pr ? [`Six update strategies for ${nL} models, tested 2018–2025; for the calculator's model, refit + recalibration moved calibration-in-the-large from ${A.signed(pr.frozen.citl)} to ${A.signed(pr.refit_recal.citl)}.`, `Šest strategií aktualizace pro ${nL} modely, testováno 2018–2025; u modelu kalkulačky přetrénování + rekalibrace posunuly kalibraci z ${A.signed(pr.frozen.citl)} na ${A.signed(pr.refit_recal.citl)}.`]
           : ["Update strategies compared year by year.", "Strategie aktualizace porovnané rok po roce."] },
-      { s: "beta", tab: "validate", t: ["Validation at partner centres", "Validace v partnerských centrech"], d: ["Any centre can test MTOP on its own data in the browser and share only summary numbers.", "Kterékoli centrum může MTOP ověřit na vlastních datech v prohlížeči a sdílet jen souhrnná čísla."] },
+      { s: "beta", tab: "validate", t: ["Validation at partner centres", "Validace v partnerských centrech"], d: ["Any centre can test every published MTOP model on its own data in the browser and share only summary numbers.", "Kterékoli centrum může na vlastních datech v prohlížeči ověřit každý zveřejněný model MTOP a sdílet jen souhrnná čísla."] },
       { s: "progress", t: ["Serum GFAP", "Sérový GFAP"], d: ["Being collected at FNO; enters the model after its added value is tested.", "Sbírán ve FNO; do modelu vstoupí po ověření přínosu."] },
-      { s: "progress", t: ["Manuscript", "Rukopis"], d: ["Development and temporal validation, reported to TRIPOD+AI.", "Vývoj a časová validace, podle TRIPOD+AI."] },
+      { s: "progress", tab: "reporting", t: ["Manuscript", "Rukopis"], d: ["Development and temporal validation, reported to TRIPOD+AI.", "Vývoj a časová validace, podle TRIPOD+AI."] },
+      { s: "proposed", tab: "reporting", t: ["Protocol and registration", "Protokol a registrace"], d: ["Publish the analysis protocol and register it (for example on OSF) before the next analysis round.", "Zveřejnit protokol analýzy a registrovat jej (např. na OSF) před dalším kolem analýzy."] },
       { s: "proposed", t: ["Completing recent follow-up", "Doplnění nedávného sledování"], d: ["Filling missing 24-h NIHSS and 90-day mRS since 2021 strengthens the later stages most.", "Doplnění chybějícího NIHSS za 24 h a mRS za 90 dní od roku 2021 nejvíce posílí pozdější fáze."] },
       { s: "proposed", t: ["External validation", "Externí validace"], d: ["Other Czech and Central European stroke centres, using the in-browser tool.", "Další česká a středoevropská iktová centra pomocí nástroje v prohlížeči."] },
       { s: "proposed", t: ["Prospective silent validation", "Prospektivní tichá validace"], d: [`Model v${A.B.version} frozen (fingerprint ${(A.B.fingerprint || "").slice(0, 12)}…) and scored on new patients without showing clinicians.`, `Model v${A.B.version} zmrazen (otisk ${(A.B.fingerprint || "").slice(0, 12)}…) a hodnocen na nových pacientech bez zobrazení lékařům.`] },
       { s: "proposed", t: ["Scheduled recalibration", "Plánovaná rekalibrace"], d: ["Under the written update policy, once 2026 outcomes are complete.", "Podle psaných pravidel aktualizace, až budou výsledky roku 2026 kompletní."] },
       { s: "proposed", t: ["Imaging and procedure detail", "Zobrazení a detaily výkonu"], d: ["CT perfusion core, collaterals, number of passes, eTICI 2c.", "Jádro infarktu z CT perfuze, kolaterály, počet průchodů, eTICI 2c."] },
       { s: A.DATA.federated ? "beta" : "proposed", tab: "federated", t: ["Federated learning", "Federované učení"],
-        d: A.DATA.federated ? ["Working network: secure aggregation, exact federated boosting and validation; demonstrated on four virtual centres. Needs partner centres next.", "Funkční síť: bezpečná agregace, přesný federovaný boosting a validace; předvedeno na čtyřech virtuálních centrech. Dále potřebuje partnerská centra."]
+        d: A.DATA.federated ? ["Working network: secure aggregation, exact federated boosting and regression, validation; demonstrated on four virtual centres. Needs partner centres next.", "Funkční síť: bezpečná agregace, přesný federovaný boosting i regrese, validace; předvedeno na čtyřech virtuálních centrech. Dále potřebuje partnerská centra."]
           : ["A shared model trained across centres without moving data, coordinated on HPC.", "Společný model trénovaný napříč centry bez přesunu dat, koordinovaný na HPC."] },
       { s: "proposed", t: ["Clinicians vs model", "Lékaři vs model"], d: ["Compare prognostic estimates of neurologists and interventionalists with MTOP.", "Porovnat prognostické odhady neurologů a intervenčních radiologů s MTOP."] },
       { s: "proposed", t: ["Hospital system link", "Napojení na nemocniční systém"], d: ["Prefill inputs from the hospital record (FHIR), keeping computation local.", "Předvyplnění vstupů z nemocniční dokumentace (FHIR) s lokálním výpočtem."] },
-      { s: "proposed", t: ["Regulatory pathway", "Regulatorní cesta"], d: ["Only if clinical use is pursued: EU MDR and AI Act requirements for decision-support software.", "Jen pokud se bude usilovat o klinické použití: požadavky EU MDR a AI Act na software pro podporu rozhodování."] },
+      { s: "proposed", tab: "reporting", t: ["Regulatory pathway", "Regulatorní cesta"], d: ["Only if clinical use is pursued: EU MDR and AI Act requirements for decision-support software.", "Jen pokud se bude usilovat o klinické použití: požadavky EU MDR a AI Act na software pro podporu rozhodování."] },
     ];
   }
 

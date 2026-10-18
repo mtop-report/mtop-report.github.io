@@ -9,10 +9,14 @@ known at each point:
 
 | Stage | Adds |
 |---|---|
-| 1 · Admission (before MT) | age, sex, pre-stroke mRS, NIHSS, ASPECTS, occlusion site, side, onset-to-puncture, IVT, drip-and-ship, glucose, SBP, hypertension, diabetes, AF, previous stroke, anticoagulation |
-| 2 · End of MT | final mTICI, procedure duration, first-line technique, acute stenting, anaesthesia |
-| 3 · 24 hours | NIHSS at 24 h (and its change), symptomatic ICH |
-| 4 · Day 7 | NIHSS on day 7, cerebral oedema |
+| 1 · Before thrombectomy | the 33 pre-procedural predictors of the 2026 FNO analysis: age, sex, pre-stroke mRS, NIHSS, ASPECTS, occlusion site, side, IVT (and whether it was given elsewhere, onset to IVT, IVT to puncture), transfer, onset to puncture, onset hour (night), weekend, glucose (hyperglycaemia), systolic and diastolic BP (pulse pressure), BMI, hypertension, diabetes, hyperlipidaemia, arrhythmia, previous stroke and TIA, smoking, alcohol, statin, heart disease, antithrombotics |
+| 2 · End of procedure | final mTICI, technique (aspiration, stent retriever, combined, no thrombectomy, diagnostic angiography only), stenting, angioplasty, intra-arterial lysis, procedure duration, onset to recanalisation, anaesthesia |
+| 3 · 24 hours | NIHSS at 24 h, its change, early neurological improvement, symptomatic and asymptomatic ICH |
+| 4 · Day 7 | NIHSS on day 7, cerebral oedema, decompressive craniectomy |
+
+Every procedure is included: patients who had stenting, angioplasty or intra-arterial lysis without
+thrombectomy, and patients whose angiography showed nothing to treat, because before the procedure
+nobody knows which it will be.
 
 The models come from the University Hospital Ostrava (FNO) thrombectomy registry (grant
 SGS18/LF/2026, Faculty of Medicine, University of Ostrava). The web app runs entirely in the
@@ -28,77 +32,89 @@ with its typeface bundled, so opening it contacts no third-party server.
 
 - **Calculator.** Enter a patient stage by stage and watch the estimate move: three-band bars
   (independent / dependent / dead) per stage, the factors that move the estimate (exact
-  TreeSHAP, computed in the browser), a what-if curve for any numeric input, and a reality check
-  ("of recent registry patients with a similar estimate, X % reached mRS 0–2"). Unknown inputs
-  are averaged over the registry's values. English and Czech.
-  *New in v1.1 (beta):* the full predicted 90-day mRS distribution with a 100-patient view,
-  a bootstrap uncertainty range, the same patient scored by logistic regression (linear and with
-  splines), the FNO bedside score and six published scores or predictor sets, and clearly marked
-  previews of candidate predictors (GFAP, imaging). On a wide screen a slim copy of the estimate
-  stays at the top once the full card scrolls away, so the explanations below remain visible.
-- **Registry.** 90-day mRS distributions (Grotta bars) by 21 subgroups, outcome by age and NIHSS
-  together (cells under 30 patients hidden), factors associated with the 90-day outcome (unadjusted
-  and adjusted odds ratios; missing values handled by multiple imputation), outcome by time to
-  puncture, two decades of trends (volume, age, thrombolysis, transfers, times, reperfusion, sICH,
-  technique, anaesthesia, stenting), data completeness by year, and Table 1. Aggregates only;
-  groups under 10 patients are hidden.
-- **Validation.** Temporal validation of every stage against logistic regression (linear and with
-  splines), XGBoost, an MLP (all tuned with the same budget as LightGBM, with the chosen settings
-  shown) and published scores, with ROC, calibration, decision curves, subgroup performance and an
-  explanation of the post-2020 outcome drift.
-- **Adaptive** *(v1.1 beta).* How the model is kept up to date: six update strategies compared year
-  by year 2018–2025 (frozen, intercept or logistic recalibration, refit, refit + recalibration,
-  sliding window), a drift monitor with control limits, data availability by year, a draft update
-  policy and the model version history with its SHA-256 fingerprint.
-- **Multicentre** *(beta).* Two parts.
-  *Learn together:* a working federated network in which hospitals train and validate a shared
-  model without moving patient data (secure aggregation; the result equals pooled training bit for
-  bit), with the Adaptive tab's update strategies run as network jobs on ranges of treatment
-  years. Demonstrated on four virtual centres that are FNO's own patients split by treatment
-  years: for 90-day death the network raised the mean AUROC at the centres' own patients from
-  0.742 to 0.780, and a centre with only 50 patients went from 0.57 alone to 0.77
-  ([docs/federated.md](docs/federated.md)).
-  *Validate on your data:* any centre can validate MTOP on its own registry export inside the
-  browser (CSV or Excel; nothing is uploaded) and export a results file with aggregate metrics
-  only; results from several sites are pooled in a random-effects meta-analysis.
-- **Roadmap** *(v1.1).* What is live, what is new, what is in progress and what is proposed.
-- **About.** Methods, limits, privacy, authors, QR code, and the data dictionary: every predictor,
-  its options and how the registry's values were coded ([docs/data_dictionary.md](docs/data_dictionary.md)).
+  contributions computed in the browser: TreeSHAP for the tree models, coefficient × value for the
+  regressions), a what-if curve for any numeric input, and a reality check ("of recent registry
+  patients with a similar estimate, X % reached mRS 0–2"). Unknown inputs are averaged over the
+  registry's values. By default each stage uses the model chosen by the pre-specified rule; any
+  other published model can be selected, and every model and published score is shown side by
+  side for the same patient. Also the full 90-day mRS distribution with a 100-patient view and a
+  bootstrap uncertainty range. English and Czech.
+- **Registry.** *Outcomes and trends:* 90-day mRS distributions (Grotta bars) by 21 subgroups,
+  outcome by age and NIHSS, factors associated with the outcome (unadjusted and adjusted odds
+  ratios, multiple imputation), outcome by time to puncture and two decades of trends.
+  *Data and preprocessing:* the full data report in the style of the earlier MTOP pipeline:
+  CONSORT-style patient flow and flow table, stage cohorts with exclusion reasons, every cleaning
+  rule with the patients it touched (by variable), how undocumented registry codes were read, all
+  48 registry columns with their role and the coding of every recorded value, the 49 model inputs
+  with missing data overall, by split, by era, by sex and age and by outcome, 90-day mRS
+  availability and who lacks it, distributions, why cholesterol is not used, and Table 1 by split
+  and by outcome with standardised mean differences. Aggregates only; groups under 10 are hidden.
+- **Validation.** Both temporal splits, every stage and outcome: the five learners and the
+  published and bedside scores with AUROC, ΔAUROC against the reference, Brier, calibration
+  intercept, slope and O/E (bootstrap CIs), nested cross-validation, the pre-specified model choice,
+  how each learner was tuned, ROC, and for any one model: calibration, recalibration on newer
+  patients, decision curves, sensitivity/specificity/PPV/NPV at thresholds, subgroups with CIs and
+  what the model relies on.
+- **Adaptive.** How the models are kept up to date: six update strategies compared year by year
+  2018–2025 for every publishable learner, a drift monitor with control limits, leave-one-era-out
+  validation, data availability by year, a draft update policy and the version history.
+- **Multicentre.** *Learn together:* a working federated network in which hospitals train and
+  validate shared models (boosted trees, regression with splines, linear regression) without
+  moving patient data (secure aggregation; the result equals pooled training), demonstrated on four
+  virtual centres made of FNO's own patients by treatment era ([docs/federated.md](docs/federated.md)).
+  *Validate on your data:* any centre can validate every published MTOP model on its own registry
+  export inside the browser and export aggregate results; results from several sites are pooled
+  in a random-effects meta-analysis, model by model.
+- **Standards.** TRIPOD+AI item by item (status, where it is addressed, what is left), TRIPOD+AI
+  for Abstracts, a PROBAST+AI self-assessment, the Riley sample-size criteria for development and
+  validation, the standards that apply later (TRIPOD-Cluster, DECIDE-AI, CONSORT-AI/SPIRIT-AI,
+  FUTURE-AI), EU MDR and AI Act notes, and a prioritised to-do list.
+- **Roadmap** and **About** (methods, limits, privacy, authors, QR code).
 
-## Results (temporal validation, patients treated 2021–2025)
+## Results
 
-**mRS 0–2 at 90 days** — AUROC (95% CI)
+Temporal validation, primary split as in the 2026 FNO analysis: models developed on 1,225 patients
+treated 2005–2022 and tested on 226 treated 2023–2025. AUROC (95% CI); **bold**: the model the
+pre-specified rule chose for the calculator.
 
-| Stage | n (events) | LightGBM | XGBoost | Logistic regression | LR + splines | MLP | Published score |
+**mRS 0–2 at 90 days**
+
+| Stage | n (events) | Regression + splines | Linear regression | LightGBM | XGBoost | MLP | Best published score |
 |---|---|---|---|---|---|---|---|
-| 1 · Admission | 378 (110) | 0.771 (0.72–0.82) | 0.773 (0.72–0.82) | 0.735 (0.68–0.79) | 0.733 (0.68–0.79) | 0.715 (0.66–0.77) | THRIVE 0.677; SPAN-100 0.574 |
-| 2 · End of MT | 370 (108) | 0.805 (0.76–0.85) | 0.804 (0.75–0.85) | 0.760 (0.71–0.81) | 0.758 (0.71–0.81) | 0.758 (0.70–0.81) | THRIVE 0.673 |
-| 3 · 24 h | 206 (73) | 0.859 (0.81–0.91) | 0.860 (0.81–0.91) | 0.832 (0.78–0.88) | 0.832 (0.78–0.88) | 0.832 (0.78–0.88) | NIHSS 24 h 0.844 |
-| 4 · Day 7 | 135 (62) | 0.896 (0.84–0.94) | 0.898 (0.84–0.94) | 0.834 (0.76–0.90) | 0.837 (0.76–0.90) | 0.823 (0.75–0.89) | NIHSS day 7 0.882 |
+| 1 · Before thrombectomy | 226 (60) | **0.811 (0.74–0.87)** | 0.806 (0.74–0.86) | 0.787 (0.71–0.85) | 0.799 (0.73–0.86) | 0.769 (0.70–0.83) | bedside items as a regression 0.794 |
+| 2 · End of procedure | 221 (59) | **0.846 (0.79–0.90)** | 0.841 (0.78–0.89) | 0.843 (0.78–0.90) | 0.830 (0.77–0.88) | 0.816 (0.75–0.87) | FNO bedside score 0.776 |
+| 3 · 24 hours | 120 (36) | **0.878 (0.81–0.93)** | 0.875 (0.81–0.93) | 0.887 (0.82–0.94) | 0.896 (0.83–0.94) | 0.856 (0.79–0.92) | MR PREDICTS@24H 0.904 |
+| 4 · Day 7 | 139 (52) | **0.882 (0.83–0.93)** | 0.883 (0.83–0.93) | 0.915 (0.87–0.95) | 0.917 (0.87–0.96) | 0.827 (0.76–0.89) | NIHSS day 7 0.924 |
 
-**Death within 90 days** — AUROC (95% CI)
+**Death within 90 days**
 
-| Stage | n (events) | LightGBM | XGBoost | Logistic regression | LR + splines | MLP | Published score |
+| Stage | n (events) | Regression + splines | Linear regression | LightGBM | XGBoost | MLP | Best published score |
 |---|---|---|---|---|---|---|---|
-| 1 · Admission | 378 (76) | 0.780 (0.72–0.83) | 0.774 (0.71–0.83) | 0.741 (0.68–0.80) | 0.736 (0.67–0.80) | 0.747 (0.68–0.81) | THRIVE 0.605; SPAN-100 0.565 |
-| 2 · End of MT | 370 (73) | 0.805 (0.75–0.86) | 0.797 (0.74–0.85) | 0.750 (0.68–0.81) | 0.742 (0.67–0.81) | 0.740 (0.67–0.80) | THRIVE 0.601 |
-| 3 · 24 h | 206 (27) | 0.904 (0.84–0.95) | 0.901 (0.84–0.95) | 0.882 (0.82–0.93) | 0.886 (0.82–0.94) | 0.874 (0.81–0.93) | NIHSS 24 h 0.852 |
-| 4 · Day 7 | 135 (7) | 0.878 (0.74–0.97) | 0.859 (0.69–0.97) | 0.856 (0.70–0.97) | 0.850 (0.70–0.96) | 0.884 (0.78–0.97) | NIHSS day 7 0.896 |
+| 1 · Before thrombectomy | 226 (40) | **0.736 (0.64–0.83)** | 0.726 (0.63–0.82) | 0.746 (0.66–0.82) | 0.759 (0.67–0.84) | 0.716 (0.62–0.80) | bedside items as a regression 0.760 |
+| 2 · End of procedure | 221 (38) | 0.744 (0.65–0.83) | 0.733 (0.63–0.83) | 0.780 (0.69–0.86) | **0.781 (0.69–0.86)** | 0.742 (0.64–0.84) | FNO bedside score 0.686 |
+| 3 · 24 hours | 120 (13) | **0.862 (0.73–0.95)** | 0.856 (0.72–0.95) | 0.858 (0.71–0.96) | 0.855 (0.70–0.96) | 0.856 (0.72–0.95) | MR PREDICTS@24H 0.849 |
+| 4 · Day 7 | 139 (6) | **0.799 (0.56–0.98)** | 0.816 (0.55–0.98) | 0.857 (0.68–0.98) | 0.847 (0.68–0.97) | 0.813 (0.62–0.97) | NIHSS day 7 0.856 |
 
-The day-7 mortality model rests on 7 deaths in the validation years; treat it as indicative only.
-Every learner was tuned with the same budget (50 candidate settings scored on the same
-cross-validation folds of the development years); the chosen settings are in the
-[model card](docs/model_card.md#5a-comparison-models-and-their-settings).
+The rule (from the 2026 analysis): regression with splines is the reference, and another model
+replaces it only if its paired 95% CI of the AUROC difference on the temporal test lies above zero,
+or in nested cross-validation (5 folds × 3 repeats on all years, admission stage) it gains ≥ 0.01
+AUROC on average and is better in ≥ 80% of folds, without worse calibration-in-the-large. Nested
+cross-validation, mRS 0–2 before thrombectomy: splines 0.763, linear 0.758, LightGBM 0.754,
+XGBoost 0.755, MLP 0.756. The test years are few (60 good outcomes, 6 deaths by day 7), so the
+sensitivity split (development 2005–2020, test 2021–2025: 379 patients, 110 good outcomes) is also
+reported; there the tree models lead at the later stages (day 7, mRS 0–2: LightGBM 0.913 vs
+splines 0.808), which the Validation tab shows next to the primary split.
 
-Calibration of the development model in 2021–2025 (mRS 0–2): 1 · Admission: intercept −0.51, slope 1.24, deployed shift −0.26; 2 · End of MT: intercept −0.60, slope 1.09, deployed shift −0.32; 3 · 24 h: intercept −0.74, slope 0.89, deployed shift −0.45; 4 · Day 7: intercept −0.75, slope 1.15, deployed shift −0.54.
+Calibration: the development models over-predicted good outcomes in 2023–2025 (regression with
+splines before thrombectomy: calibration intercept −0.40, slope 1.51, O/E 0.79). The published
+models are refitted on all years and their intercepts re-estimated on the pooled years 2023–2025.
 
-**Keeping the model up to date** (admission stage, mRS 0–2, test years 2018–2025, models trained
-only on earlier years): a model frozen in 2015 drifted (first signal 2019, 3σ alarm 2023) with
-calibration-in-the-large −0.59 and AUROC 0.733; refitting on all earlier years and shifting the
-intercept to the last two years (the policy used for v1.0) gave −0.03 and 0.768. See the Adaptive tab.
+**Keeping the model up to date** (regression with splines, before thrombectomy, mRS 0–2, test years
+2018–2025, models trained only on earlier years): a model frozen in 2015 had calibration-in-the-large
+−0.41 and AUROC 0.730; refitting on all earlier years and re-estimating the intercept on the last
+years gave −0.04 and 0.770. Every learner is compared on the Adaptive tab.
 
-Full tables (Brier, calibration, ΔAUROC with paired-bootstrap CIs, subgroups) are produced by
-`python -m mtop report` in `reports/validation_summary.md`.
+`python -m mtop report` writes the full tables to `reports/validation_report.md` (local only).
 
 ## How it works
 
@@ -106,32 +122,31 @@ Full tables (Brier, calibration, ΔAUROC with paired-bootstrap CIs, subgroups) a
    Every change is logged with the patient ID in `reports/data_quality.xlsx` so the source file
    can be corrected. Implausible values and text in numeric fields become missing (with a
    suggested correction, never applied silently). The only automatic repair is an isolated ±1-year
-   typo in the onset date, detected from neighbouring patient IDs. Cross-field checks (IVT against
-   its place, time and agent; occlusion site against hemisphere; ASPECTS in posterior strokes;
-   recanalisation against the end of the procedure; 90-day against pre-stroke mRS) list records
-   for review without changing them. The app's About tab shows the counts per check. **NIHSS 43
-   is read as death and 99 as "not assessable"** (70 of the 71 patients coded 43 on day 7 had died
-   by 90 days); they are never used as scores, because doing so would leak the outcome. Codings
-   that the export itself does not document are marked "our reading" in the
-   [data dictionary](docs/data_dictionary.md), to be confirmed with the registry team.
-2. **Cohort.** Adults with endovascular treatment (diagnostic angiography only is excluded) and a
-   known 90-day mRS. Stage 3 includes patients alive and assessable at 24 h, stage 4 at day 7, so
-   later estimates are conditional on reaching that point.
-3. **Models** (`src/mtop/train.py`). One LightGBM model per stage and outcome, with **monotone
-   constraints** (for example a higher NIHSS or a longer time to puncture can never raise the
-   chance of independence), tuned with Optuna on cross-validated log-loss in the development
-   cohort only. Every tree leaf is guaranteed to summarise at least 20 patients. The comparison
-   models (XGBoost, an MLP, logistic regression linear and with splines) get the same tuning
-   budget: 50 candidate settings each, scored on the same folds
-   ([model card, section 5a](docs/model_card.md#5a-comparison-models-and-their-settings)).
-4. **Validation.** Temporal split: development ≤ 2020, validation 2021–2025. Bootstrap 95 % CIs
-   (2,000 resamples), calibration intercept and slope, ICI, decision curves, subgroup AUROCs.
-5. **Deployment.** Models are refitted on all years. Because recent outcomes were worse than the
-   development data predicted, each model's intercept is re-estimated on 2021–2025 patients from
-   cross-validated predictions (temporal recalibration).
-6. **Browser** (`web/`). The trees are exported as compact JSON. `web/model.js` reproduces
-   LightGBM's decision rules and TreeSHAP exactly; `tests/test_parity.py` checks predictions and
-   every SHAP value against LightGBM to 1e-6.
+   typo in the onset date, detected from neighbouring patient IDs. Cross-field checks list records
+   for review without changing them. **NIHSS 43 is read as death and 99 as "not assessable"**
+   (70 of the 71 patients coded 43 on day 7 had died by 90 days); they are never used as scores,
+   because doing so would leak the outcome. Impossible time orders (IVT after puncture,
+   recanalisation before puncture) set that time to missing and keep the patient. Codings the
+   export does not document are marked "our reading" on the Registry page, to be confirmed with
+   the registry team.
+2. **Cohort.** 1,577 registry records → 1,572 adults → 1,451 with a known 90-day mRS, whatever the
+   procedure (88 diagnostic angiographies only). The end-of-procedure stage needs the final mTICI,
+   the 24-h stage a 24-h NIHSS score and the day-7 stage a day-7 NIHSS score.
+3. **Models** (`src/mtop/learners.py`, `train.py`). Five learners per stage and outcome, each tuned
+   with the same budget (50 candidate settings on the same cross-validation folds of the
+   development years): logistic regression with restricted cubic splines (the reference), linear
+   logistic regression, LightGBM with **monotone constraints**, XGBoost and an MLP. Tree leaves
+   summarise at least 20 patients. The MLP is validated but not published (no such guarantee for
+   its weights).
+4. **Validation.** Temporal splits (primary: test 2023–2025; sensitivity: test 2021–2025), nested
+   cross-validation on all years, bootstrap 95% CIs (2,000 resamples) for AUROC, Brier,
+   calibration intercept and slope and the AUROC difference against the reference, decision
+   curves, thresholds and subgroups.
+5. **Deployment.** Every publishable learner (regression with splines, linear regression,
+   LightGBM, XGBoost) is refitted on all years with its development settings, and its intercept is
+   re-estimated on the pooled years 2023–2025 from cross-validated predictions.
+6. **Browser** (`web/`). `web/model.js` reproduces every published model and its explanations
+   exactly; `tests/test_parity.py` checks predictions and contributions against Python to 1e-6.
 
 ## Federated network
 
@@ -180,29 +195,30 @@ open site/index.html          # the app; works offline from the file
 python -m mtop all --input data/synthetic/registry_synthetic.xlsx --quick
 ```
 
-Individual steps: `python -m mtop clean | train [--quick] | export | extras [--quick] | compare | reconcile | adaptive | fed-demo | explorer | associations | report | site | synth`.
+Individual steps: `python -m mtop clean | nested | train [--split primary|sensitivity] | deploy | export | extras | adaptive | fed-demo | explorer | preprocessing | reporting | associations | report | site | synth`.
 
 ## Updating with new patients
 
 1. Add rows to the master Excel file and put it in `data/raw/`.
 2. `python -m mtop all`, then read `reports/data_quality.xlsx` and fix the source where needed.
-3. Check `reports/validation_summary.md`, then commit `artifacts/public/` and push. GitHub Actions
+3. Check `reports/validation_report.md`, then commit `artifacts/public/` and push. GitHub Actions
    re-runs the tests and redeploys the app.
 
 ## Repository layout
 
 ```
 config/            features.yaml (predictors, stages, UI labels EN/CZ), settings.yaml, federated.yaml
-src/mtop/          clean · cohort · features · train · lr · splines · metrics · scores · export · extras · compare ·
-                   reconcile · adaptive · explorer · associations · report · site · synth · cli
+src/mtop/          clean · cohort · features · learners · lgbm · tuning · lr · splines · treejson · train · nested ·
+                   metrics · scores · export · extras · adaptive · explorer · preprocessing · reporting ·
+                   associations · report · site · synth · cli
 src/mtop/fed/      federated network: schema · bins · secagg · gbdt · logreg · site · coordinator · server · client · demo
-web/               index.html template, styles.css, app.js + view_*.js, charts.js, model.js (trees + TreeSHAP),
+web/               index.html template, styles.css, app.js + view_*.js, charts.js, model.js (all models + explanations),
                    models_extra.js (comparators, mRS layer), metrics.js (in-browser validation), i18n.js,
                    assets/ (logo, app icons, bundled Instrument Sans font)
 scripts/           check_no_patient_data.sh (CI guard), make_brand.py (regenerates logo and icons)
 artifacts/public/  published model bundle, validation and explorer aggregates (committed)
 data/synthetic/    synthetic registry for CI and demos (committed)
-tests/             cleaning rules, JS↔LightGBM parity, privacy rules, federated network, end-to-end synthetic run
+tests/             cleaning rules, JS↔Python parity for every model, privacy rules, federated network, end-to-end synthetic run
 docs/              model card (TRIPOD+AI), data dictionary, federated network
 .github/workflows/ ci.yml (tests), pages.yml (build and deploy the app)
 ```
@@ -211,10 +227,13 @@ docs/              model card (TRIPOD+AI), data dictionary, federated network
 
 - ASPECTS is recorded from 2016 and anaesthesia type from about 2012.
 - Since 2021 about half of patients have no 24-hour NIHSS, and day-7 NIHSS is often missing;
-  missing 90-day mRS rose from about 3 % to about 20 %. Filling these gaps would strengthen the
-  24-h and day-7 models more than any modelling change.
-- The share of patients reaching mRS 0–2 fell from about 44 % (2015–2017) to 29 % (2021–2025),
-  with more mRS 4–5 and unchanged mortality, beyond what age and severity explain.
+  missing 90-day mRS rose from about 3 % to about 20 % (21.5 % in 2023–2025). Filling these gaps
+  would strengthen the 24-h and day-7 models more than any modelling change.
+- The share of patients reaching mRS 0–2 fell to about 27 % in 2023–2025 (40 % in 2005–2022),
+  beyond what age and severity explain.
+- With 33 predictors before the procedure, the development data fall short of the Riley sample-size
+  criteria for the regression (Standards tab); the models are penalised and validated on later
+  years for that reason.
 
 ## Citation and licence
 

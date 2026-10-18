@@ -1,16 +1,21 @@
 """Command-line entry point: `python -m mtop <command>`.
 
   clean     raw Excel -> data/processed/clean.parquet + reports/data_quality.xlsx
-  train     tune, validate and fit all stage models (artifacts/private)
-  export    browser model + validation summary (artifacts/public)
+  nested    nested cross-validation of every learner on all years (admission, mRS 0-2)
+  train     tune and validate all learners on the primary and sensitivity splits, choose the model
+            by the pre-specified rule, deploy (artifacts/private); --split primary|sensitivity
+  deploy    choose the model per stage and outcome by the pre-specified rule, refit the publishable
+            learners on all years and recalibrate them to the recent era (artifacts/private)
+  export    browser models + validation summary (artifacts/public)
   extras    calculator extras: comparators, mRS distribution layer, bootstrap uncertainty
             (--comparators-only refreshes just the comparator panel)
-  compare   refresh comparators in the temporal validation without retraining LightGBM
-  reconcile rebuild the earlier HTML report's cohort and split and compare models on both set-ups
   adaptive  model-updating experiments, drift monitor, era validation (artifacts/public)
   fed-demo  federated network demo: four virtual centres from the registry (artifacts/public)
             (the network itself: python -m mtop.fed coordinator | site | template | check)
   explorer  suppressed aggregate statistics for the cohort explorer (artifacts/public)
+  preprocessing  cohort flow, data checks, missingness, outcome availability, variable map
+            (artifacts/public/preprocessing.json; aggregates only)
+  reporting sample-size calculations for the reporting-standards page (artifacts/public)
   associations  factors associated with 90-day outcome: unadjusted and adjusted odds ratios
             (multiple imputation; artifacts/public)
   report    Table 1, figures and a validation summary for the manuscript (reports/)
@@ -40,7 +45,7 @@ def _load_clean() -> pd.DataFrame:
 def cmd_clean(args):
     import json
 
-    from .clean import check_summary, clean_registry, load_raw
+    from .clean import check_summary, clean_registry, load_raw, raw_profile
     from .cohort import flow
     from .config import settings
 
@@ -48,7 +53,10 @@ def cmd_clean(args):
     if not src.exists():
         raise SystemExit(f"Raw file not found: {src}. Put the registry export in data/raw/ "
                          "or pass --input (use --input data/synthetic/registry_synthetic.xlsx to test).")
-    clean, issues = clean_registry(load_raw(src))
+    raw = load_raw(src)
+    clean, issues = clean_registry(raw)
+    prof = raw_profile(raw, int(settings()["privacy"]["min_cell"]))
+    (paths.PUBLIC / "raw_profile.json").write_text(json.dumps(prof, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
     clean.to_parquet(paths.PROCESSED / "clean.parquet", index=False)
     with pd.ExcelWriter(paths.REPORTS / "data_quality.xlsx") as xw:
         summary = issues.groupby(["column", "action"]).size().rename("n").reset_index()
@@ -62,12 +70,30 @@ def cmd_clean(args):
         print(f"  {s['step']:<36} {s['n']:>5}")
 
 
+def cmd_nested(args):
+    from .cohort import flow
+    from .nested import run
+
+    base, _ = flow(_load_clean())
+    run(base, paths.PRIVATE, quick=getattr(args, "quick", False))
+
+
 def cmd_train(args):
     from .cohort import flow
     from .train import run
 
     base, _ = flow(_load_clean())
-    run(base, paths.PRIVATE, quick=args.quick)
+    run(base, paths.PRIVATE, quick=args.quick, only=getattr(args, "split", None))
+
+
+def cmd_deploy(args):
+    from .cohort import flow
+    from .train import choose_and_deploy
+
+    base, _ = flow(_load_clean())
+    out = choose_and_deploy(base, paths.PRIVATE)
+    for st, tg in out["selection"].items():
+        print(f"deploy {st}: " + ", ".join(f"{t} -> {v['chosen']}" for t, v in tg.items()))
 
 
 def cmd_export(args):
@@ -85,31 +111,33 @@ def cmd_extras(args):
     build_extras(_load_clean(), n_boot=20 if getattr(args, "quick", False) else 100)
 
 
-def cmd_compare(args):
-    from .cohort import flow
-    from .compare import run
-
-    base, _ = flow(_load_clean())
-    run(base, quick=getattr(args, "quick", False))
-
-
-def cmd_reconcile(args):
-    from .reconcile import run
-
-    run(_load_clean(), quick=getattr(args, "quick", False))
-    print(f"reconciliation: {paths.REPORTS / 'reconciliation.md'}, {paths.PUBLIC / 'reconciliation.json'}")
-
-
 def cmd_adaptive(args):
     from .adaptive import build_adaptive
 
-    build_adaptive(_load_clean())
+    if getattr(args, "quick", False):      # CI: one stage, one outcome, two learners
+        build_adaptive(_load_clean(), stages=["admission"], targets_=["good_outcome"],
+                       learners=("Logistic regression (splines)", "LightGBM"))
+    else:
+        build_adaptive(_load_clean())
 
 
 def cmd_explorer(args):
     from .explorer import build_explorer
 
     build_explorer(_load_clean())
+
+
+def cmd_preprocessing(args):
+    from .preprocessing import build_preprocessing, write_data_dictionary
+
+    build_preprocessing(_load_clean())
+    write_data_dictionary()
+
+
+def cmd_reporting(args):
+    from .reporting import build_reporting
+
+    build_reporting(_load_clean())
 
 
 def cmd_associations(args):
@@ -151,11 +179,15 @@ def cmd_fed_demo(args):
 def cmd_all(args):
     t = time.time()
     cmd_clean(args)
+    cmd_nested(args)
     cmd_train(args)
+    cmd_deploy(args)
     cmd_export(args)
     cmd_extras(args)
     cmd_adaptive(args)
     cmd_explorer(args)
+    cmd_preprocessing(args)
+    cmd_reporting(args)
     cmd_associations(args)
     cmd_report(args)
     cmd_site(args)
@@ -167,17 +199,20 @@ def main(argv=None):
     ap = argparse.ArgumentParser(prog="mtop", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name, fn in [("clean", cmd_clean), ("train", cmd_train), ("export", cmd_export),
-                     ("extras", cmd_extras), ("compare", cmd_compare), ("reconcile", cmd_reconcile),
-                     ("adaptive", cmd_adaptive), ("fed-demo", cmd_fed_demo),
-                     ("explorer", cmd_explorer), ("associations", cmd_associations), ("report", cmd_report), ("site", cmd_site),
+    for name, fn in [("clean", cmd_clean), ("nested", cmd_nested), ("train", cmd_train), ("deploy", cmd_deploy),
+                     ("export", cmd_export),
+                     ("extras", cmd_extras), ("adaptive", cmd_adaptive), ("fed-demo", cmd_fed_demo),
+                     ("explorer", cmd_explorer), ("preprocessing", cmd_preprocessing), ("reporting", cmd_reporting),
+                     ("associations", cmd_associations), ("report", cmd_report), ("site", cmd_site),
                      ("all", cmd_all), ("synth", cmd_synth)]:
         p = sub.add_parser(name)
         p.set_defaults(fn=fn)
         if name in ("clean", "all"):
             p.add_argument("--input", help="registry Excel file (default: data/raw/mt_patients_master.xlsx)")
-        if name in ("train", "extras", "all", "fed-demo", "associations", "compare", "reconcile"):
+        if name in ("train", "nested", "extras", "all", "fed-demo", "associations"):
             p.add_argument("--quick", action="store_true", help="fewer tuning trials / bootstrap refits, for testing")
+        if name == "train":
+            p.add_argument("--split", choices=["primary", "sensitivity"], help="run one split only")
         if name == "extras":
             p.add_argument("--comparators-only", action="store_true",
                            help="rebuild only the calculator's comparator panel in extras.json")

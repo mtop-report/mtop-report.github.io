@@ -1,7 +1,9 @@
-/* MTOP browser model
- * Evaluates exported LightGBM trees and computes exact TreeSHAP attributions
- * (Lundberg et al., Nat Mach Intell 2020), mirroring LightGBM's own
- * Tree::Decision / Tree::TreeSHAP so results match `pred_contrib=True`.
+/* MTOP browser models
+ * Tree ensembles (LightGBM and XGBoost) with exact TreeSHAP attributions (Lundberg et al.,
+ * Nat Mach Intell 2020), mirroring the libraries' own decision rules so results match
+ * LightGBM `pred_contrib=True` and XGBoost `pred_contribs=True`; and the penalised logistic
+ * regressions (linear and with restricted cubic splines), whose exact Shapley values are the
+ * coefficient times the standardised value of each term.
  * No patient data is needed or sent anywhere: everything runs in the browser.
  */
 (function (root) {
@@ -10,6 +12,7 @@
   const MISSING_ZERO = 1;
   const MISSING_NAN = 2;
   const K_ZERO = 1.0000000180025095e-35; // LightGBM's kZeroThreshold is the float 1e-35f
+  const fround = Math.fround || ((v) => v);
 
   function treeDepth(t) {
     let best = 0;
@@ -22,20 +25,22 @@
     return best;
   }
 
+  // TreeSHAP's base value: the cover-weighted mean leaf value (counts for LightGBM, hessian cover for XGBoost)
   function expectedValue(t) {
     if (t.f.length === 1) return t.v[0];
-    const total = t.c[0];
-    let e = 0;
-    for (let i = 0; i < t.f.length; i++) if (t.f[i] < 0) e += (t.c[i] / total) * t.v[i];
-    return e;
+    let e = 0, total = 0;
+    for (let i = 0; i < t.f.length; i++) if (t.f[i] < 0) { e += t.c[i] * t.v[i]; total += t.c[i]; }
+    return total ? e / total : 0;
   }
 
-  /** Prepare a model spec from the bundle (adds depth, expected values, path buffers). */
+  /** Prepare a tree-ensemble spec (adds depth, expected values, path buffers). */
   function prepare(spec) {
     if (spec._ready) return spec;
-    let base = 0;
+    let base = spec.base_margin || 0;
     let maxDepth = 0;
+    const lt = spec.op === "lt";
     for (const t of spec.trees) {
+      t.lt = lt;
       t.depth = treeDepth(t);
       t.ev = expectedValue(t);
       base += t.ev;
@@ -54,6 +59,10 @@
 
   function decide(t, node, x) {
     let v = x[t.f[node]];
+    if (t.lt) { // XGBoost: missing goes to the default child, otherwise float32(x) < threshold goes left
+      if (Number.isNaN(v)) return t.d[node] ? t.l[node] : t.r[node];
+      return fround(v) < t.t[node] ? t.l[node] : t.r[node];
+    }
     // LightGBM stores only |v| > 1e-35 when it reads a row, so tinier values act as exact zero
     if (!Number.isNaN(v) && v >= -K_ZERO && v <= K_ZERO) v = 0.0;
     const mt = t.m[node];
@@ -70,22 +79,15 @@
     return t.v[n];
   }
 
-  /** Raw score (log-odds) without recalibration. */
-  function raw(spec, x) {
+  /** Raw score (log-odds) of a tree ensemble, without recalibration. */
+  function rawTrees(spec, x) {
     prepare(spec);
-    let s = 0;
+    let s = spec.base_margin || 0;
     for (const t of spec.trees) s += leafValue(t, x);
     return s;
   }
 
   const sigmoid = (z, k) => 1 / (1 + Math.exp(-(k || 1) * z));
-
-  /** Probability; `recent` (default true) applies the recent-era intercept. */
-  function predict(spec, x, opts) {
-    const r = raw(spec, x);
-    const shift = opts && opts.recent === false ? 0 : spec.intercept_recent || 0;
-    return { raw: r, logit: r + shift, p: sigmoid(r + shift, spec.sigmoid) };
-  }
 
   // ---------------------------------------------------------------- TreeSHAP
   function extendPath(P, o, d, zero, one, feat) {
@@ -165,10 +167,9 @@
     recurse(t, x, phi, P, cold, d + 1, o, coldZero * inZero, 0, split);
   }
 
-  /** SHAP values per model column (log-odds scale) plus base value. */
-  function shap(spec, x) {
+  function shapTrees(spec, x, nCols) {
     prepare(spec);
-    const phi = new Float64Array(spec.columns.length);
+    const phi = new Float64Array(nCols);
     const P = spec._path;
     for (const t of spec.trees) {
       if (t.f.length === 1) continue;
@@ -178,24 +179,123 @@
     return { base: spec.base, phi: Array.from(phi) };
   }
 
-  /** SHAP values summed per predictor (one-hot columns grouped). */
-  function explain(spec, x) {
-    const s = shap(spec, x);
+  // ---------------------------------------------------------------- regressions
+  const miss = (v) => v === null || v === undefined || v === "" || (typeof v === "number" && Number.isNaN(v));
+
+  /** Restricted cubic spline terms (Harrell) of x for knots t1 < ... < tk: k - 2 values, NaN if x is missing.
+   *  Same arithmetic as src/mtop/splines.py rcs_terms. */
+  function rcsTerms(x, t) {
+    const k = t.length;
+    if (miss(x) || Number.isNaN(Number(x))) return Array.from({ length: k - 2 }, () => NaN);
+    const v = Number(x);
+    const p3 = (z) => Math.pow(Math.max(z, 0), 3);
+    const d = (t[k - 1] - t[0]) * (t[k - 1] - t[0]);
+    const out = [];
+    for (let j = 0; j < k - 2; j++) {
+      out.push((p3(v - t[j]) - (p3(v - t[k - 2]) * (t[k - 1] - t[j])) / (t[k - 1] - t[k - 2])
+        + (p3(v - t[k - 1]) * (t[k - 2] - t[j])) / (t[k - 1] - t[k - 2])) / d);
+    }
+    return out;
+  }
+
+  /** Expanded row of the spline regression: base columns, then each knotted variable's terms;
+   *  `owner[j]` is the base column each expanded column belongs to. */
+  function splineExpand(spec, base) {
+    const row = base.slice();
+    const owner = base.map((_, i) => i);
+    for (const [v, knots] of Object.entries(spec.knots)) {
+      const i = spec.base_columns.indexOf(v);
+      for (const z of rcsTerms(base[i], knots)) { row.push(z); owner.push(i); }
+    }
+    return { row, owner };
+  }
+
+  /** Penalised logistic regression pipeline (median imputation + indicators, scaling): per-coefficient
+   *  terms of the linear predictor and the intercept. `owner` maps each input column to a base column. */
+  function lrTerms(spec, x, owner) {
+    const filled = x.map((v, i) => (miss(v) ? spec.medians[i] : v));
+    const ind = spec.indicators.map((j) => (miss(x[j]) ? 1 : 0));
+    const z = filled.concat(ind);
+    const own = owner.concat(spec.indicators.map((j) => owner[j]));
+    const terms = z.map((v, i) => ((v - spec.mean[i]) / spec.scale[i]) * spec.coef[i]);
+    return { terms, own, intercept: spec.intercept + (spec.shift || 0) };
+  }
+
+  function lrRaw(spec, x) {
+    const t = lrTerms(spec, x, x.map((_, i) => i));
+    return t.terms.reduce((a, b) => a + b, t.intercept);
+  }
+
+  // ---------------------------------------------------------------- one interface for every learner
+  /** Log-odds (without the recent-era shift) of a published learner for a model row. */
+  function raw(L, x) {
+    if (L.kind === "lgbm" || L.kind === "xgb") return rawTrees(L, x);
+    if (L.kind === "lr") return lrRaw(L.spec, x);
+    if (L.kind === "spline") return lrRaw(L.spec, splineExpand(L.spec, x).row);
+    throw new Error(`unknown learner ${L.kind}`);
+  }
+
+  /** Probability; `recent` (default true) applies the recent-era intercept. */
+  function predict(L, x, opts) {
+    const r = raw(L, x);
+    const shift = opts && opts.recent === false ? 0 : L.intercept_recent || 0;
+    return { raw: r, logit: r + shift, p: sigmoid(r + shift, L.sigmoid) };
+  }
+
+  /** Exact attributions per model column on the log-odds scale: base + sum(phi) = raw score. */
+  function shap(L, x) {
+    if (L.kind === "lgbm" || L.kind === "xgb") return shapTrees(L, x, x.length);
+    let t;
+    if (L.kind === "lr") t = lrTerms(L.spec, x, x.map((_, i) => i));
+    else {
+      const e = splineExpand(L.spec, x);
+      t = lrTerms(L.spec, e.row, e.owner);
+    }
+    const phi = new Array(x.length).fill(0);
+    t.terms.forEach((v, i) => { phi[t.own[i]] += v; });
+    return { base: t.intercept, phi };
+  }
+
+  /** Attributions summed per predictor (one-hot columns grouped). */
+  function explain(L, x, columnFeature) {
+    const s = shap(L, x);
     const byFeature = {};
-    spec.column_feature.forEach((f, i) => { byFeature[f] = (byFeature[f] || 0) + s.phi[i]; });
+    columnFeature.forEach((f, i) => { byFeature[f] = (byFeature[f] || 0) + s.phi[i]; });
     return { base: s.base, phi: s.phi, byFeature };
   }
 
   // ---------------------------------------------------------------- inputs -> model row
-  /** Build the model row for a stage from calculator inputs keyed by predictor. */
-  function buildRow(spec, featureMeta, inputs) {
+  /** Derived predictors, as src/mtop/features.py derived(). */
+  function derivedValue(key, val) {
+    const n0 = val("nihss_adm"), n24 = val("nihss_24h");
+    switch (key) {
+      case "nihss_change_24h": return n24 - n0;
+      case "eni_24h":
+        if (Number.isNaN(n24)) return NaN;
+        if (n24 <= 1) return 1;
+        return Number.isNaN(n0) ? NaN : (n0 - n24 >= 8 ? 1 : 0);
+      case "night_onset": { const h = val("onset_hour"); return Number.isNaN(h) ? NaN : (h >= 22 || h < 6 ? 1 : 0); }
+      case "ivt_to_puncture": return val("onset_to_puncture") - val("onset_to_ivt");
+      case "pulse_pressure": return val("sbp") - val("dbp");
+      case "hyperglycemia": { const g = val("glucose"); return Number.isNaN(g) ? NaN : (g > 7.8 ? 1 : 0); }
+      default: return NaN;
+    }
+  }
+
+  /** Build the model row for a stage from calculator inputs keyed by predictor. Inputs that need IV
+   *  thrombolysis are "not applicable" without it: onset-to-IVT becomes missing (as in the registry)
+   *  and "thrombolysis in another hospital" becomes no. */
+  function buildRow(columns, featureMeta, inputs) {
     const meta = {};
     for (const f of featureMeta) meta[f.key] = f;
+    const noIvt = inputs.ivt === 0;
     const val = (k) => {
+      if (noIvt && k === "onset_to_ivt") return NaN;
+      if (noIvt && k === "ivt_external") return 0;
       const v = inputs[k];
-      return v === null || v === undefined || v === "" || Number.isNaN(v) ? NaN : v;
+      return v === null || v === undefined || v === "" || Number.isNaN(v) ? NaN : Number(v);
     };
-    return spec.columns.map((col) => {
+    return columns.map((col) => {
       const [key, cat] = col.split("__");
       const f = meta[key];
       if (cat !== undefined) {
@@ -203,16 +303,12 @@
         if (v === null || v === undefined || v === "") return NaN;
         return v === cat ? 1 : 0;
       }
-      if (f && f.type === "derived") {
-        if (key === "nihss_change_24h") return val("nihss_24h") - val("nihss_adm");
-        return NaN;
-      }
-      const v = val(key);
-      return typeof v === "number" ? v : Number(v);
+      if (f && f.type === "derived") return derivedValue(key, val);
+      return val(key);
     });
   }
 
-  const api = { prepare, predict, raw, shap, explain, buildRow, sigmoid };
+  const api = { prepare, predict, raw, rawTrees, shap, explain, buildRow, derivedValue, sigmoid, rcsTerms, splineExpand, lrRaw };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   root.MTOPModel = api;
 })(typeof globalThis !== "undefined" ? globalThis : this);

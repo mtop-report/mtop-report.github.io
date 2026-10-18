@@ -1,13 +1,18 @@
 # MTOP pipeline settings. Paths are relative to the repository root.
 
 cohort:
-  min_age: 18                    # adults only
-  require_outcome: true          # 90-day mRS must be known
-  exclude_diagnostic_only: true  # "PAG": diagnostic angiography without endovascular treatment
+  min_age: 18                     # patients recorded as younger are excluded; a missing age is kept (imputed)
+  require_outcome: true           # 90-day mRS must be known
+  exclude_diagnostic_only: false  # "PAG" (diagnostic angiography only) is kept: at admission every patient
+                                  # taken for intended thrombectomy belongs to the population, as in the 2026 analysis
+  exclude_impossible_times: false # false: an impossible time (IVT after puncture, recanalisation before
+                                  # puncture) becomes missing and the patient stays; true: the patient is
+                                  # removed, as in the 2026 analysis (29 records)
 
 split:
-  temporal_test_from_year: 2021  # development cohort <= 2020, temporal validation >= 2021
-  recent_era_from_year: 2021     # deployed model is intercept-recalibrated to this era
+  temporal_test_from_year: 2023     # primary: development 2005-2022, temporal validation 2023-2025
+  sensitivity_test_from_year: 2021  # sensitivity: development <= 2020, validation 2021-2025 (more events)
+  recent_era_from_year: 2023        # deployed models: intercept re-estimated on the pooled last three years
 
 seed: 20261016
 
@@ -19,6 +24,23 @@ tuning:
   trials: 50
   max_rounds: 3000
   early_stopping: 100
+
+# Model choice, pre-specified as in the 2026 analysis: regression with splines is the reference.
+# A candidate replaces it only if (a) its paired 95% CI of the AUROC difference on the temporal
+# test lies above zero, or (b) in nested cross-validation its mean AUROC gain is >= 0.01 and it is
+# better in >= 80% of the outer folds; in both cases its mean |calibration-in-the-large| may be at
+# most 0.05 worse than the reference's.
+selection:
+  reference: "Logistic regression (splines)"
+  min_cv_gain: 0.01
+  min_cv_share: 0.8
+  max_citl_worse: 0.05
+  deployable: ["Logistic regression (splines)", "Logistic regression", "LightGBM", "XGBoost"]
+
+nested_cv:                # internal validation on all years (admission stage, mRS 0-2), as in the 2026 analysis
+  folds: 5
+  repeats: 3
+  trials: 20              # inner tuning budget per learner (the same for every learner)
 
 bootstrap:
   n: 2000
@@ -47,19 +69,19 @@ stages:
     requires: []
   - id: procedure
     order: 2
-    label: {en: "End of MT", cs: "Konec MT"}
-    title: {en: "End of thrombectomy", cs: "Konec trombektomie"}
+    label: {en: "End of procedure", cs: "Konec výkonu"}
+    title: {en: "End of the procedure", cs: "Konec výkonu"}
     requires: [tici]
   - id: h24
     order: 3
     label: {en: "24 hours", cs: "24 hodin"}
     title: {en: "24 hours after treatment", cs: "24 hodin po léčbě"}
-    requires: [nihss_24h]     # alive and assessable at 24 h
+    requires: [tici, nihss_24h]     # alive and assessed at 24 h
   - id: d7
     order: 4
     label: {en: "Day 7", cs: "7. den"}
     title: {en: "Day 7", cs: "7. den"}
-    requires: [nihss_7d]      # alive and assessable at day 7
+    requires: [tici, nihss_7d]      # alive and assessed at day 7 (a missing 24-h NIHSS is allowed)
 
 site:
   title: "MTOP · Mechanical Thrombectomy Outcome Predictor"

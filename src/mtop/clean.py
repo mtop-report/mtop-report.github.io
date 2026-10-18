@@ -110,6 +110,11 @@ HEART = {
     "Náhrada aorty": "valve", "kardiomyopatie": "cardiomyopathy", "KS. Kardio.": "other",
     "PFO": "pfo", "Trombus v Levém oušku": "laa_thrombus",
 }
+# Heart condition merged into three levels for modelling (as in the 2026 analysis): the rarer
+# structural conditions (valve disease or replacement, cardiomyopathy, PFO, left-atrial thrombus,
+# pacemaker) form one group.
+HEART3 = {"none": "none", "coronary": "coronary", "valve": "other", "cardiomyopathy": "other",
+          "other": "other", "pfo": "other", "laa_thrombus": "other"}
 
 ETIOLOGY = {
     "kardioembolická": "cardioembolic", "aterotrombotická": "atherothrombotic",
@@ -350,19 +355,20 @@ CHECK_GROUPS = [
     ("not a number", "missing", "Text in a numeric field set to missing", "Text v číselném poli nastaven jako chybějící"),
     ("unknown category", "missing", "Unrecognised category set to missing", "Nerozpoznaná kategorie nastavena jako chybějící"),
     ("not ANO/NE", "missing", "Yes/no field with another value set to missing", "Pole ano/ne s jinou hodnotou nastaveno jako chybějící"),
-    ("recanalisation before puncture", "missing", "Recanalisation time before puncture set to missing",
-     "Čas rekanalizace před punkcí nastaven jako chybějící"),
+    ("recanalisation before puncture", "missing", "Recanalisation time before puncture set to missing (patient kept)",
+     "Čas rekanalizace před punkcí nastaven jako chybějící (pacient ponechán)"),
+    ("IVT after puncture", "missing", "IV thrombolysis time after puncture set to missing (patient kept)",
+     "Čas IV trombolýzy po punkci nastaven jako chybějící (pacient ponechán)"),
     ("systolic <= diastolic", "missing", "Systolic pressure not above diastolic: both set to missing",
      "Systolický tlak nepřevyšuje diastolický: oba nastaveny jako chybějící"),
     ("unparseable/unknown time", "missing", "Unreadable onset time set to missing", "Nečitelný čas vzniku nastaven jako chybějící"),
-    ("paediatric", "kept", "Patients under 18 (kept in the registry, not in the models)",
-     "Pacienti mladší 18 let (ponecháni v registru, ne v modelech)"),
+    ("paediatric", "kept", "Patients under 18 (kept in the registry, excluded from the analysis)",
+     "Pacienti mladší 18 let (ponecháni v registru, vyřazeni z analýzy)"),
     ("flag only: IVT = no, but a place", "flag", "IVT = no, but a place of IVT is recorded", "IVT = ne, ale je uvedeno místo IVT"),
     ("flag only: IVT = yes, but the place", "flag", "IVT = yes, but the place of IVT is 'none'", "IVT = ano, ale místo IVT je „žádné“"),
     ("flag only: IVT = no, but an onset", "flag", "IVT = no, but an onset-to-IVT time is recorded", "IVT = ne, ale je uveden čas do IVT"),
     ("flag only: IVT = no and no intra", "flag", "IVT = no and no intra-arterial lysis, but a thrombolytic is recorded",
      "IVT = ne a bez intraarteriální lýzy, ale je uvedeno trombolytikum"),
-    ("flag only: IVT >30", "flag", "IVT recorded more than 30 min after groin puncture", "IVT zaznamenána více než 30 min po punkci"),
     ("flag only: puncture > 24 h", "flag", "Groin puncture more than 24 h after onset", "Punkce více než 24 h od vzniku"),
     ("flag only: basilar", "flag", "Basilar occlusion recorded with a lateral hemisphere", "Uzávěr a. basilaris se stranou hemisféry"),
     ("flag only: anterior-circulation", "flag", "Anterior-circulation occlusion recorded as posterior circulation",
@@ -386,9 +392,12 @@ def check_summary(issues: pd.DataFrame, n_records: int, min_cell: int = 10) -> d
         n = int(sub["patient_id"].nunique())
         if n == 0:
             continue
+        by_col = [{"column": str(col), "n": int(k) if k >= min_cell else None, "small": bool(k < min_cell)}
+                  for col, k in sub.groupby("column")["patient_id"].nunique().sort_values(ascending=False).items()]
         rows.append({"kind": kind, "label": {"en": en, "cs": cs}, "n": n if n >= min_cell else None,
-                     "small": bool(n < min_cell)})
-    return {"records": int(n_records), "min_cell": int(min_cell), "checks": rows}
+                     "small": bool(n < min_cell), "by_column": by_col})
+    return {"records": int(n_records), "min_cell": int(min_cell), "checks": rows,
+            "duplicate_ids": 0}   # clean_registry stops if a patient ID repeats
 
 
 def clean_registry(raw: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -453,6 +462,7 @@ def clean_registry(raw: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     c["antiplatelet"] = at.map({"anticoagulant": 0.0, "antiplatelet": 1.0, "none": 0.0}).astype("float64")
     heart = _map(raw["Heart condition"], HEART, "heart", ids, log)
     c["heart"] = heart
+    c["heart3"] = heart.map(lambda v: None if _null(v) else HEART3[v])
     c["coronary"] = heart.map(lambda v: np.nan if _null(v) else float(v == "coronary")).astype("float64")
     c["heart_structural"] = heart.map(
         lambda v: np.nan if _null(v) else float(v in ("valve", "cardiomyopathy", "laa_thrombus"))
@@ -496,6 +506,8 @@ def clean_registry(raw: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     tech = explicit.where(explicit.notna(), device)
     tech = tech.where(~((c["mt_label"] == 1) & (tech == "none")), None)   # MT label but "no device": unknown
     tech[(c["mt_label"] == 0) & tech.isna()] = "none"
+    # diagnostic angiography only ("PAG"): no endovascular treatment after the angiogram
+    tech[c["diagnostic_only"] == 1] = "diagnostic"
     c["technique"] = tech
     c["mt_performed"] = tech.map(
         lambda v: np.nan if _null(v) else float(v in ("aspiration", "stent_retriever", "combined"))
@@ -527,10 +539,16 @@ def clean_registry(raw: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
                 "recanalisation before puncture -> missing", None,
                 f"puncture at {c.at[idx, 'onset_to_puncture']:g} min")
     c.loc[bad_t, "onset_to_recan"] = np.nan
-    late_ivt = c["onset_to_ivt"].notna() & c["onset_to_puncture"].notna() & (c["onset_to_ivt"] > c["onset_to_puncture"] + 30)
+    # IV thrombolysis cannot start after the groin puncture of the same admission: the IVT time is
+    # set to missing (the patient and the puncture time are kept; the earlier analysis removed them).
+    late_ivt = c["onset_to_ivt"].notna() & c["onset_to_puncture"].notna() & (c["onset_to_ivt"] > c["onset_to_puncture"])
     for idx in c.index[late_ivt]:
-        log.add(ids.at[idx], "onset_to_ivt", c.at[idx, "onset_to_ivt"], "flag only: IVT >30 min after puncture",
-                c.at[idx, "onset_to_ivt"], f"puncture at {c.at[idx, 'onset_to_puncture']:g} min")
+        log.add(ids.at[idx], "onset_to_ivt", c.at[idx, "onset_to_ivt"], "IVT after puncture -> IVT time missing",
+                None, f"puncture at {c.at[idx, 'onset_to_puncture']:g} min")
+    c.loc[late_ivt, "onset_to_ivt"] = np.nan
+    # records whose time order was impossible (kept; settings.cohort.exclude_impossible_times
+    # reproduces the 2026 analysis, which removed them)
+    c["time_conflict"] = (late_ivt | bad_t).astype("float64")
     for idx in c.index[c["onset_to_puncture"] > 1440]:
         log.add(ids.at[idx], "onset_to_puncture", c.at[idx, "onset_to_puncture"],
                 "flag only: puncture > 24 h after onset", c.at[idx, "onset_to_puncture"])
@@ -545,8 +563,12 @@ def clean_registry(raw: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     c["nihss_change_24h"] = c["nihss_24h"] - c["nihss_adm"]
     c["etiology"] = _map(raw["Etiology"], ETIOLOGY, "etiology", ids, log)
     c["ivt_location"] = raw["IVT in different hospital"].map(_s)
+    # IVT given in another hospital before transfer ("drip-and-ship" thrombolysis): a referring
+    # hospital's name = yes; "FNO" or "žádné" (none) = no
+    c["ivt_external"] = c["ivt_location"].map(lambda v: np.nan if _null(v) else float(v not in ("FNO", "žádné"))).astype("float64")
     consistency_flags(c, ids, log)
     c = c.drop(columns=["ivt_location"])
+    c["weekend"] = c["onset_date"].dt.dayofweek.map(lambda d: np.nan if _null(d) else float(d >= 5)).astype("float64")
 
     # --- outcomes -------------------------------------------------------------------------------------
     c["good_outcome"] = (c["mrs90"] <= 2).astype("float64").where(c["mrs90"].notna())
@@ -558,3 +580,36 @@ def clean_registry(raw: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
 
 def load_raw(path) -> pd.DataFrame:
     return pd.read_excel(path, sheet_name=0)
+
+
+# Registry columns whose values name other hospitals: published only as FNO / another hospital / none.
+HOSPITAL_COLUMNS = ("IVT in different hospital", "Transfer from different hospital")
+# Columns profiled only by completeness (free values, dates, identifiers or measurements).
+NUMERIC_OR_FREE = ("Patient ID", "Date of stroke onset", "Time of stroke onset", "Age", "ASPECTS", "Procedure duration",
+                   "Stroke onset to IVT (min)", "Stroke onset to puncture (min)", "Stroke onset to recanalization (min)",
+                   "Admission NIHSS", "NIHSS 24h", "NIHSS 7d", "mRS before", "90-day mRS", "BMI", "Systolic BP",
+                   "Diastolic BP", "Glycemia", "Cholesterol")
+
+
+def raw_profile(raw: pd.DataFrame, min_cell: int = 10) -> dict:
+    """Completeness of every registry column and, for coded columns, how often each recorded value
+    occurs (counts under min_cell shown as None with small=True; hospital names grouped)."""
+    raw = raw.copy()
+    raw.columns = [str(c).strip() for c in raw.columns]
+    n = len(raw)
+    cols = []
+    for col in raw.columns:
+        s = raw[col].map(_s)
+        miss = int(s.isna().sum())
+        entry = {"column": col, "missing": miss, "missing_pct": round(100 * miss / n, 1) if n else None}
+        if col in HOSPITAL_COLUMNS:
+            s = s.map(lambda v: None if v is None else v if v in ("FNO", "žádné") else "another hospital")
+        if col not in NUMERIC_OR_FREE:
+            vc = s.dropna().value_counts()
+            entry["values"] = [{"value": str(v), "n": int(c) if c >= min_cell else None, "small": bool(c < min_cell)}
+                               for v, c in vc.items()]
+        else:
+            num = pd.to_numeric(raw[col], errors="coerce") if col not in ("Date of stroke onset", "Time of stroke onset", "Patient ID") else None
+            entry["numeric"] = num is not None
+        cols.append(entry)
+    return {"records": int(n), "min_cell": int(min_cell), "columns": cols}

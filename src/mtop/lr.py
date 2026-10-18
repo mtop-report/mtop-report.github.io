@@ -37,17 +37,19 @@ def fit_logreg_fixed(X, y, C: float):
     return _pipeline(LogisticRegression(C=C, max_iter=5000)).fit(X, y)
 
 
-def fit_logreg(X, y, seed):
+def fit_logreg(X, y, seed, Cs=None):
+    """`Cs`: candidate penalties (default the 50-value grid; the adaptive analysis, which refits
+    dozens of times, passes a coarser grid)."""
     from .tuning import shared_folds
 
-    kw = dict(Cs=C_GRID, cv=shared_folds(y, seed), scoring="neg_log_loss", max_iter=5000, random_state=seed)
+    kw = dict(Cs=C_GRID if Cs is None else Cs, cv=shared_folds(y, seed), scoring="neg_log_loss", max_iter=5000, random_state=seed)
     accepted = inspect.signature(LogisticRegressionCV).parameters
     if "use_legacy_attributes" in accepted:      # scikit-learn >= 1.9: silence the transition warning
         kw.update(use_legacy_attributes=False, l1_ratios=(0.0,))
     model = _pipeline(LogisticRegressionCV(**kw))
     model.fit(X, y)
     clf = model.steps[2][1]
-    model.settings = {"C": float(np.ravel(clf.C_)[0]), "cv_logloss": cv_logloss(clf), "candidates": len(C_GRID)}
+    model.settings = {"C": float(np.ravel(clf.C_)[0]), "cv_logloss": cv_logloss(clf), "candidates": len(kw["Cs"])}
     return model
 
 

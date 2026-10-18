@@ -3,7 +3,8 @@
 Point scores (higher = worse outcome):
   THRIVE   (Flint et al., Stroke 2010): NIHSS <=10: 0, 11-20: 1, >=21: 2; age <=59: 0,
            60-79: 1, >=80: 2; +1 each for hypertension, diabetes, atrial fibrillation. 0-9.
-  SPAN-100 (Saposnik et al., Stroke 2013): age + NIHSS >= 100 -> positive.
+  SPAN-100 (Saposnik et al., Stroke 2013): age + NIHSS >= 100 -> positive (the published cut-off).
+  SPAN index age + NIHSS as a continuous number, as the 2026 FNO analysis scored SPAN-100.
   HIAT2    (Sarraj et al., Stroke 2013): age <=59: 0, 60-79: 2, >=80: 4; NIHSS <=10: 0,
            11-20: 1, >=21: 2; glucose >=150 mg/dL: 1; ASPECTS <=7: 3. 0-10.
   PRE      (Rangaraju et al., J NeuroIntervent Surg 2015): age + 2 x NIHSS - 10 x ASPECTS.
@@ -19,6 +20,8 @@ development cohort, so discrimination is compared on equal terms.
 Published predictor sets refitted on the registry (published coefficients not used):
   THRIVE-c (Flint et al., Int J Stroke 2015): continuous age and NIHSS, hypertension,
            diabetes, atrial fibrillation.
+  Bedside variables (regression): the seven bedside items as a linear logistic regression (the
+           2026 analysis's parsimonious model).
   MR PREDICTS@24H ("Development and validation of a postprocedural model to predict outcome
            after endovascular treatment for ischemic stroke", 2023; PMC10391355): age, NIHSS, pre-stroke mRS,
            diabetes, occlusion site, mTICI, NIHSS at 24 h (knot at 12), sICH. The CTA
@@ -52,6 +55,10 @@ def span100(df: pd.DataFrame) -> pd.Series:
     s = ((df["age"] + df["nihss_adm"]) >= 100).astype(float)
     s[df["age"].isna() | df["nihss_adm"].isna()] = np.nan
     return s
+
+
+def span_index(df: pd.DataFrame) -> pd.Series:
+    return df["age"] + df["nihss_adm"]
 
 
 def hiat2(df: pd.DataFrame) -> pd.Series:
@@ -88,6 +95,7 @@ def bedside(df: pd.DataFrame) -> pd.Series:
 POINT_SCORES = {
     "THRIVE": thrive,
     "SPAN-100": span100,
+    "SPAN index": span_index,
     "HIAT2": hiat2,
     "PRE": pre_score,
     "Bedside score": bedside,
@@ -98,6 +106,8 @@ POINT_SCORES = {
 # term: (kind, key[, arg]); kinds: num, bin, in (membership), min (min(x, c)), max0 (max(x - c, 0))
 REFIT_TERMS = {
     "THRIVE-c": [("num", "age"), ("num", "nihss_adm"), ("bin", "htn"), ("bin", "dm"), ("bin", "arrhythmia")],
+    "Bedside variables (regression)": [("num", "age"), ("num", "nihss_adm"), ("num", "glucose"), ("num", "mrs_pre"),
+                                       ("num", "aspects"), ("num", "onset_to_puncture"), ("bin", "stroke_prior")],
     "MR PREDICTS@24H": [
         ("num", "age"), ("num", "nihss_adm"), ("num", "mrs_pre"), ("bin", "dm"),
         ("in", "occlusion", ["M1"]), ("in", "occlusion", ["distal", "basilar", "other_posterior"]),
@@ -106,16 +116,18 @@ REFIT_TERMS = {
 }
 
 BENCHMARKS = {
-    "admission": ["THRIVE", "THRIVE-c", "SPAN-100", "HIAT2", "PRE", "Bedside score"],
-    "procedure": ["THRIVE", "Bedside score"],
+    "admission": ["Bedside score", "Bedside variables (regression)", "SPAN index", "SPAN-100", "THRIVE", "THRIVE-c",
+                  "HIAT2", "PRE"],
+    "procedure": ["Bedside score", "SPAN index", "THRIVE"],
     "h24": ["NIHSS 24 h", "MR PREDICTS@24H"],
     "d7": ["NIHSS day 7"],
 }
 
 # shown in the calculator's "other models" panel (pre-treatment scores stay visible later on)
 PANEL = {
-    "admission": ["Bedside score", "THRIVE", "THRIVE-c", "SPAN-100", "HIAT2", "PRE"],
-    "procedure": ["Bedside score", "THRIVE", "THRIVE-c", "SPAN-100", "HIAT2", "PRE"],
+    "admission": ["Bedside score", "Bedside variables (regression)", "SPAN index", "SPAN-100", "THRIVE", "THRIVE-c",
+                  "HIAT2", "PRE"],
+    "procedure": ["Bedside score", "SPAN index", "THRIVE", "THRIVE-c", "HIAT2", "PRE"],
     "h24": ["MR PREDICTS@24H", "NIHSS 24 h", "Bedside score", "THRIVE", "HIAT2"],
     "d7": ["NIHSS day 7", "MR PREDICTS@24H", "Bedside score", "THRIVE"],
 }

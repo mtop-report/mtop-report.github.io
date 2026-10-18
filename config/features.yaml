@@ -1,17 +1,27 @@
-# Predictor registry: one entry per input shown in the calculator.
+# Predictor registry: one entry per model input.
+#
+# The admission stage uses the 33 pre-procedural predictors of the 2026 FNO analysis ("set v2":
+# merged categories, no etiology or cholesterol, with the derived onset-time, IVT-to-puncture,
+# pulse-pressure and hyperglycaemia variables). The later stages add what the same analysis added:
+# reperfusion and procedure details at the end of the procedure, the 24-hour NIHSS course and
+# haemorrhage at 24 hours, and the day-7 NIHSS, oedema and decompression at day 7.
 #
 # stage     first stage at which the predictor is used (admission | procedure | h24 | d7);
 #           later stages reuse all earlier predictors.
 # type      numeric | binary | ordinal | categorical | derived
 # monotone  +1 = higher value can only raise P(mRS 0–2); -1 = can only lower it; 0 = free.
-#           Flipped automatically for the mortality model.
-# optional  true = the calculator offers "unknown" (passed to the model as missing).
-# Categorical predictors are one-hot encoded; a missing category sets all its columns to missing.
+#           Used by LightGBM only; flipped automatically for the mortality model.
+# optional  true = the calculator offers "unknown"; the estimate is then averaged over the
+#           registry's values of that input.
+# group     where the calculator shows the input (admission stage).
+# Categorical predictors are one-hot encoded (minus the reference level, if one is given); a
+# missing category sets all its columns to missing.
 
 features:
-  # ------------------------------------------------------------------ admission
+  # ------------------------------------------------------------------ admission: patient
   - key: age
     stage: admission
+    group: patient
     type: numeric
     monotone: -1
     min: 18
@@ -23,6 +33,7 @@ features:
 
   - key: sex_male
     stage: admission
+    group: patient
     type: binary
     monotone: 0
     default: 1
@@ -33,6 +44,7 @@ features:
 
   - key: mrs_pre
     stage: admission
+    group: patient
     type: ordinal
     monotone: -1
     default: 0
@@ -45,8 +57,10 @@ features:
       - {value: 4, label: {en: "4 · moderately severe", cs: "4 · středně těžké až těžké"}}
       - {value: 5, label: {en: "5 · severe disability", cs: "5 · těžké postižení"}}
 
+  # ------------------------------------------------------------------ admission: the stroke
   - key: nihss_adm
     stage: admission
+    group: stroke
     type: numeric
     monotone: -1
     min: 0
@@ -55,21 +69,9 @@ features:
     default: 16
     label: {en: "NIHSS on admission", cs: "NIHSS při přijetí"}
 
-  - key: aspects
-    stage: admission
-    type: numeric
-    monotone: 1
-    min: 0
-    max: 10
-    step: 1
-    default: 9
-    optional: true
-    label: {en: "ASPECTS", cs: "ASPECTS"}
-    help: {en: "Non-contrast CT, middle cerebral artery territory. Recorded in the registry from 2016.",
-           cs: "Nativní CT, povodí arteria cerebri media. V registru evidováno od roku 2016."}
-
   - key: occlusion
     stage: admission
+    group: stroke
     type: categorical
     monotone: 0
     default: M1
@@ -84,6 +86,7 @@ features:
 
   - key: side_left
     stage: admission
+    group: stroke
     type: binary
     monotone: 0
     default: 1
@@ -93,8 +96,72 @@ features:
       - {value: 0, label: {en: "Right", cs: "Pravá"}}
     posterior_value: 0      # forced for basilar / vertebral / PCA occlusions
 
+  - key: aspects
+    stage: admission
+    group: stroke
+    type: numeric
+    monotone: 1
+    min: 0
+    max: 10
+    step: 1
+    default: 9
+    optional: true
+    label: {en: "ASPECTS", cs: "ASPECTS"}
+    help: {en: "Non-contrast CT, middle cerebral artery territory. Recorded in the registry from 2016.",
+           cs: "Nativní CT, povodí arteria cerebri media. V registru evidováno od roku 2016."}
+
+  # ------------------------------------------------------------------ admission: pathway and timing
+  - key: ivt
+    stage: admission
+    group: pathway
+    type: binary
+    monotone: 0
+    default: 1
+    label: {en: "IV thrombolysis", cs: "Intravenózní trombolýza"}
+    options:
+      - {value: 1, label: {en: "Yes", cs: "Ano"}}
+      - {value: 0, label: {en: "No", cs: "Ne"}}
+
+  - key: ivt_external
+    stage: admission
+    group: pathway
+    type: binary
+    monotone: 0
+    default: 0
+    requires_ivt: true      # forced to "no" without IV thrombolysis
+    label: {en: "Thrombolysis given", cs: "Trombolýza podána"}
+    options:
+      - {value: 0, label: {en: "At FNO", cs: "Ve FNO"}}
+      - {value: 1, label: {en: "In another hospital", cs: "V jiné nemocnici"}}
+
+  - key: onset_to_ivt
+    stage: admission
+    group: pathway
+    type: numeric
+    monotone: 0
+    min: 20
+    max: 600
+    step: 5
+    default: 120
+    optional: true
+    requires_ivt: true      # not applicable without IV thrombolysis (passed to the model as missing)
+    unit: {en: "min", cs: "min"}
+    label: {en: "Onset to IV thrombolysis", cs: "Od vzniku do IV trombolýzy"}
+
+  - key: transfer
+    stage: admission
+    group: pathway
+    type: binary
+    monotone: 0
+    default: 0
+    label: {en: "Admission route", cs: "Způsob přijetí"}
+    options:
+      - {value: 0, label: {en: "Direct to FNO", cs: "Přímo do FNO"}}
+      - {value: 1, label: {en: "Transferred (drip-and-ship)", cs: "Překlad (drip-and-ship)"}}
+
   - key: onset_to_puncture
     stage: admission
+    group: pathway
     type: numeric
     monotone: -1
     min: 30
@@ -106,28 +173,36 @@ features:
     label: {en: "Onset to groin puncture", cs: "Od vzniku do punkce"}
     help: {en: "From symptom onset or last known well.", cs: "Od vzniku příznaků nebo od doby, kdy byl naposledy v pořádku."}
 
-  - key: ivt
+  - key: onset_hour
     stage: admission
-    type: binary
+    group: pathway
+    type: numeric
     monotone: 0
-    default: 1
-    label: {en: "IV thrombolysis", cs: "Intravenózní trombolýza"}
-    options:
-      - {value: 1, label: {en: "Yes", cs: "Ano"}}
-      - {value: 0, label: {en: "No", cs: "Ne"}}
+    min: 0
+    max: 23.5
+    step: 0.5
+    default: 9
+    optional: true
+    unit: {en: "h", cs: "h"}
+    label: {en: "Time of onset", cs: "Čas vzniku"}
+    help: {en: "Clock time of symptom onset or last known well.", cs: "Hodina vzniku příznaků nebo doby, kdy byl naposledy v pořádku."}
 
-  - key: transfer
+  - key: weekend
     stage: admission
+    group: pathway
     type: binary
     monotone: 0
     default: 0
-    label: {en: "Transferred from another hospital", cs: "Překlad z jiné nemocnice"}
+    optional: true
+    label: {en: "Onset at the weekend", cs: "Vznik o víkendu"}
     options:
-      - {value: 0, label: {en: "Direct to FNO", cs: "Přímo do FNO"}}
-      - {value: 1, label: {en: "Drip-and-ship", cs: "Drip-and-ship"}}
+      - {value: 0, label: {en: "Weekday", cs: "Pracovní den"}}
+      - {value: 1, label: {en: "Saturday or Sunday", cs: "Sobota nebo neděle"}}
 
+  # ------------------------------------------------------------------ admission: vital signs and labs
   - key: glucose
     stage: admission
+    group: vitals
     type: numeric
     monotone: -1
     min: 2
@@ -140,6 +215,7 @@ features:
 
   - key: sbp
     stage: admission
+    group: vitals
     type: numeric
     monotone: 0
     min: 70
@@ -150,8 +226,36 @@ features:
     unit: {en: "mmHg", cs: "mmHg"}
     label: {en: "Systolic blood pressure", cs: "Systolický tlak"}
 
+  - key: dbp
+    stage: admission
+    group: vitals
+    type: numeric
+    monotone: 0
+    min: 30
+    max: 160
+    step: 1
+    default: 85
+    optional: true
+    unit: {en: "mmHg", cs: "mmHg"}
+    label: {en: "Diastolic blood pressure", cs: "Diastolický tlak"}
+
+  - key: bmi
+    stage: admission
+    group: vitals
+    type: numeric
+    monotone: 0
+    min: 14
+    max: 50
+    step: 0.5
+    default: 27
+    optional: true
+    unit: {en: "kg/m²", cs: "kg/m²"}
+    label: {en: "Body mass index", cs: "Index tělesné hmotnosti (BMI)"}
+
+  # ------------------------------------------------------------------ admission: history and medication
   - key: htn
     stage: admission
+    group: history
     type: binary
     monotone: 0
     default: 1
@@ -162,14 +266,25 @@ features:
 
   - key: dm
     stage: admission
+    group: history
     type: binary
     monotone: 0
     default: 0
     label: {en: "Diabetes mellitus", cs: "Diabetes mellitus"}
     options: *yesno
 
+  - key: hld
+    stage: admission
+    group: history
+    type: binary
+    monotone: 0
+    default: 0
+    label: {en: "Hyperlipidaemia", cs: "Hyperlipidémie"}
+    options: *yesno
+
   - key: arrhythmia
     stage: admission
+    group: history
     type: binary
     monotone: 0
     default: 0
@@ -178,20 +293,107 @@ features:
 
   - key: stroke_prior
     stage: admission
+    group: history
     type: binary
     monotone: 0
     default: 0
     label: {en: "Previous stroke", cs: "Předchozí CMP"}
     options: *yesno
 
-  - key: anticoag
+  - key: tia_prior
     stage: admission
+    group: history
     type: binary
     monotone: 0
     default: 0
-    label: {en: "Anticoagulated before stroke", cs: "Antikoagulace před CMP"}
-    help: {en: "Warfarin, DOAC or LMWH.", cs: "Warfarin, DOAC nebo LMWH."}
+    label: {en: "Previous TIA", cs: "Předchozí TIA"}
     options: *yesno
+
+  - key: smoking
+    stage: admission
+    group: history
+    type: binary
+    monotone: 0
+    default: 0
+    label: {en: "Smoker", cs: "Kuřák"}
+    options: *yesno
+
+  - key: alcohol
+    stage: admission
+    group: history
+    type: binary
+    monotone: 0
+    default: 0
+    label: {en: "Alcohol abuse", cs: "Abúzus alkoholu"}
+    options: *yesno
+
+  - key: statin
+    stage: admission
+    group: history
+    type: binary
+    monotone: 0
+    default: 0
+    label: {en: "Statin before stroke", cs: "Statin před CMP"}
+    options: *yesno
+
+  - key: heart3
+    stage: admission
+    group: history
+    type: categorical
+    monotone: 0
+    default: none
+    reference: none
+    label: {en: "Heart condition", cs: "Srdeční onemocnění"}
+    help: {en: "Other: valve disease or replacement, cardiomyopathy, PFO, left-atrial thrombus, pacemaker.",
+           cs: "Jiné: chlopenní vada nebo náhrada, kardiomyopatie, PFO, trombus v levé síni, kardiostimulátor."}
+    options:
+      - {value: none, label: {en: "None", cs: "Žádné"}}
+      - {value: coronary, label: {en: "Coronary heart disease", cs: "ICHS"}}
+      - {value: other, label: {en: "Other", cs: "Jiné"}}
+
+  - key: antithrombotic
+    stage: admission
+    group: history
+    type: categorical
+    monotone: 0
+    default: none
+    reference: none
+    label: {en: "Antithrombotics before stroke", cs: "Antitrombotika před CMP"}
+    help: {en: "Anticoagulant: warfarin, DOAC or LMWH. Antiplatelet: aspirin, clopidogrel or both.",
+           cs: "Antikoagulancia: warfarin, DOAC nebo LMWH. Antiagregancia: kyselina acetylsalicylová, klopidogrel nebo obojí."}
+    options:
+      - {value: none, label: {en: "None", cs: "Žádná"}}
+      - {value: antiplatelet, label: {en: "Antiplatelet", cs: "Antiagregancia"}}
+      - {value: anticoagulant, label: {en: "Anticoagulant", cs: "Antikoagulancia"}}
+
+  # ------------------------------------------------------------------ admission: derived
+  - key: night_onset
+    stage: admission
+    type: derived
+    monotone: 0
+    formula: "onset_hour >= 22 or onset_hour < 6"
+    label: {en: "Onset at night (22–6 h)", cs: "Vznik v noci (22–6 h)"}
+
+  - key: ivt_to_puncture
+    stage: admission
+    type: derived
+    monotone: 0
+    formula: "onset_to_puncture - onset_to_ivt"
+    label: {en: "IV thrombolysis to puncture", cs: "Od IV trombolýzy do punkce"}
+
+  - key: pulse_pressure
+    stage: admission
+    type: derived
+    monotone: 0
+    formula: "sbp - dbp"
+    label: {en: "Pulse pressure", cs: "Pulzní tlak"}
+
+  - key: hyperglycemia
+    stage: admission
+    type: derived
+    monotone: -1
+    formula: "glucose > 7.8"
+    label: {en: "Glucose above 7.8 mmol/L", cs: "Glykémie nad 7,8 mmol/l"}
 
   # ------------------------------------------------------------------ end of procedure
   - key: tici
@@ -208,6 +410,46 @@ features:
       - {value: 4, label: {en: "3", cs: "3"}}
     note: "Registry grade '2' without subgrade is coded 2.5 (between 2a and 2b); not offered as an input."
 
+  - key: technique
+    stage: procedure
+    type: categorical
+    monotone: 0
+    default: aspiration
+    reference: none          # all one-hot columns 0
+    label: {en: "Procedure", cs: "Výkon"}
+    options:
+      - {value: aspiration, label: {en: "Thrombectomy: direct aspiration (ADAPT)", cs: "Trombektomie: přímá aspirace (ADAPT)"}}
+      - {value: stent_retriever, label: {en: "Thrombectomy: stent retriever", cs: "Trombektomie: stentriever"}}
+      - {value: combined, label: {en: "Thrombectomy: combined (e.g. Solumbra)", cs: "Trombektomie: kombinovaná (např. Solumbra)"}}
+      - {value: none, label: {en: "No thrombectomy: stent, angioplasty or intra-arterial lysis", cs: "Bez trombektomie: stent, angioplastika nebo intraarteriální lýza"}}
+      - {value: diagnostic, label: {en: "Diagnostic angiography only", cs: "Pouze diagnostická angiografie"}}
+
+  - key: stenting
+    stage: procedure
+    type: binary
+    monotone: 0
+    default: 0
+    label: {en: "Stent placed", cs: "Zavedení stentu"}
+    help: {en: "Carotid or intracranial stent during the procedure.", cs: "Karotický nebo intrakraniální stent během výkonu."}
+    options: *yesno
+
+  - key: angioplasty
+    stage: procedure
+    type: binary
+    monotone: 0
+    default: 0
+    label: {en: "Angioplasty (PTA)", cs: "Angioplastika (PTA)"}
+    options: *yesno
+
+  - key: ia_lysis
+    stage: procedure
+    type: binary
+    monotone: 0
+    default: 0
+    label: {en: "Intra-arterial thrombolysis", cs: "Intraarteriální trombolýza"}
+    help: {en: "Local intra-arterial lysis (LIAT, EKOS) or an intra-arterial thrombolytic.", cs: "Lokální intraarteriální lýza (LIAT, EKOS) nebo intraarteriálně podané trombolytikum."}
+    options: *yesno
+
   - key: procedure_min
     stage: procedure
     type: numeric
@@ -221,27 +463,17 @@ features:
     label: {en: "Procedure duration", cs: "Délka výkonu"}
     help: {en: "Groin puncture to recanalisation or end of procedure.", cs: "Od punkce do rekanalizace nebo ukončení výkonu."}
 
-  - key: technique
+  - key: onset_to_recan
     stage: procedure
-    type: categorical
+    type: numeric
     monotone: 0
-    default: aspiration
-    reference: none          # all one-hot columns 0
-    label: {en: "First-line technique", cs: "Technika"}
-    options:
-      - {value: aspiration, label: {en: "Direct aspiration (ADAPT)", cs: "Přímá aspirace (ADAPT)"}}
-      - {value: stent_retriever, label: {en: "Stent retriever", cs: "Stentriever"}}
-      - {value: combined, label: {en: "Combined (e.g. Solumbra)", cs: "Kombinovaná (např. Solumbra)"}}
-      - {value: none, label: {en: "No mechanical thrombectomy", cs: "Bez mechanické trombektomie"}}
-
-  - key: stenting
-    stage: procedure
-    type: binary
-    monotone: 0
-    default: 0
-    label: {en: "Acute stenting", cs: "Akutní stenting"}
-    help: {en: "Carotid or intracranial stent during the procedure.", cs: "Karotický nebo intrakraniální stent během výkonu."}
-    options: *yesno
+    min: 30
+    max: 1500
+    step: 5
+    default: 225
+    optional: true
+    unit: {en: "min", cs: "min"}
+    label: {en: "Onset to recanalisation", cs: "Od vzniku do rekanalizace"}
 
   - key: anesthesia
     stage: procedure
@@ -274,12 +506,27 @@ features:
     label: {en: "Symptomatic intracranial haemorrhage", cs: "Symptomatické intrakraniální krvácení"}
     options: *yesno
 
+  - key: ich_other
+    stage: h24
+    type: binary
+    monotone: 0
+    default: 0
+    label: {en: "Asymptomatic intracranial haemorrhage", cs: "Asymptomatické intrakraniální krvácení"}
+    options: *yesno
+
   - key: nihss_change_24h
     stage: h24
     type: derived
     monotone: -1
     formula: "nihss_24h - nihss_adm"
     label: {en: "NIHSS change in 24 h", cs: "Změna NIHSS za 24 h"}
+
+  - key: eni_24h
+    stage: h24
+    type: derived
+    monotone: 1
+    formula: "nihss_adm - nihss_24h >= 8 or nihss_24h <= 1"
+    label: {en: "Early neurological improvement", cs: "Časné neurologické zlepšení"}
 
   # ------------------------------------------------------------------ day 7
   - key: nihss_7d
@@ -298,4 +545,12 @@ features:
     monotone: -1
     default: 0
     label: {en: "Cerebral oedema", cs: "Mozkový edém"}
+    options: *yesno
+
+  - key: decompression
+    stage: d7
+    type: binary
+    monotone: 0
+    default: 0
+    label: {en: "Decompressive craniectomy", cs: "Dekompresivní kraniektomie"}
     options: *yesno

@@ -62,6 +62,7 @@
     root.appendChild(kpis());
     root.appendChild(liveCard(res, rerender));
     root.appendChild(centresCard(res, rerender));
+    if (res.regression) root.appendChild(familiesCard(res, rerender));
     root.appendChild(h("div", { class: "grid-2 block" }, sizeCard(res), growthCard(res)));
     root.appendChild(stagesCard());
     root.appendChild(losoCard(res));
@@ -72,6 +73,31 @@
     root.appendChild(h("p", { class: "note fx-demo-note", text: tx(
       `About this demo: the four centres are FNO's own thrombectomy registry split by treatment era (A ${era("A")}, B ${era("B")}, C ${era("C")}, D ${era("D")}). Each centre's data were exported in the MTOP template and read by its own node. Inside every centre, ${F.folds}-fold cross-validation kept a fifth of the patients aside, and each centre scored its own held-out patients. Model: boosted trees at admission (${F.recipe.trees} trees, depth ${F.recipe.max_depth}, learning rate ${num(F.recipe.learning_rate, 2)}, at least ${F.recipe.min_child} patients per leaf, monotone constraints). Real partner centres differ more in case mix and practice; measuring that is what the network is for.`,
       `O této ukázce: čtyři centra jsou registr trombektomií FNO rozdělený podle období léčby (A ${era("A")}, B ${era("B")}, C ${era("C")}, D ${era("D")}). Data každého centra byla exportována do šablony MTOP a načtena jeho vlastním uzlem. V každém centru se při ${F.folds}násobné křížové validaci odložila pětina pacientů a každé centrum hodnotilo své vlastní odložené pacienty. Model: boosting stromů při přijetí (${F.recipe.trees} stromů, hloubka ${F.recipe.max_depth}, rychlost učení ${num(F.recipe.learning_rate, 2)}, nejméně ${F.recipe.min_child} pacientů v listu, monotónní omezení). Skutečná partnerská centra se liší více, a právě to by síť měřila.`) }));
+  }
+
+  // ================================================================== every model family in the network
+  function familiesCard(res, rerender) {
+    const card = h("div", { class: "card card-pad block" });
+    card.appendChild(h("div", { class: "chart-head" }, h("div", null,
+      h("div", { class: "chart-title", text: tx("Every model family, alone and in the network", "Každá rodina modelů, samostatně i v síti") }),
+      h("div", { class: "chart-sub", text: tx(`AUROC on each centre's own held-out patients, ${target(S.fedTarget).toLowerCase()}, before the procedure`,
+        `AUROC na vlastních odložených pacientech každého centra, ${target(S.fedTarget).toLowerCase()}, před výkonem`) })), outcomeSeg(rerender)));
+    const fam = [
+      ["trees", tx("Boosted trees (LightGBM / XGBoost family)", "Boosting stromů (rodina LightGBM / XGBoost)"), res.mean, res.per_centre.map((e) => ({ id: e.id, alone: e.alone.auroc, network: e.network.auroc, adapted: e.adapted.auroc }))],
+      ["spline", A.mname("Logistic regression (splines)"), res.regression.spline.mean, res.regression.spline.per_centre],
+      ["linear", A.mname("Logistic regression"), res.regression.linear.mean, res.regression.linear.per_centre],
+    ];
+    const ids = F.centres.map((c) => c.id);
+    const rows = fam.map(([k, label, mean, per]) => h("tr", null, h("th", { scope: "row", text: label }),
+      ...ids.map((id) => { const e = per.find((x) => x.id === id) || {}; return h("td", null, `${num(e.alone, 3)} → `, h("b", { text: num(e.network, 3) })); }),
+      h("td", null, `${num(mean.alone, 3)} → `, h("b", { text: num(mean.network, 3) }), mean.adapted !== undefined ? h("span", { class: "ci", text: tx(` (adapted ${num(mean.adapted, 3)})`, ` (doladěno ${num(mean.adapted, 3)})`) }) : null)));
+    card.appendChild(h("div", { class: "table-scroll" }, h("table", { class: "data" },
+      h("thead", null, h("tr", null, [tx("Model", "Model")].concat(ids.map(centreEra), [tx("Mean", "Průměr")]).map((x) => h("th", { scope: "col", text: x })))),
+      h("tbody", null, rows))));
+    card.appendChild(h("p", { class: "note", text: tx(
+      "Each cell: the centre's own model → the network's model. The regressions are fitted exactly by federated Newton steps (only sums of first and second derivatives travel), the trees by exact federated boosting on pre-agreed value bands; LightGBM and XGBoost are both gradient-boosted trees, and the network's trees are their federated counterpart. The neural network (MLP) is not federated: averaging network weights across centres is only approximate, and the gradients of small networks can reveal individual patients.",
+      "Každá buňka: vlastní model centra → model sítě. Regrese se fitují přesně federovanými Newtonovými kroky (putují jen součty prvních a druhých derivací), stromy přesným federovaným boostingem na předem dohodnutých pásmech hodnot; LightGBM i XGBoost jsou boosting stromů a stromy sítě jsou jejich federovanou obdobou. Neuronová síť (MLP) se nefederuje: průměrování vah napříč centry je jen přibližné a gradienty malých sítí mohou prozradit jednotlivé pacienty.") }));
+    return card;
   }
 
   // ================================================================== what the demo centres are

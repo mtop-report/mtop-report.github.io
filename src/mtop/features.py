@@ -7,6 +7,32 @@ import pandas as pd
 from .config import Feature, stage_features, targets
 
 
+def _num(df: pd.DataFrame, key: str) -> pd.Series:
+    return df[key].astype("float64")
+
+
+def derived(df: pd.DataFrame, key: str) -> pd.Series:
+    """Derived predictors (the browser computes the same in web/model.js buildRow)."""
+    if key == "nihss_change_24h":
+        return _num(df, "nihss_24h") - _num(df, "nihss_adm")
+    if key == "eni_24h":
+        n0, n24 = _num(df, "nihss_adm"), _num(df, "nihss_24h")
+        out = (((n0 - n24) >= 8) | (n24 <= 1)).astype("float64")
+        unknown = n24.isna() | (n0.isna() & ~(n24 <= 1))
+        return out.where(~unknown)
+    if key == "night_onset":
+        h = _num(df, "onset_hour")
+        return ((h >= 22) | (h < 6)).astype("float64").where(h.notna())
+    if key == "ivt_to_puncture":
+        return _num(df, "onset_to_puncture") - _num(df, "onset_to_ivt")
+    if key == "pulse_pressure":
+        return _num(df, "sbp") - _num(df, "dbp")
+    if key == "hyperglycemia":
+        g = _num(df, "glucose")
+        return (g > 7.8).astype("float64").where(g.notna())
+    raise KeyError(f"No rule for derived feature {key}")
+
+
 def _column(df: pd.DataFrame, f: Feature) -> pd.DataFrame:
     if f.type == "categorical":
         src = df[f.key]
@@ -18,9 +44,7 @@ def _column(df: pd.DataFrame, f: Feature) -> pd.DataFrame:
             out[col] = v
         return pd.DataFrame(out, index=df.index)
     if f.type == "derived":
-        if f.key == "nihss_change_24h":
-            return pd.DataFrame({f.key: df["nihss_24h"] - df["nihss_adm"]}, index=df.index)
-        raise KeyError(f"No rule for derived feature {f.key}")
+        return pd.DataFrame({f.key: derived(df, f.key)}, index=df.index)
     return pd.DataFrame({f.key: df[f.key].astype("float64")}, index=df.index)
 
 

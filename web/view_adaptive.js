@@ -4,11 +4,21 @@
   const A = window.MTOPApp;
   if (!A || !A.DATA.adaptive) return;
   const { h, C, tx, num, signed, STAGES, STAGE } = A;
+  if (!A.chosenOf) A.chosenOf = () => "LightGBM";
   const AD = A.DATA.adaptive;
   const S = A.S;
   S.adStage = S.adStage || "admission";
   S.adTarget = S.adTarget || "good_outcome";
   S.adShow = S.adShow || { refit_recal: true, frozen: true, refit: true, recal_int: true, recal_log: false, sliding: false };
+  // results per learner (older files: one LightGBM model)
+  const LEARN = AD.learners || ["LightGBM"];
+  const resOf = (st, tg, ln) => (AD.learners ? AD.results[st][tg][ln] : AD.results[st][tg]);
+  const iecvOf = (st, tg, ln) => (AD.learners ? ((AD.iecv[st] || {})[tg] || {})[ln] : (AD.iecv[st] || {})[tg]);
+  const learnerFor = (st, tg) => {
+    if (S.adLearner && LEARN.includes(S.adLearner)) return S.adLearner;
+    const ch = A.chosenOf(st, tg);
+    return LEARN.includes(ch) ? ch : LEARN[0];
+  };
 
   // colour follows the strategy (fixed order), MTOP policy first
   const ORDER = ["refit_recal", "frozen", "refit", "recal_int", "recal_log", "sliding"];
@@ -22,8 +32,11 @@
 
   function render(root) {
     root.replaceChildren();
+    if (!AD.results[S.adStage]) S.adStage = Object.keys(AD.results)[0];
+    if (!AD.results[S.adStage][S.adTarget]) S.adTarget = Object.keys(AD.results[S.adStage])[0];
     const st = S.adStage, tg = S.adTarget;
-    const R = AD.results[st][tg];
+    const ln = learnerFor(st, tg);
+    const R = resOf(st, tg, ln);
     const set = AD.settings;
     root.appendChild(h("div", { class: "view-head" }, h("div", null,
       h("h2", { text: tx("Keeping the model up to date", "Jak udržet model aktuální") }),
@@ -35,9 +48,13 @@
     const seg = h("div", { class: "mini-seg", role: "group", "aria-label": A.t().outcome },
       A.TARGETS.map((k) => h("button", { type: "button", "aria-pressed": String(tg === k), onclick: () => { S.adTarget = k; render(root); } }, k === "good_outcome" ? A.t().targetGood : A.t().targetDeath)));
     const stSel = h("select", { class: "sel", id: "ad-stage" });
-    for (const s2 of STAGES) stSel.appendChild(h("option", { value: s2, selected: s2 === st ? true : null }, `${A.idx(s2) + 1} · ${A.L(STAGE[s2].title)}`));
+    for (const s2 of STAGES.filter((x) => AD.results[x])) stSel.appendChild(h("option", { value: s2, selected: s2 === st ? true : null }, `${A.idx(s2) + 1} · ${A.L(STAGE[s2].title)}`));
     stSel.addEventListener("change", () => { S.adStage = stSel.value; render(root); });
-    root.appendChild(h("div", { class: "controls" }, h("span", { text: A.t().outcome }), seg, h("label", { for: "ad-stage" }, A.t().stage), stSel));
+    const lnSel = h("select", { class: "sel", id: "ad-learner" });
+    for (const k of LEARN) lnSel.appendChild(h("option", { value: k, selected: k === ln ? true : null }, `${A.mname(k)}${k === A.chosenOf(st, tg) ? tx(" (calculator)", " (kalkulačka)") : ""}`));
+    lnSel.addEventListener("change", () => { S.adLearner = lnSel.value; render(root); });
+    root.appendChild(h("div", { class: "controls" }, h("span", { text: A.t().outcome }), seg, h("label", { for: "ad-stage" }, A.t().stage), stSel,
+      AD.learners ? h("label", { for: "ad-learner" }, tx("Model", "Model")) : null, AD.learners ? lnSel : null));
 
     // headline tiles
     const P = R.pooled;
@@ -138,9 +155,10 @@
       })));
     tCard.appendChild(h("div", { class: "table-scroll" }, tbl));
     tCard.appendChild(h("p", { class: "note", text: tx(
-      `Every model uses the same fixed hyperparameters (number of trees chosen by cross-validation within each training set). Recalibration uses the previous ${set.recal_years} years; the sliding window uses the previous ${set.window}. Refitting can also pick up predictors that started being recorded later, such as ASPECTS from 2016, which recalibration alone cannot.`,
-      `Všechny modely mají stejné pevné hyperparametry (počet stromů zvolen křížovou validací v rámci každé trénovací sady). Rekalibrace používá předchozí ${set.recal_years} roky, posuvné okno předchozích ${set.window} let. Přetrénování navíc využije prediktory, které se začaly evidovat později, např. ASPECTS od roku 2016, což samotná rekalibrace nedokáže.`) }));
+      `${A.mname(ln)}. Settings are fixed in advance and identical for every strategy: the tree models use generic hyperparameters with the number of trees chosen by cross-validation within each training set; the regressions choose their penalty the same way (4 spline knots). Recalibration uses the previous ${set.recal_years} years; the sliding window uses the previous ${set.window}. Refitting can also pick up predictors that started being recorded later, such as ASPECTS from 2016, which recalibration alone cannot.`,
+      `${A.mname(ln)}. Nastavení jsou stanovena předem a pro všechny strategie stejná: stromové modely mají obecné hyperparametry a počet stromů volený křížovou validací v rámci každé trénovací sady; regrese volí penalizaci stejně (4 uzly splajnů). Rekalibrace používá předchozí ${set.recal_years} roky, posuvné okno předchozích ${set.window} let. Přetrénování navíc využije prediktory, které se začaly evidovat později, např. ASPECTS od roku 2016, což samotná rekalibrace nedokáže.`) }));
     root.appendChild(tCard);
+    if (AD.learners && AD.learners.length > 1) root.appendChild(learnersCard(st, tg, ln, root));
 
     // availability heat grid
     const av = AD.availability;
@@ -171,6 +189,38 @@
     }
   }
 
+  // every learner side by side: frozen vs MTOP policy, and validation across treatment eras
+  function learnersCard(st, tg, ln, root) {
+    const set = AD.settings;
+    const card = h("div", { class: "card card-pad block" });
+    card.appendChild(h("div", { class: "chart-head" }, h("div", null,
+      h("div", { class: "chart-title", text: tx("Every model, same test", "Všechny modely, stejný test") }),
+      h("div", { class: "chart-sub", text: tx(`All test years pooled (${set.first_test}–${set.last_test}), frozen in ${set.base_end} vs the MTOP policy (refit + recalibrate); leave-one-era-out validation pooled across eras`,
+        `Všechny testovací roky dohromady (${set.first_test}–${set.last_test}), zmrazený v roce ${set.base_end} vs postup MTOP (přetrénování + rekalibrace); validace s vynecháním období, sloučená přes období`) }))));
+    const rows = LEARN.map((k) => {
+      const P = resOf(st, tg, k).pooled;
+      const ie = iecvOf(st, tg, k);
+      const pooled = ie && ie.pooled;
+      const sel = h("button", { type: "button", class: "btn btn-ghost", style: "min-height:28px;padding:0 10px", onclick: () => { S.adLearner = k; render(root); window.scrollTo(0, 0); } }, tx("show", "zobrazit"));
+      return h("tr", { class: k === ln ? "chosen" : "" },
+        h("th", { scope: "row" }, h("span", { class: "dot", style: `background:${A.mcolor(k)}` }), A.mname(k), k === A.chosenOf(st, tg) ? h("span", { class: "tag", text: tx("calculator", "kalkulačka") }) : null),
+        h("td", null, `${num(P.frozen.auroc, 3)} → ${num(P.refit_recal.auroc, 3)}`),
+        h("td", { text: `${signed(P.frozen.citl)} → ${signed(P.refit_recal.citl)}` }),
+        h("td", { text: `${num(P.frozen.ici, 3)} → ${num(P.refit_recal.ici, 3)}` }),
+        h("td", { text: num(P.refit_recal.mean_abs_citl, 2) }),
+        h("td", null, pooled ? `${num(pooled.auroc, 3)} ` : "–", pooled ? h("span", { class: "ci", text: `${num(pooled.ci[0], 3)}–${num(pooled.ci[1], 3)}` }) : null),
+        h("td", { text: pooled ? `${num(pooled.i2 * 100)}%` : "–" }),
+        h("td", null, k === ln ? "" : sel));
+    });
+    card.appendChild(h("div", { class: "table-scroll" }, h("table", { class: "data comp" },
+      h("thead", null, h("tr", null, [tx("Model", "Model"), tx("AUROC frozen → MTOP", "AUROC zmrazený → MTOP"), tx("Cal. intercept", "Kal. intercept"), "ICI", tx("Mean |yearly intercept|, MTOP", "Průměr |ročního interceptu|, MTOP"), tx("Across eras: AUROC (95% CI)", "Napříč obdobími: AUROC (95% IS)"), "I²", ""].map((x) => h("th", { scope: "col", text: x })))),
+      h("tbody", null, rows))));
+    card.appendChild(h("p", { class: "note", text: tx(
+      "The calculator's model for each stage and outcome is chosen on the Validation tab; here every publishable model goes through the same updating experiment, so the strategies can be compared within and across model types. I²: share of the variation in AUROC across eras beyond chance.",
+      "Model kalkulačky pro každou fázi a výsledek se volí na kartě Validace; zde prochází stejným experimentem aktualizace každý zveřejnitelný model, takže lze strategie porovnat v rámci modelu i mezi modely. I²: podíl variability AUROC mezi obdobími nad rámec náhody.") }));
+    return card;
+  }
+
   function flagText(f) {
     return f === "alarm" ? tx("alarm (beyond 3σ)", "alarm (za 3σ)") : f === "warning" ? tx("warning (beyond 95%)", "varování (za 95 %)") : tx("in control", "v mezích");
   }
@@ -186,7 +236,7 @@
       h("div", { class: "chart-sub", text: tx("Written in advance, in the spirit of a predetermined change control plan", "Stanovena předem, v duchu předem schváleného plánu změn") }))));
     const rows = [
       [tx("Each quarter", "Každé čtvrtletí"), tx("Observed vs expected outcome for patients whose 90-day mRS is complete", "Pozorovaný vs očekávaný výsledek u pacientů s dokončeným mRS za 90 dní"),
-        tx("Outside 95% limits twice in a row → re-estimate the intercept on the last 2 years; minor version", "Dvakrát po sobě mimo 95% meze → přepočet interceptu na posledních 2 letech; menší verze")],
+        tx(`Outside 95% limits twice in a row → re-estimate the intercept on the most recent complete years (now ${A.RECENT}); minor version`, `Dvakrát po sobě mimo 95% meze → přepočet interceptu na nejnovějších úplných letech (nyní ${A.RECENT}); menší verze`)],
       [tx("Each year", "Každý rok"), tx("AUROC and calibration slope on the latest year", "AUROC a kalibrační sklon na posledním roce"),
         tx("AUROC below its validation interval or slope outside 0.8–1.2 → full refit with temporal validation; major version", "AUROC pod validačním intervalem nebo sklon mimo 0,8–1,2 → úplné přetrénování s časovou validací; vyšší verze")],
       [tx("New predictor", "Nový prediktor"), tx("For example GFAP, once at least 100 outcome events are available", "Například GFAP, jakmile bude k dispozici alespoň 100 událostí"),
@@ -208,7 +258,7 @@
     card.appendChild(h("div", { class: "chart-title", text: tx("Model versions", "Verze modelu"), style: "margin-bottom:10px" }));
     const items = [
       { v: `v${B.version}`, date: B.generated, status: "live",
-        text: tx(`Trained on 2005–2025, intercepts recalibrated to 2021–2025. Fingerprint ${(B.fingerprint || "").slice(0, 12)}…`, `Trénováno na letech 2005–2025, intercepty rekalibrovány na 2021–2025. Otisk ${(B.fingerprint || "").slice(0, 12)}…`) },
+        text: tx(`Trained on ${A.E.period[0]}–${A.E.period[1]}, intercepts recalibrated to ${A.RECENT}. Fingerprint ${(B.fingerprint || "").slice(0, 12)}…`, `Trénováno na letech ${A.E.period[0]}–${A.E.period[1]}, intercepty rekalibrovány na ${A.RECENT}. Otisk ${(B.fingerprint || "").slice(0, 12)}…`) },
       { v: "v1.1", date: tx("after 2026 follow-up", "po dokončení sledování 2026"), status: "proposed",
         text: tx("Scheduled recalibration once 90-day outcomes of 2026 patients are complete.", "Plánovaná rekalibrace po dokončení 90denních výsledků pacientů z roku 2026.") },
       { v: "v2.0", date: tx("when data allow", "až to data dovolí"), status: "candidate",

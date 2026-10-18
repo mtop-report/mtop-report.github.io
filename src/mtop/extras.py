@@ -1,14 +1,14 @@
 """Deployment extras for the calculator (artifacts/public/extras.json, aggregates only).
 
-1. Comparators for the "other models" panel, refitted on all years and shifted to the recent
-   era: penalised logistic regression on the MTOP predictors, published point scores mapped to
-   probabilities, and published predictor sets refitted on the registry.
-2. Full 90-day mRS distribution: a cumulative-logit (proportional odds) layer on the two
-   LightGBM scores (mRS 0-2 and death), fitted on out-of-fold scores. The browser uses it only
-   to split the independent (0-2) and dependent (3-5) bands into single grades, so the headline
+1. Comparators for the "other models" panel, fitted on all years and shifted to the recent era:
+   published point scores mapped to probabilities, and published or bedside predictor sets refitted
+   on the registry. (The other learners are in model_bundle.json.)
+2. Full 90-day mRS distribution: a cumulative-logit (proportional odds) layer on the two chosen
+   models' scores (mRS 0-2 and death), fitted on out-of-fold scores. The browser uses it only to
+   split the independent (0-2) and dependent (3-5) bands into single grades, so the headline
    probabilities stay those of the binary models.
-3. Prediction uncertainty: bootstrap refits of the deployed models (Riley & Collins 2023);
-   95 % ranges summarised by predicted-risk bin.
+3. Prediction uncertainty: bootstrap refits of the chosen models (Riley & Collins 2023); 95 %
+   ranges summarised by predicted-risk bin.
 4. A synthetic demo cohort in the upload template format for the in-browser validation tool.
 """
 from __future__ import annotations
@@ -16,23 +16,23 @@ from __future__ import annotations
 import json
 import time
 
-import lightgbm as lgb
 import numpy as np
 import pandas as pd
 from scipy.optimize import minimize
 from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import StratifiedKFold
 
+from . import learners as Lr
 from . import metrics as M
 from .clean import TICI_LABEL, clean_registry, load_raw
 from .cohort import flow, split_temporal, stage_cohort
 from .config import features, settings, stage_ids
+from .export import clean_json
 from .features import design_matrix, monotone_vector
 from .lr import export_logreg, fit_logreg, fit_logreg_fixed
 from .paths import PRIVATE, PUBLIC, SYNTHETIC
 from .scores import PANEL, POINT_SCORES, REFIT_TERMS, apply_points_map, design, fit_points_map
-from .splines import export_spline_logreg, fit_spline_logreg, fit_spline_logreg_fixed
-from .train import _params, fit_lgbm, oof_lgbm
+from .train import load_deployed
 
 UW_MRS = [1.0, 0.91, 0.76, 0.65, 0.33, 0.0, 0.0]  # utility-weighted mRS (Chaisinanunkul et al., Stroke 2015)
 N_BOOT = 100
@@ -103,19 +103,10 @@ def generalized_c(score_better, mrs):
 
 
 # ------------------------------------------------------------------------------ helpers
-# Out-of-fold predictions for the recent-era shift use the setting chosen on all patients (as the
-# deployed LightGBM does), so the search is not repeated inside every fold.
 def _oof_logreg(Xd, y, seed, C):
     p = np.zeros(len(y))
     for tr, va in StratifiedKFold(5, shuffle=True, random_state=seed).split(Xd, y):
         p[va] = fit_logreg_fixed(Xd.iloc[tr], y[tr], C).predict_proba(Xd.iloc[va])[:, 1]
-    return p
-
-
-def _oof_spline(X, y, seed, k, C):
-    p = np.zeros(len(y))
-    for tr, va in StratifiedKFold(5, shuffle=True, random_state=seed).split(X, y):
-        p[va] = fit_spline_logreg_fixed(X.iloc[tr], y[tr], k, C).predict_proba(X.iloc[va])[:, 1]
     return p
 
 
@@ -136,16 +127,11 @@ def _bins(p0, lo_off, hi_off, min_n):
     return out
 
 
-# ------------------------------------------------------------------------------ main
-def stage_comparators(stage: str, d: pd.DataFrame, X: pd.DataFrame, yg: np.ndarray, recent: np.ndarray, seed: int) -> dict:
-    """Comparators for the calculator's "other models" panel, each shifted to the recent era."""
+# ------------------------------------------------------------------------------ comparators
+def stage_comparators(stage: str, d: pd.DataFrame, yg: np.ndarray, recent: np.ndarray, seed: int) -> dict:
+    """Scores and published predictor sets for the calculator's "other models" panel (mRS 0-2),
+    each shifted to the recent era."""
     comp = {}
-    lrm = fit_logreg(X, yg, seed)
-    comp["Logistic regression"] = {"kind": "lr", "spec": export_logreg(
-        lrm, list(X.columns), _citl(yg[recent], _oof_logreg(X, yg, seed, lrm.settings["C"])[recent]))}
-    slr = fit_spline_logreg(X, yg, seed)
-    comp["Logistic regression (splines)"] = {"kind": "spline", "spec": export_spline_logreg(
-        slr, _citl(yg[recent], _oof_spline(X, yg, seed, slr.settings["knots"], slr.settings["C"])[recent]))}
     for name in PANEL[stage]:
         if name in POINT_SCORES:
             sc = POINT_SCORES[name](d)
@@ -173,20 +159,22 @@ def update_comparators(clean: pd.DataFrame) -> dict:
     out["panel"] = PANEL
     for stage in stage_ids():
         d = stage_cohort(base, stage)
-        X = design_matrix(d, stage)
         recent = (d["year"] >= recent_from).to_numpy()
-        out["comparators"][stage] = stage_comparators(stage, d, X, d["good_outcome"].to_numpy(float), recent, seed)
+        out["comparators"][stage] = stage_comparators(stage, d, d["good_outcome"].to_numpy(float), recent, seed)
     with open(path, "w", encoding="utf-8") as fh:
-        json.dump(out, fh, ensure_ascii=False, separators=(",", ":"))
+        json.dump(clean_json(out), fh, ensure_ascii=False, separators=(",", ":"))
     return out
 
 
+# ------------------------------------------------------------------------------ main
 def build_extras(clean: pd.DataFrame, n_boot: int = N_BOOT) -> dict:
     cfg = settings()
     seed = int(cfg["seed"])
     recent_from = int(cfg["split"]["recent_era_from_year"])
     min_cell = int(cfg["privacy"]["min_cell"])
-    res = json.loads((PRIVATE / "train_results.json").read_text())
+    min_leaf = int(cfg["privacy"]["min_leaf"])
+    primary = json.loads((PRIVATE / "train_primary.json").read_text())
+    test_preds = pd.read_parquet(PRIVATE / "predictions_primary.parquet")
     base, _ = flow(clean)
     out = {"uw_mrs": UW_MRS, "panel": PANEL, "comparators": {}, "ordinal": {}, "ordinal_validation": {},
            "uncertainty": {}, "stability": {}}
@@ -196,35 +184,33 @@ def build_extras(clean: pd.DataFrame, n_boot: int = N_BOOT) -> dict:
         d = stage_cohort(base, stage)
         X = design_matrix(d, stage)
         recent = (d["year"] >= recent_from).to_numpy()
-        tr = res["stages"][stage]["targets"]
         y = {t: d[t].to_numpy(float) for t in ("good_outcome", "death90")}
-        prm = {t: _params(tr[t]["params"], monotone_vector(stage, t), seed) for t in y}
-        shift = {t: float(tr[t]["deployed"]["intercept_recent"]) for t in y}
-        rounds_all = {t: int(tr[t]["deployed"]["rounds"]) for t in y}
+        dep = {t: load_deployed(PRIVATE, stage, t) for t in y}
+        chosen = {t: dep[t]["chosen"] for t in y}
+        mono = {t: monotone_vector(stage, t) for t in y}
 
         # 1. comparators (primary outcome)
-        out["comparators"][stage] = stage_comparators(stage, d, X, y["good_outcome"], recent, seed)
+        out["comparators"][stage] = stage_comparators(stage, d, y["good_outcome"], recent, seed)
 
-        # 2. ordinal layer on out-of-fold scores (same folds as the deployed recalibration)
+        # 2. ordinal layer on out-of-fold scores of the chosen deployed models
         z = {}
         for t in y:
-            oof, _ = oof_lgbm(X, y[t], prm[t], rounds_all[t], seed + 1, folds=5, repeats=1)
-            z[t] = M.logit(oof)
+            f = dep[t]["models"][chosen[t]]["fitted"]
+            z[t] = M.logit(Lr.oof(chosen[t], f.settings, X, y[t], seed + 1, mono[t], min_leaf=min_leaf))
         mrs = d["mrs90"].to_numpy(int)
         bg, bd, _ = fit_ordinal(z["good_outcome"], z["death90"], mrs)
         _, _, th = fit_ordinal(z["good_outcome"][recent], z["death90"][recent], mrs[recent], fixed_beta=(bg, bd))
-        out["ordinal"][stage] = {"bg": bg, "bd": bd, "theta": th}
+        out["ordinal"][stage] = {"bg": bg, "bd": bd, "theta": th, "models": chosen}
 
-        # 2b. temporal validation of the full distribution (development models only)
+        # 2b. temporal validation of the full distribution (development models of the primary split)
         dev, test = split_temporal(d)
-        Xdv, Xte = X.loc[dev.index], X.loc[test.index]
+        Xdv = X.loc[dev.index]
         zd_dev, p_test = {}, {}
         for t in y:
-            pdv = _params(tr[t]["params"], monotone_vector(stage, t), seed)
-            ydv = dev[t].to_numpy(float)
-            oof, _ = oof_lgbm(Xdv, ydv, pdv, int(tr[t]["rounds_dev"]), seed + 2, folds=5, repeats=1)
-            zd_dev[t] = M.logit(oof)
-            p_test[t] = fit_lgbm(Xdv, ydv, pdv, int(tr[t]["rounds_dev"])).predict(Xte)
+            st = primary["stages"][stage]["targets"][t]["settings"][chosen[t]]
+            zd_dev[t] = M.logit(Lr.oof(chosen[t], st, Xdv, dev[t].to_numpy(float), seed + 2, mono[t], min_leaf=min_leaf))
+            tp = test_preds[(test_preds["stage"] == stage) & (test_preds["target"] == t) & (test_preds["model"] == chosen[t])]
+            p_test[t] = tp.set_index("patient_id").loc[test["patient_id"].to_numpy(), "p"].to_numpy(float)
         mrs_dev, mrs_te = dev["mrs90"].to_numpy(int), test["mrs90"].to_numpy(int)
         vbg, vbd, vth = fit_ordinal(zd_dev["good_outcome"], zd_dev["death90"], mrs_dev)
         q = ordinal_probs(M.logit(p_test["good_outcome"]), M.logit(p_test["death90"]), vbg, vbd, vth)
@@ -241,25 +227,28 @@ def build_extras(clean: pd.DataFrame, n_boot: int = N_BOOT) -> dict:
             "uw_obs": float(np.mean(np.asarray(UW_MRS)[mrs_te])), "uw_pred": float(uw.mean()),
         }
 
-        # 3. bootstrap uncertainty of the deployed models
+        # 3. bootstrap uncertainty of the chosen deployed models
         rng = np.random.default_rng(seed)
         out["uncertainty"][stage], out["stability"][stage] = {}, {}
         for t in y:
-            booster = lgb.Booster(model_file=str(PRIVATE / f"lgbm_{stage}_{t}.txt"))
-            l0 = booster.predict(X, raw_score=True) + shift[t]
+            m = dep[t]["models"][chosen[t]]
+            f, shift = m["fitted"], m["shift"]
+            l0 = f.logit(X) + shift
             p0 = M.expit(l0)
             L = np.empty((n_boot, len(l0)))
             for b in range(n_boot):
                 i = rng.integers(0, len(l0), len(l0))
-                m = fit_lgbm(X.iloc[i], y[t][i], prm[t], rounds_all[t])
-                L[b] = m.predict(X, raw_score=True) + shift[t]
+                fb = Lr.refit(chosen[t], f.settings, X.iloc[i], y[t][i], seed, mono[t], min_leaf=min_leaf)
+                L[b] = fb.logit(X) + shift
             lo_off = np.percentile(L, 2.5, axis=0) - l0
             hi_off = np.percentile(L, 97.5, axis=0) - l0
             out["uncertainty"][stage][t] = _bins(p0, lo_off, hi_off, min_cell)
             pb = M.expit(L)
             out["stability"][stage][t] = {
+                "model": chosen[t],
                 "mape": float(np.mean(np.abs(pb - p0[None, :]))),
                 "width_median": float(np.median(np.percentile(pb, 97.5, axis=0) - np.percentile(pb, 2.5, axis=0))),
+                "share_wide": float(np.mean((np.percentile(pb, 97.5, axis=0) - np.percentile(pb, 2.5, axis=0)) > 0.2)),
                 "n_boot": n_boot,
             }
         ov = out["ordinal_validation"][stage]
@@ -268,7 +257,7 @@ def build_extras(clean: pd.DataFrame, n_boot: int = N_BOOT) -> dict:
 
     PUBLIC.mkdir(parents=True, exist_ok=True)
     with open(PUBLIC / "extras.json", "w", encoding="utf-8") as fh:
-        json.dump(out, fh, ensure_ascii=False, separators=(",", ":"))
+        json.dump(clean_json(out), fh, ensure_ascii=False, separators=(",", ":"))
     write_demo_csv()
     return out
 
@@ -283,7 +272,7 @@ def write_demo_csv() -> None:
     if not src.exists():
         return
     c, _ = clean_registry(load_raw(src))
-    c = c[(c["age"] >= 18) & (c["diagnostic_only"] != 1)].copy()
+    c = c[(c["age"] >= 18)].copy()
     c["tici"] = c["tici"].map(lambda v: TICI_LABEL.get(v, "") if pd.notna(v) else "").str.replace(" (not subgraded)", "")
     cols = template_columns()
     df = c[cols].copy()

@@ -1,4 +1,4 @@
-// Helper for test_parity.py: evaluate web/model.js on rows from a JSON file.
+// Helper for test_parity.py: evaluate a published learner with web/model.js on rows from a JSON file.
 // usage: node node_eval.js input.json output.json
 const fs = require("fs");
 const path = require("path");

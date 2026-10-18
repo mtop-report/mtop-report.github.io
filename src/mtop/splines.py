@@ -70,13 +70,13 @@ class SplineLogReg:
         return self.model.predict_proba(expand(X[self.columns], self.knots))
 
 
-def fit_spline_logreg(X: pd.DataFrame, y, seed: int, knot_options=KNOT_OPTIONS) -> SplineLogReg:
-    """For each number of knots, the penalty is tuned over 50 values; the pair with the lowest
-    cross-validated log-loss (same folds for every pair) is kept."""
+def fit_spline_logreg(X: pd.DataFrame, y, seed: int, knot_options=KNOT_OPTIONS, Cs=None) -> SplineLogReg:
+    """For each number of knots, the penalty is tuned over 50 values (or `Cs`); the pair with the
+    lowest cross-validated log-loss (same folds for every pair) is kept."""
     best = None
     for k in knot_options:
         knots = choose_knots(X, k=k)
-        model = fit_logreg(expand(X, knots), y, seed)
+        model = fit_logreg(expand(X, knots), y, seed, Cs=Cs)
         if best is None or model.settings["cv_logloss"] < best[2].settings["cv_logloss"]:
             best = (k, knots, model)
     k, knots, model = best

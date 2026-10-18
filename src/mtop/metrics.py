@@ -14,7 +14,7 @@ def logit(p):
 
 
 def expit(z):
-    return 1 / (1 + np.exp(-np.asarray(z, float)))
+    return 1 / (1 + np.exp(-np.clip(np.asarray(z, float), -500, 500)))
 
 
 def _fit_logistic(x, y, offset=None, slope=True):
@@ -40,6 +40,35 @@ def calibration_intercept_slope(y, p):
     citl = _fit_logistic(np.zeros_like(lp), y, offset=lp, slope=False)[0]
     slope = _fit_logistic(lp, y)[1]
     return float(citl), float(slope)
+
+
+def fast_citl_slope(y, lp, iters: int = 25):
+    """The same two quantities by Newton-Raphson (used inside the bootstrap, where BFGS is slow)."""
+    y = np.asarray(y, float)
+    lp = np.asarray(lp, float)
+    a = 0.0
+    for _ in range(iters):
+        q = expit(lp + a)
+        g, hss = np.sum(y - q), np.sum(q * (1 - q))
+        if hss <= 1e-12:
+            break
+        step = g / hss
+        a += step
+        if abs(step) < 1e-9:
+            break
+    w = np.zeros(2)
+    X = np.column_stack([np.ones_like(lp), lp])
+    for _ in range(iters):
+        q = expit(X @ w)
+        H = (X * (q * (1 - q))[:, None]).T @ X
+        try:
+            step = np.linalg.solve(H + 1e-9 * np.eye(2), X.T @ (y - q))
+        except np.linalg.LinAlgError:
+            break
+        w += step
+        if np.max(np.abs(step)) < 1e-9:
+            break
+    return float(a), float(w[1])
 
 
 def ici(y, p, frac=0.75):
@@ -126,13 +155,17 @@ def summary(y, p):
     }
 
 
-def bootstrap_ci(y, preds: dict, n_boot=2000, seed=0, ref=None):
-    """Percentile 95% CIs for AUROC/Brier of each model, plus paired delta-AUROC vs `ref`."""
+def bootstrap_ci(y, preds: dict, n_boot=2000, seed=0, ref=None, calibration=True):
+    """Percentile 95% CIs for AUROC, Brier, calibration-in-the-large and slope of each model, plus
+    the paired AUROC difference against `ref` (model minus reference: positive = better than the
+    reference), with a two-sided bootstrap p-value."""
     rng = np.random.default_rng(seed)
     y = np.asarray(y, float)
     names = list(preds)
+    P = {k: np.asarray(preds[k], float) for k in names}
+    LP = {k: logit(P[k]) for k in names}
     stats = {k: {"auroc": [], "brier": [], "citl": [], "slope": []} for k in names}
-    deltas = {k: [] for k in names if ref and k != ref}
+    deltas = {k: [] for k in names if ref and k != ref and ref in preds}
     n = len(y)
     for _ in range(n_boot):
         idx = rng.integers(0, n, n)
@@ -141,13 +174,18 @@ def bootstrap_ci(y, preds: dict, n_boot=2000, seed=0, ref=None):
             continue
         aucs = {}
         for k in names:
-            pb = np.asarray(preds[k], float)[idx]
+            pb = P[k][idx]
             aucs[k] = roc_auc_score(yb, pb)
             stats[k]["auroc"].append(aucs[k])
             if np.all((pb > 0) & (pb < 1)):
                 stats[k]["brier"].append(brier_score_loss(yb, pb))
+            if calibration:
+                a, b = fast_citl_slope(yb, LP[k][idx])
+                if np.isfinite(a) and np.isfinite(b) and abs(b) < 50:
+                    stats[k]["citl"].append(a)
+                    stats[k]["slope"].append(b)
         for k in deltas:
-            deltas[k].append(aucs[ref] - aucs[k])
+            deltas[k].append(aucs[k] - aucs[ref])
     out = {}
     for k in names:
         out[k] = {m: [float(np.percentile(v, 2.5)), float(np.percentile(v, 97.5))]
@@ -155,8 +193,15 @@ def bootstrap_ci(y, preds: dict, n_boot=2000, seed=0, ref=None):
     for k, v in deltas.items():
         v = np.asarray(v)
         out[k]["delta_auroc_vs_ref"] = {
+            "ref": ref,
             "mean": float(v.mean()),
             "ci": [float(np.percentile(v, 2.5)), float(np.percentile(v, 97.5))],
             "p_two_sided": float(min(1.0, 2 * min((v <= 0).mean(), (v >= 0).mean()))),
         }
     return out
+
+
+def oe_ratio(y, p) -> float:
+    """Observed / expected events (1 = calibrated in the large; < 1 = the model over-predicts)."""
+    e = float(np.sum(p))
+    return float(np.sum(y) / e) if e > 0 else float("nan")

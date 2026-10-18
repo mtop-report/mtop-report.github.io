@@ -2,6 +2,10 @@
 
 Outputs aggregate results only (artifacts/public/adaptive.json):
 
+Every publishable learner is followed (regression with splines, linear regression, LightGBM,
+XGBoost), each with settings fixed in advance (below), so the strategies can be compared within and
+across learners.
+
 1. Rolling-origin ("prequential") comparison of update strategies. A base model is trained on
    patients treated up to BASE_END. Each test year Y (FIRST_TEST..LAST_TEST) is predicted using
    only data from earlier years:
@@ -12,9 +16,11 @@ Outputs aggregate results only (artifacts/public/adaptive.json):
      refit_recal  refitted on all earlier years, then intercept shifted to the previous
                   RECAL_YEARS years (shift estimated out-of-sample); the MTOP v1.0 policy
      sliding      refitted on the previous WINDOW years only
-   All strategies share fixed generic hyperparameters; the number of trees is chosen by 5-fold
-   cross-validation inside each training set, so nothing from a test year leaks into it.
-2. Drift monitor: observed vs expected outcome rate per year for the frozen base model with
+   Settings are fixed in advance for every learner: the trees use generic hyperparameters with the
+   number of trees chosen by 5-fold cross-validation inside each training set; the regressions
+   choose their penalty from 9 values by 5-fold cross-validation inside each training set (4 spline
+   knots placed on the training data). Nothing from a test year leaks into a model.
+2. Drift monitor: observed vs expected outcome rate per year for each frozen base model with
    95 % and 3-sigma control limits, plus the cumulative standardised difference.
 3. Internal-external validation across treatment eras (leave one era out), pooled with a
    DerSimonian-Laird random-effects model on the logit-AUROC scale.
@@ -25,6 +31,7 @@ Per-year discrimination is reported only when a year has >= 10 events and >= 10 
 from __future__ import annotations
 
 import json
+import os
 import time
 
 import lightgbm as lgb
@@ -36,6 +43,9 @@ from sklearn.model_selection import StratifiedKFold
 from . import metrics as M
 from .cohort import flow, stage_cohort
 from .config import settings, stage_ids, targets
+from .lr import fit_logreg
+from .splines import fit_spline_logreg
+from .tuning import fit_xgb_fixed, threads
 from .features import design_matrix, monotone_vector
 from .paths import PUBLIC
 
@@ -59,6 +69,10 @@ STRATEGY_LABELS = {
 
 ERAS = [(0, 2014, "2005–2014"), (2015, 2017, "2015–2017"), (2018, 2020, "2018–2020"), (2021, 3000, "2021–2025")]
 
+LEARNERS = ("Logistic regression (splines)", "Logistic regression", "LightGBM", "XGBoost")
+C_GRID_ADAPTIVE = np.logspace(-3, 1, 9)     # regression penalties tried in every training window
+GENERIC_XGB = {"learning_rate": 0.03, "max_depth": 3, "min_child_weight": 5.0, "subsample": 0.8,
+               "colsample_bytree": 0.8, "lambda": 1.0, "gamma": 0.0}
 GENERIC = dict(objective="binary", learning_rate=0.03, num_leaves=7, max_depth=3, min_child_samples=25,
                feature_fraction=0.8, bagging_fraction=0.8, bagging_freq=1, lambda_l2=1.0,
                min_sum_hessian_in_leaf=5.0, verbosity=-1, deterministic=True, force_row_wise=True,
@@ -70,6 +84,7 @@ AVAILABILITY = [
     ("sbp", {"en": "Systolic BP", "cs": "Systolický tlak"}),
     ("onset_to_puncture", {"en": "Onset to puncture", "cs": "Od vzniku do punkce"}),
     ("anesthesia", {"en": "Anaesthesia", "cs": "Anestezie"}),
+    ("smoking", {"en": "Smoking", "cs": "Kouření"}),
     ("tici", {"en": "Final mTICI", "cs": "Výsledné mTICI"}),
     ("procedure_min", {"en": "Procedure duration", "cs": "Délka výkonu"}),
     ("nihss_24h_status", {"en": "NIHSS at 24 h", "cs": "NIHSS za 24 h"}),
@@ -81,6 +96,7 @@ AVAILABILITY = [
 def _params(stage, target, seed):
     p = dict(GENERIC)
     p["seed"] = seed
+    p["num_threads"] = threads()
     p["monotone_constraints"] = monotone_vector(stage, target)
     return p
 
@@ -95,6 +111,24 @@ def fit_cv(X, y, params, seed):
                     folds=folds, callbacks=[lgb.early_stopping(100, verbose=False)])
         rounds = len(cv["valid binary_logloss-mean"])
     return lgb.train(params, lgb.Dataset(X, y, params={"feature_pre_filter": False}), num_boost_round=rounds)
+
+
+def fit_learner(name: str, X: pd.DataFrame, y, stage: str, target: str, seed: int):
+    """A model of the given learner with the fixed settings above; returns predict(X) -> p."""
+    y = np.asarray(y, float)
+    if name == "LightGBM":
+        b = fit_cv(X, y, _params(stage, target, seed), seed)
+        return lambda Z: b.predict(Z)
+    if name == "XGBoost":
+        m = fit_xgb_fixed(X, y, GENERIC_XGB, seed, trees=100, cv_trees=bool(y.sum() >= 10 and len(y) - y.sum() >= 10))
+        return lambda Z: m.predict_proba(Z)[:, 1]
+    if name == "Logistic regression":
+        m = fit_logreg(X, y, seed, Cs=C_GRID_ADAPTIVE)
+        return lambda Z: m.predict_proba(Z)[:, 1]
+    if name == "Logistic regression (splines)":
+        m = fit_spline_logreg(X, y, seed, knot_options=(4,), Cs=C_GRID_ADAPTIVE)
+        return lambda Z: m.predict_proba(Z)[:, 1]
+    raise KeyError(name)
 
 
 def _citl(y, p):
@@ -136,18 +170,17 @@ def _boot_auc(y, p, seed, n=N_BOOT):
     return [float(np.percentile(v, 2.5)), float(np.percentile(v, 97.5))], float(lv.std(ddof=1))
 
 
-def rolling(d: pd.DataFrame, stage: str, target: str, seed: int) -> dict:
+def rolling(d: pd.DataFrame, stage: str, target: str, seed: int, learner: str = "LightGBM") -> dict:
     X = design_matrix(d, stage)
     y = d[target].to_numpy(float)
     yr = d["year"].to_numpy()
-    params = _params(stage, target, seed)
     cache = {}
 
     def model_until(end_year, start_year=None):
         key = (start_year, end_year)
         if key not in cache:
             m = (yr <= end_year) if start_year is None else ((yr >= start_year) & (yr <= end_year))
-            cache[key] = fit_cv(X[m], y[m], params, seed)
+            cache[key] = fit_learner(learner, X[m], y[m], stage, target, seed)
         return cache[key]
 
     base = model_until(BASE_END)
@@ -157,16 +190,16 @@ def rolling(d: pd.DataFrame, stage: str, target: str, seed: int) -> dict:
         rc = (yr >= Y - RECAL_YEARS) & (yr < Y)
         if te.sum() == 0:
             continue
-        pf_te, pf_rc = base.predict(X[te]), base.predict(X[rc])
+        pf_te, pf_rc = base(X[te]), base(X[rc])
         preds["frozen"][te] = pf_te
         preds["recal_int"][te] = M.expit(M.logit(pf_te) + _citl(y[rc], pf_rc))
         a, b = _recal_log(y[rc], pf_rc)
         preds["recal_log"][te] = M.expit(a + b * M.logit(pf_te))
-        p_refit = model_until(Y - 1).predict(X[te])
+        p_refit = model_until(Y - 1)(X[te])
         preds["refit"][te] = p_refit
-        shift = _citl(y[rc], model_until(Y - 1 - RECAL_YEARS).predict(X[rc]))
+        shift = _citl(y[rc], model_until(Y - 1 - RECAL_YEARS)(X[rc]))
         preds["refit_recal"][te] = M.expit(M.logit(p_refit) + shift)
-        preds["sliding"][te] = model_until(Y - 1, Y - WINDOW).predict(X[te])
+        preds["sliding"][te] = model_until(Y - 1, Y - WINDOW)(X[te])
 
     years = []
     for Y in range(FIRST_TEST, LAST_TEST + 1):
@@ -193,7 +226,7 @@ def rolling(d: pd.DataFrame, stage: str, target: str, seed: int) -> dict:
         m = yr == Y
         if m.sum() < 10:
             continue
-        p = base.predict(X[m])
+        p = base(X[m])
         o, e, v = float(y[m].sum()), float(p.sum()), float((p * (1 - p)).sum())
         n = int(m.sum())
         sd = np.sqrt(v) / n
@@ -230,19 +263,17 @@ def random_effects(est, se):
             "pi_lo": mu - half_pi, "pi_hi": mu + half_pi, "tau2": float(tau2), "i2": float(i2), "q": q, "k": k}
 
 
-def iecv(d: pd.DataFrame, stage: str, target: str, seed: int) -> dict:
+def iecv(d: pd.DataFrame, stage: str, target: str, seed: int, learner: str = "LightGBM") -> dict:
     X = design_matrix(d, stage)
     y = d[target].to_numpy(float)
     yr = d["year"].to_numpy()
-    params = _params(stage, target, seed)
     rows = []
     for lo, hi, label in ERAS:
         te = (yr >= lo) & (yr <= hi)
         if te.sum() < 30 or not _enough(y[te]):
             rows.append({"label": label, "suppressed": True})
             continue
-        m = fit_cv(X[~te], y[~te], params, seed)
-        p = m.predict(X[te])
+        p = fit_learner(learner, X[~te], y[~te], stage, target, seed)(X[te])
         ci, se_l = _boot_auc(y[te], p, seed)
         auc = float(roc_auc_score(y[te], p))
         rows.append({"label": label, "n": int(te.sum()), "events": int(y[te].sum()), "auroc": auc, "ci": ci,
@@ -259,7 +290,7 @@ def iecv(d: pd.DataFrame, stage: str, target: str, seed: int) -> dict:
 
 
 def availability(clean: pd.DataFrame) -> dict:
-    d = clean[(clean["age"] >= 18) & (clean["diagnostic_only"] != 1)].copy()
+    d = clean[~(clean["age"] < 18)].copy()
     d["yr"] = d["year"].clip(lower=2007)
     years, labels, counts = [], [], []
     for yr, g in d.groupby("yr"):
@@ -278,27 +309,50 @@ def availability(clean: pd.DataFrame) -> dict:
     return {"years": labels, "n": counts, "variables": rows}
 
 
-def build_adaptive(clean: pd.DataFrame, stages=None, targets_=None) -> dict:
+def _task(args):
+    """One stage x outcome x learner: rolling-origin strategies and leave-one-era-out validation."""
+    base, (stage, target, learner), seed = args
+    t0 = time.time()
+    d = stage_cohort(base, stage)
+    res = rolling(d, stage, target, seed, learner)
+    ie = iecv(d, stage, target, seed, learner)
+    pr = res["pooled"]
+    print(f"[adaptive {stage}/{target} {learner}] pooled AUROC " +
+          " ".join(f"{s}={pr[s]['auroc']:.3f}/citl {pr[s]['citl']:+.2f}" for s in STRATEGIES) +
+          f" ({time.time() - t0:.0f}s)", flush=True)
+    return res, ie
+
+
+def build_adaptive(clean: pd.DataFrame, stages=None, targets_=None, learners=LEARNERS) -> dict:
+    """MTOP_JOBS > 1 runs the stage x outcome x learner tasks in parallel processes."""
     seed = int(settings()["seed"])
     base, _ = flow(clean)
     out = {
         "settings": {"base_end": BASE_END, "first_test": FIRST_TEST, "last_test": LAST_TEST,
                      "recal_years": RECAL_YEARS, "window": WINDOW, "min_events": MIN_EVENTS,
-                     "params": {k: v for k, v in GENERIC.items() if k not in ("verbosity", "num_threads")}},
+                     "params": {k: v for k, v in GENERIC.items() if k not in ("verbosity", "num_threads")},
+                     "xgb": GENERIC_XGB, "regression": {"penalty": "L2, chosen by 5-fold CV in each training set",
+                                                        "candidates": [float(c) for c in C_GRID_ADAPTIVE], "spline_knots": 4}},
+        "learners": list(learners),
         "strategies": [{"key": s, "label": STRATEGY_LABELS[s]} for s in STRATEGIES],
         "results": {}, "iecv": {}, "availability": availability(clean),
     }
-    for stage in stages or stage_ids():
-        d = stage_cohort(base, stage)
-        out["results"][stage], out["iecv"][stage] = {}, {}
-        for target in targets_ or list(targets()):
-            t0 = time.time()
-            out["results"][stage][target] = rolling(d, stage, target, seed)
-            out["iecv"][stage][target] = iecv(d, stage, target, seed)
-            pr = out["results"][stage][target]["pooled"]
-            print(f"[adaptive {stage}/{target}] pooled AUROC " +
-                  " ".join(f"{s}={pr[s]['auroc']:.3f}/citl {pr[s]['citl']:+.2f}" for s in STRATEGIES) +
-                  f" ({time.time() - t0:.0f}s)", flush=True)
+    tasks = [(stage, target, learner) for stage in (stages or stage_ids()) for target in (targets_ or list(targets()))
+             for learner in learners]
+    for stage, target, _ in tasks:
+        out["results"].setdefault(stage, {}).setdefault(target, {})
+        out["iecv"].setdefault(stage, {}).setdefault(target, {})
+    jobs = int(os.environ.get("MTOP_JOBS", "1"))
+    if jobs > 1:
+        from concurrent.futures import ProcessPoolExecutor
+
+        with ProcessPoolExecutor(max_workers=jobs) as ex:
+            for (stage, target, learner), (res, ie) in zip(tasks, ex.map(_task, [(base, t, seed) for t in tasks])):
+                out["results"][stage][target][learner], out["iecv"][stage][target][learner] = res, ie
+    else:
+        for t in tasks:
+            stage, target, learner = t
+            out["results"][stage][target][learner], out["iecv"][stage][target][learner] = _task((base, t, seed))
     PUBLIC.mkdir(parents=True, exist_ok=True)
     with open(PUBLIC / "adaptive.json", "w", encoding="utf-8") as fh:
         json.dump(out, fh, ensure_ascii=False, separators=(",", ":"))

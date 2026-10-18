@@ -10,6 +10,12 @@ cross-validation keeps a fifth of the patients aside; each centre scores its own
   network   the shared model trained across all four nodes by the federated protocol;
   adapted   the shared model plus a few boosting steps on the centre's own patients (done locally).
 
+The same comparison is made for the two regressions (with splines, and linear), which the network
+fits exactly by federated Newton steps: each centre alone vs the network model. LightGBM and XGBoost
+are both gradient-boosted trees; the network's boosted trees are their federated counterpart. The
+MLP is not federated: averaging network weights across centres is approximate, and gradients of
+small networks can reveal individual patients.
+
 Further analyses: centre size (a centre given only 50/100/200 of its patients), growth of the
 network (every group of 1-4 centres), later stages, leave-one-centre-out validation (a network
 of three tested at the fourth), proof of equivalence with pooled training, and a run over HTTP.
@@ -203,6 +209,38 @@ def compare(sites, co, stage: str, target: str, p: GBDTParams, folds: int, seed:
     return res, fold0
 
 
+def compare_regression(sites, co, stage: str, target: str, folds: int, seed: int) -> dict:
+    """Each centre alone vs the network for the regression with splines and the linear regression
+    (exact federated Newton fits), scored on each centre's own held-out patients."""
+    ids = [s.site_id for s in sites]
+    designs = {"spline": spline_spec(stage), "linear": {"kind": "spline", "stage": stage, "knots": {}}}
+    keep = {s.site_id: {"y": [], **{f"{k}_{m}": [] for k in designs for m in ("alone", "network")}} for s in sites}
+    for k in range(folds):
+        tr, te = _cv(k, folds, seed)
+        for name, des in designs.items():
+            net, _ = federated_logreg(co, ids, stage, target, tr, design=des)
+            for s in sites:
+                d, _, _ = s.cohort(stage, target)
+                r_te = s.rows(stage, target, te)
+                alone = fit_logreg(PooledNetwork.from_sites([s], stage, target, tr), des)
+                keep[s.site_id][f"{name}_network"].append(predict_spline(net, d.iloc[r_te]))
+                keep[s.site_id][f"{name}_alone"].append(predict_spline(alone, d.iloc[r_te]))
+        for s in sites:
+            _, _, y = s.cohort(stage, target)
+            keep[s.site_id]["y"].append(y[s.rows(stage, target, te)])
+        log.info("%s/%s regression fold %d", stage, target, k + 1)
+    out = {}
+    for name in designs:
+        per = []
+        for s in sites:
+            K = keep[s.site_id]
+            y = _cat(K["y"])
+            per.append({"id": s.site_id, "n": int(len(y)), "events": int(y.sum()),
+                        "alone": _r(auc(y, _cat(K[f"{name}_alone"]))), "network": _r(auc(y, _cat(K[f"{name}_network"])))})
+        out[name] = {"per_centre": per, "mean": {m: _r(np.mean([e[m] for e in per])) for m in ("alone", "network")}}
+    return out
+
+
 def size_effect(sites, stage: str, target: str, p: GBDTParams, folds: int, seed: int, reps: int, full: dict) -> dict:
     """A centre that contributes only m of its training patients: alone vs joined with the others."""
     acc = {(m, r, s.site_id, kind): [] for m in SIZES for r in range(reps) for s in sites for kind in ("alone", "joined")}
@@ -367,6 +405,7 @@ def run(http: bool = True, quick: bool = False) -> dict:
         fold0 = fold0 or f0
         res["size"] = size_effect(sites, STAGE, target, p, folds, seed, reps, res)
         res["loso"] = leave_one_out(sites, co, target, p, n_boot, seed)
+        res["regression"] = compare_regression(sites, co, STAGE, target, folds, seed)
         outcomes[target] = res
     stages = [{"stage": STAGE, "target": t, "mean": outcomes[t]["mean"],
                "per_centre": [{"id": e["id"], "n": e["n"], "events": e["events"], **{m: e[m]["auroc"] for m in MODELS}}
@@ -409,6 +448,8 @@ def _check_public(out: dict, k: int) -> None:
     groups = [c[t] for c in out["centres"] for t in OUTCOMES]
     for res in out["outcomes"].values():
         groups += res["per_centre"] + res["loso"]
+        for r in res.get("regression", {}).values():
+            groups += r["per_centre"]
     for st in out["stages"]:
         groups += st["per_centre"]
     for g in groups:
@@ -428,6 +469,8 @@ def _report(o: dict) -> None:
             L.append(f"| {e['id']} | {e['n']} | {e['alone']['auroc']} | {e['network']['auroc']} | {e['adapted']['auroc']} | "
                      f"{gn['mean']} ({gn['ci'][0]} to {gn['ci'][1]}) | {ga['mean']} ({ga['ci'][0]} to {ga['ci'][1]}) | "
                      f"{e['network']['citl']} | {e['adapted']['citl']} |")
+        for name, r in res.get("regression", {}).items():
+            L.append(f"Regression ({name}): alone {r['mean']['alone']}, network {r['mean']['network']}")
         L += ["", f"Mean: {res['mean']}", f"Growth (1-4 centres): {res['growth']['mean']}",
               f"Size {res['size']['sizes']}: alone {res['size']['alone']}, network {res['size']['network']}", "",
               "| Held-out centre | n | AUROC | CITL | Slope |", "|---|---|---|---|---|"]

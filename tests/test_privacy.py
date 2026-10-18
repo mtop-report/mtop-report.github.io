@@ -16,8 +16,11 @@ import pytest
 from mtop.config import settings
 from mtop.paths import PUBLIC
 
-FILES = ["model_bundle.json", "validation.json", "explorer.json", "extras.json", "adaptive.json", "subgroups.json",
-         "reconciliation.json", "federated.json", "associations.json", "data_checks.json"]
+FILES = ["model_bundle.json", "validation.json", "explorer.json", "extras.json", "adaptive.json", "federated.json",
+         "associations.json", "data_checks.json", "preprocessing.json", "raw_profile.json", "reporting.json"]
+# column names that may appear as labels (never with values) in the data report
+COLUMN_LABELS = {"preprocessing.json": ("Patient ID", "onset_date"), "raw_profile.json": ("Patient ID",),
+                 "data_checks.json": ("onset_date",)}
 
 
 def _load(name):
@@ -44,6 +47,8 @@ def test_no_identifiers_or_dates():
         if not raw:
             continue
         for bad in ("patient_id", "Patient ID", "onset_date", "referring_hospital"):
+            if bad in COLUMN_LABELS.get(name, ()):
+                continue
             assert bad not in raw, f"{bad} found in {name}"
         for hname in hospitals:
             assert f'"{hname}"' not in raw, f"hospital name {hname} in {name}"
@@ -90,6 +95,8 @@ def test_explorer_small_cells_suppressed():
     for r in e["registry_years"]:
         assert r["n"] >= k
     for row in e["table1"]["rows"]:
+        if "section" in row:
+            continue
         for col in ("all", "dev", "test", "good", "poor"):
             v = row[col]
             if row["kind"] == "pct" and v.get("n") is not None:
@@ -99,54 +106,74 @@ def test_explorer_small_cells_suppressed():
 def test_validation_bins_and_no_extremes():
     v = _load("validation.json")
     k = int(settings()["privacy"]["min_cell"])
-    for st in v["stages"].values():
-        for tv in st["targets"].values():
-            for b in tv["curves"]["calibration"]:
-                assert b["n"] >= k
-            for b in tv["deployed"].get("reality_bins", []):
-                assert b["n"] >= k
-            for rows in tv["explain"]["dependence"].values():
-                for r in rows:
-                    assert r["n"] >= k
-                    assert "lo" not in r and "hi" not in r
-            for curve in tv["curves"]["roc"].values():
-                assert len(curve) == 51  # fixed FPR grid, not raw operating points
-            for r in tv.get("thresholds", []):   # rates only; thresholds with a small 2x2 cell are suppressed
-                assert set(r) in ({"t", "suppressed"}, {"t", "sens", "spec", "ppv", "npv", "pos"})
+    for sp in v["splits"].values():
+        for st in sp["stages"].values():
+            for tv in st["targets"].values():
+                for bins in tv["curves"]["calibration"].values():
+                    for b in bins:
+                        assert b["n"] >= k
+                for curve in tv["curves"]["roc"].values():
+                    assert len(curve) == 51  # fixed FPR grid, not raw operating points
+                for rows in tv.get("thresholds", {}).values():   # rates only; small 2x2 cells suppressed
+                    for r in rows:
+                        assert set(r) in ({"t", "suppressed"}, {"t", "sens", "spec", "ppv", "npv", "pos", "acc"})
+                for rows in tv.get("subgroups", {}).values():
+                    for r in rows:
+                        assert r.get("suppressed") or r["n"] >= k
+    for per in v["deployed"].values():
+        for dep in per.values():
+            for lr in dep["learners"].values():
+                for b in lr.get("reality_bins", []):
+                    assert b["n"] >= k
+                ex = lr.get("explain") or {}
+                for rows in ex.get("dependence", {}).values():
+                    for r in rows:
+                        assert r["n"] >= k
+                        assert "lo" not in r and "hi" not in r
 
 
 def test_tree_leaves_are_large():
     b = _load("model_bundle.json")
     min_leaf = int(settings()["privacy"]["min_leaf"])
     for per_target in b["models"].values():
-        for spec in per_target.values():
-            for t in spec["trees"]:
-                if len(t["f"]) == 1:
-                    continue
-                for f, c in zip(t["f"], t["c"]):
-                    if f == -1:
-                        assert c >= min_leaf
-            assert "feature_infos" not in json.dumps(spec)
+        for entry in per_target.values():
+            for name, spec in entry["learners"].items():
+                assert "feature_infos" not in json.dumps(spec)
+                if spec["kind"] in ("lgbm", "xgb"):
+                    # counted on the training patients at export (treejson.min_leaf_count / leaf_counts)
+                    assert spec["min_leaf_count"] >= min_leaf, name
+                # LightGBM publishes leaf counts; XGBoost publishes cover (sum of p(1-p) <= n/4)
+                floor = min_leaf if spec["kind"] == "lgbm" else min_leaf / 4
+                for t in spec.get("trees", []):
+                    if len(t["f"]) == 1:
+                        continue
+                    for f, c in zip(t["f"], t["c"]):
+                        if f == -1:
+                            assert c >= floor, f"{name}: leaf weight {c}"
 
 
 def test_adaptive_outputs_are_aggregates():
     a = _load("adaptive.json")
     k = int(settings()["privacy"]["min_cell"])
     me = int(a["settings"]["min_events"])
-    for per_target in a["results"].values():
-        for r in per_target.values():
-            for yr in r["years"]:
-                assert yr["n"] >= k
-                for m in yr["by"].values():
-                    if m["auroc"] is not None:
-                        assert yr["events"] >= me and yr["n"] - yr["events"] >= me
-            for m in r["monitor"]:
-                assert m["n"] >= k
-    for per_target in a["iecv"].values():
-        for r in per_target.values():
-            for e in r["eras"]:
-                if not e.get("suppressed"):
-                    assert e["n"] >= 30 and e["events"] >= me
+
+    def flat(block):   # one result per learner (or a single model in older files)
+        for per_target in block.values():
+            for r in per_target.values():
+                yield from (r.values() if a.get("learners") else [r])
+
+    for r in flat(a["results"]):
+        for yr in r["years"]:
+            assert yr["n"] >= k
+            for m in yr["by"].values():
+                if m["auroc"] is not None:
+                    assert yr["events"] >= me and yr["n"] - yr["events"] >= me
+        for m in r["monitor"]:
+            assert m["n"] >= k
+    for r in flat(a["iecv"]):
+        for e in r["eras"]:
+            if not e.get("suppressed"):
+                assert e["n"] >= 30 and e["events"] >= me
     assert all(n >= k for n in a["availability"]["n"])
 
 
@@ -167,6 +194,8 @@ def test_federated_outputs_are_aggregates():
     groups = [c[t] for c in f["centres"] for t in ("good_outcome", "death90")]
     for res in f["outcomes"].values():
         groups += res["per_centre"] + res["loso"]
+        for r in res.get("regression", {}).values():
+            groups += r["per_centre"]
     for st in f["stages"]:
         groups += st["per_centre"]
     for g in groups:
@@ -202,15 +231,53 @@ def test_data_checks_are_counts_only():
     d = _load("data_checks.json")
     k = int(settings()["privacy"]["min_cell"])
     for r in d["checks"]:
-        assert set(r) == {"kind", "label", "n", "small"}
+        assert set(r) <= {"kind", "label", "n", "small", "by_column"}
         assert (r["n"] is None and r["small"]) or (r["n"] >= k and not r["small"])
+        for c in r.get("by_column", []):
+            assert (c["n"] is None and c["small"]) or (c["n"] >= k and not c["small"])
 
 
-def test_reconciliation_is_aggregate():
-    r = _load("reconciliation.json")
-    for setup in r["setups"].values():
-        assert setup["n_test"] >= 10 * 3 and setup["n_train"] >= 10 * 3
-    assert "patient" not in json.dumps(r).lower()
+def _counts(o):
+    """Every {"n": ..., "small": ...} cell in a nested structure."""
+    if isinstance(o, dict):
+        if "n" in o and "small" in o:
+            yield o
+        for v in o.values():
+            yield from _counts(v)
+    elif isinstance(o, list):
+        for v in o:
+            yield from _counts(v)
+
+
+def test_preprocessing_report_is_aggregate():
+    """Data report: suppressed small cells, no raw values of identifiers, dates or free text."""
+    k = int(settings()["privacy"]["min_cell"])
+    for name in ("preprocessing.json", "raw_profile.json"):
+        p = _load(name)
+        for c in _counts(p):
+            if c.get("present") is False:      # a coding listed for a value absent from this export
+                continue
+            assert (c["n"] is None and c["small"]) or c["n"] == 0 or (c["n"] >= k and not c["small"]), (name, c)
+    raw = _load("raw_profile.json")
+    for col in raw["columns"]:
+        if col["column"] in ("Patient ID", "Date of stroke onset", "Time of stroke onset", "Age"):
+            assert "values" not in col
+        if col["column"] in ("IVT in different hospital", "Transfer from different hospital"):
+            assert {v["value"] for v in col.get("values", [])} <= {"FNO", "žádné", "another hospital"}
+    pp = _load("preprocessing.json")
+    for r in pp["cholesterol"]:
+        assert r["n"] >= k
+    who = pp["outcome"]["who_missing_n"]
+    assert who["missing"] >= k and who["observed"] >= k
+
+
+def test_reporting_is_aggregate():
+    r = _load("reporting.json")
+    raw = json.dumps(r)
+    assert "patient" not in raw.lower()
+    for per in r["development"].values():
+        for v in per.values():
+            assert v["n_available"] >= 100
 
 
 def test_demo_csv_is_synthetic_template():
