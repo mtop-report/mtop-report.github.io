@@ -274,25 +274,44 @@ def validate_split(base: pd.DataFrame, test_from: int, seed: int, trials: int, n
 
 
 # ------------------------------------------------------------------------------- model choice
+def holm(deltas: dict, alpha: float) -> dict:
+    """Holm's step-down over the candidates: {name: (mean difference, two-sided p)} ->
+    {name: {"p_holm": adjusted p, "pass": positive difference and adjusted p < alpha}}."""
+    items = sorted(deltas.items(), key=lambda kv: kv[1][1])
+    m, running, out = len(items), 0.0, {}
+    for i, (name, (d, p)) in enumerate(items):
+        running = min(1.0, max(running, (m - i) * p))
+        out[name] = {"p_holm": running, "pass": bool(running < alpha and d > 0)}
+    return out
+
+
 def select_models(primary: dict, nested: dict | None) -> dict:
-    """Apply the pre-specified rule (settings.selection) per stage x target."""
+    """Apply the pre-specified rule (settings.selection; amendment 1: Holm on the temporal
+    criterion over all candidates) per stage x target."""
     sel = settings()["selection"]
     ref = sel["reference"]
+    alpha = float(sel.get("alpha", 0.05))
     out = {}
     for stage, sres in primary.items():
         out[stage] = {}
         for target, tres in sres["targets"].items():
             models = tres["models"]
             nst = ((nested or {}).get(stage) or {}).get(target) if nested else None
+            names = [n for n in sel["deployable"] if n != ref and n in models]
+            dls = {n: models[n]["ci"].get("delta_auroc_vs_ref") for n in names}
+            adj = holm({n: (d["mean"], d["p_two_sided"]) for n, d in dls.items() if d}, alpha) \
+                if sel.get("multiplicity") == "holm" else {}
             cands = {}
-            for name in sel["deployable"]:
-                if name == ref or name not in models:
-                    continue
-                dl = models[name]["ci"].get("delta_auroc_vs_ref")
-                a = bool(dl and dl["ci"][0] > 0)
+            for name in names:
+                dl = dls[name]
+                if sel.get("multiplicity") == "holm":
+                    a = bool(dl and adj.get(name, {}).get("pass"))
+                else:
+                    a = bool(dl and dl["ci"][0] > 0)
                 b = False
                 calib_ok = True
-                info = {"delta_test": dl, "test_rule": a}
+                info = {"delta_test": dl, "test_rule": a, "p_holm": adj.get(name, {}).get("p_holm"),
+                        "candidates_m": len(names)}
                 if nst and name in nst["models"] and ref in nst["models"]:
                     cm, rm = nst["models"][name], nst["models"][ref]
                     b = bool(cm["delta_mean"] >= sel["min_cv_gain"] and cm["share_better"] >= sel["min_cv_share"])

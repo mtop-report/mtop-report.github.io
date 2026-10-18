@@ -37,7 +37,15 @@ selection:
   min_cv_gain: 0.01
   min_cv_share: 0.8
   max_citl_worse: 0.05
-  deployable: ["Logistic regression (splines)", "Logistic regression", "LightGBM", "XGBoost"]
+  # Amendment 1 (docs/amendment_1.md, 2026-10-19): four more publishable candidates, and the temporal
+  # criterion uses Holm's step-down over the candidates (adjusted p < alpha with a positive difference)
+  multiplicity: holm
+  alpha: 0.05
+  deployable: ["Logistic regression (splines)", "Logistic regression", "LightGBM", "XGBoost",
+               "EBM", "LR + interactions", "LR + multiple imputation", "Stacking"]
+  # validated and reported, never chosen or published (reasons in docs/amendment_1.md)
+  comparison: ["MLP", "CatBoost", "Probability averaging", "FT-Transformer", "FT-Transformer, tuned",
+               "TabPFN v2", "TabICL v2"]
 
 nested_cv:                # internal validation on all years (admission stage, mRS 0-2), as in the 2026 analysis
   folds: 5
