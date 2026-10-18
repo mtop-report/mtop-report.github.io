@@ -85,7 +85,8 @@ then sees exactly the totals pooled training would see. The test suite checks th
 ## Keeping the shared model up to date
 
 Outcomes drift: in FNO's registry the odds of independence at 90 days fell over the years more
-than the case mix explains, which is why MTOP is recalibrated to 2021–2025. The update strategies
+than the case mix explains, which is why MTOP's intercepts are re-estimated on the most recent
+complete years (now 2023–2025). The update strategies
 compared on the *Adaptive* tab run in the network as ordinary jobs restricted to a range of
 treatment years. A centre adds the optional `year` column (year of treatment) to its export; it
 never leaves the hospital, and a job only selects patients by it
