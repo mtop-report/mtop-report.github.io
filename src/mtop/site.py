@@ -109,6 +109,7 @@ def build_site():
         "qr_svg": (WEB / "assets" / "qr.svg").read_text(encoding="utf-8") if (WEB / "assets" / "qr.svg").exists() else "",
         "logo_svg": logo.read_text(encoding="utf-8").strip() if logo.exists() else "",
         "federated": _load("federated.json"),
+        "validation_pool": _load("validation_pool.json", {"results": []}),
         "site": site_cfg,
     }
     tpl = (WEB / "index.html").read_text(encoding="utf-8")

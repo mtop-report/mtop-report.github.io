@@ -9,9 +9,13 @@
   const S = A.S;
   S.netStage = S.netStage || "admission";
   S.netTarget = S.netTarget || "good_outcome";
-  const NS = { file: null, records: null, issues: null, results: null, preds: null, imports: [], includeFno: true, label: "", running: false, progress: 0, error: null };
+  // imports: results files this viewer added (drafts: this browser only, never shared); demo: the
+  // loaded data are the synthetic demo cohort, whose results can be looked at but never pooled
+  const NS = { file: null, records: null, issues: null, results: null, preds: null, imports: [], includeFno: true, includeReviewed: true,
+    includeDraft: true, label: "", running: false, progress: 0, error: null, demo: false, poolMsg: null };
 
-  const KEYS = B.features.filter((f) => f.type !== "derived").map((f) => f.key).concat(["mrs90"]);
+  // `year` (year of treatment) is optional: it dates the patients against the model's development years
+  const KEYS = B.features.filter((f) => f.type !== "derived").map((f) => f.key).concat(["mrs90", "year"]);
   const POSTERIOR = new Set(["basilar", "basilar_vertebral", "other_posterior"]);
   const norm = (s) => String(s).normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]/g, "");
   const SYN = {
@@ -31,7 +35,7 @@
     onset_to_recan: ["onsettorecan", "onsettorecanalization", "onsettoreperfusion"], anesthesia: ["anesthesia", "anaesthesia"],
     nihss_24h: ["nihss24h", "nihss24"], sich: ["sich"], ich_other: ["ichother", "nonsich", "asymptomaticich"], nihss_7d: ["nihss7d", "nihss7"],
     edema: ["edema", "oedema", "cerebraledema"], decompression: ["decompression", "decompressivecraniectomy", "hemicraniectomy"],
-    mrs90: ["mrs90", "90daymrs", "mrs3m", "mrs3months"],
+    mrs90: ["mrs90", "90daymrs", "mrs3m", "mrs3months"], year: ["year", "rok", "treatmentyear", "yearoftreatment", "admissionyear"],
   };
   const BIN = { "1": 1, "0": 0, yes: 1, no: 0, y: 1, n: 0, true: 1, false: 0, ano: 1, ne: 0 };
   const SEX = { "1": 1, "0": 0, m: 1, male: 1, man: 1, muz: 1, f: 0, female: 0, woman: 0, w: 0, z: 0, zena: 0 };
@@ -59,6 +63,7 @@
     const f = FEAT[key];
     const bad = () => { issues[key] = (issues[key] || 0) + 1; return null; };
     if (key === "mrs90") { const v = Number(s.replace(",", ".")); return Number.isInteger(v) && v >= 0 && v <= 6 ? v : bad(); }
+    if (key === "year") { const v = Number(s.slice(0, 4)); return Number.isInteger(v) && v >= 1990 && v <= 2100 ? v : bad(); }
     if (key === "tici") { const k = norm(s).replace(/^m?e?tici/, ""); return k in TICI ? TICI[k] : bad(); }
     if (key === "sex_male") { const k = norm(s); return k in SEX ? SEX[k] : bad(); }
     if (key === "side_left") { const k = norm(s); return k in SIDE ? SIDE[k] : bad(); }
@@ -205,10 +210,17 @@
   // results file: every published learner per stage and outcome (format 2); "chosen" names the
   // calculator's model, whose numbers also sit at the stage level for readers of format 1
   function exportJSON() {
+    const yrs = NS.records.map((x) => x.year).filter((v) => v !== null && v !== undefined);
+    const dev = (A.E && A.E.period) || null;
     const out = {
       format: "mtop-validation/2", model_version: B.version, model_fingerprint: B.fingerprint || null,
       site: NS.label || "unnamed site", generated: new Date().toISOString().slice(0, 10),
-      rows: NS.records.length, columns_found: Object.keys(NS.map || {}), stages: {},
+      rows: NS.records.length, columns_found: Object.keys(NS.map || {}), demo: !!NS.demo,
+      // treatment years of the validated patients against the years the model was developed on:
+      // patients treated after the development years are a prospective test of this model version
+      period: yrs.length ? [yrs.reduce((a, b) => Math.min(a, b)), yrs.reduce((a, b) => Math.max(a, b))] : null,
+      development_period: dev, rows_with_year: yrs.length, rows_after_development: dev ? yrs.filter((v) => v > dev[1]).length : null,
+      stages: {},
     };
     const pick = (r) => (r.insufficient ? { n: r.n, insufficient: true }
       : { n: r.n, events: r.events, auroc: r.auroc, auroc_ci: r.auroc_ci, se_logit: r.se_logit, brier: r.brier, citl: r.citl, slope: r.slope, calibration: r.calibration });
@@ -285,7 +297,7 @@
       [[tx("Open model", "Otevřený model"), tx("Code and trained model are public; this page runs offline.", "Kód i natrénovaný model jsou veřejné; stránka funguje i offline.")],
         [tx("Local run", "Lokální výpočet"), tx("A partner centre loads its own registry export here. Nothing is uploaded.", "Partnerské centrum zde načte vlastní export registru. Nic se nenahrává.")],
         [tx("Summary only", "Jen souhrn"), tx("The page produces a results file with aggregate metrics, no patient rows.", "Stránka vytvoří soubor výsledků se souhrnnými metrikami, bez řádků pacientů.")],
-        [tx("Pooled evidence", "Souhrnný důkaz"), tx("Results from all centres are combined in a random-effects meta-analysis.", "Výsledky všech center se spojí metaanalýzou s náhodnými efekty.")]]
+        [tx("Reviewed pooling", "Ověřený souhrn"), tx("After an agreement and a check, the MTOP team adds a centre's results to the pool everyone sees, combined in a random-effects meta-analysis.", "Po uzavření smlouvy a kontrole přidá tým MTOP výsledky centra do souhrnu, který vidí všichni, a spojí je metaanalýzou s náhodnými efekty.")]]
         .map(([a, b], i) => h("li", null, h("span", { class: "flow-n", text: String(i + 1) }), h("div", null, h("b", { text: a }), h("p", { text: b }))))));
 
     body.appendChild(toolCard(root));
@@ -311,6 +323,7 @@
     const demo = h("button", { class: "btn", type: "button" }, tx("Try with synthetic demo data", "Vyzkoušet na syntetických datech"));
     demo.addEventListener("click", () => {
       NS.file = tx("Synthetic demo cohort (randomly generated, not real patients)", "Syntetická ukázková kohorta (náhodně vygenerovaná, nejde o skutečné pacienty)");
+      NS.demo = true;
       ingest(parseCSV(A.DATA.demo_csv || ""), root);
       NS.label = "Synthetic demo";
     });
@@ -332,6 +345,7 @@
     NS.error = null;
     try {
       NS.file = file.name;
+      NS.demo = false;
       NS.label = file.name.replace(/\.[^.]+$/, "");
       ingest(await readFile(file), root);
     } catch (e) {
@@ -357,6 +371,8 @@
     const rows = KEYS.map((k) => {
       const f = FEAT[k];
       if (k === "mrs90") return [k, tx("90-day mRS", "mRS za 90 dní"), "0–6", tx("required for validation", "nutné pro validaci")];
+      if (k === "year") return [k, tx("Year of treatment", "Rok léčby"), tx("for example 2026", "například 2026"),
+        tx("optional · shows which patients were treated after the model's development years (a prospective test)", "nepovinné · ukáže, kteří pacienti byli léčeni po letech vývoje modelu (prospektivní test)")];
       if (k === "tici") return [k, A.L(f.label), "0, 1, 2a, 2b, 2c, 3", tx("2c is analysed as 3", "2c se hodnotí jako 3")];
       let vals;
       if (f.type === "categorical") vals = f.options.map((o) => o.value).join(", ");
@@ -450,11 +466,23 @@
     copyBtn.addEventListener("click", () => copyText(exportJSON(), copyBtn));
     const dl = h("button", { class: "btn", type: "button" }, tx("Prepare download", "Připravit ke stažení"));
     dl.addEventListener("click", () => { dl.replaceWith(downloadLink(exportJSON(), `mtop_results_${(NS.label || "site").replace(/[^a-z0-9]+/gi, "_")}.json`, "application/json")); });
-    const addPool = h("button", { class: "btn btn-primary", type: "button" }, tx("Add to pooled analysis below", "Přidat do souhrnné analýzy níže"));
-    addPool.addEventListener("click", () => { NS.imports.push(JSON.parse(exportJSON())); render(root); document.getElementById("pool-card")?.scrollIntoView({ block: "start", behavior: "smooth" }); });
+    // A draft stays in this browser. Only the MTOP team adds results to the reviewed pool that
+    // everyone sees, after an agreement with the centre; demo results are never pooled.
+    const addPool = h("button", { class: "btn btn-primary", type: "button", disabled: NS.demo ? true : null },
+      tx("Add to my draft pool (this browser only)", "Přidat do mého návrhu souhrnu (jen v tomto prohlížeči)"));
+    addPool.addEventListener("click", () => {
+      if (NS.demo) return;
+      NS.imports.push(Object.assign(JSON.parse(exportJSON()), { _draft: true }));
+      render(root); document.getElementById("pool-card")?.scrollIntoView({ block: "start", behavior: "smooth" });
+    });
     box.appendChild(h("div", { class: "export" },
       h("label", { for: "lv-site", text: tx("Results file (aggregate metrics only):", "Soubor výsledků (jen souhrnné metriky):") }),
-      h("div", { class: "tool-actions" }, nameIn, copyBtn, dl, addPool)));
+      h("div", { class: "tool-actions" }, nameIn, copyBtn, dl, addPool),
+      h("p", { class: "note", text: NS.demo
+        ? tx("These are results on the synthetic demo cohort. They show how the tool works and cannot be added to any pool.",
+          "Jde o výsledky na syntetické ukázkové kohortě. Ukazují, jak nástroj funguje, a nelze je přidat do žádného souhrnu.")
+        : tx(`To have your results in the reviewed pool that everyone sees, send this file with the signed data-sharing agreement to ${(A.DATA.site || {}).contact || "the MTOP team"}. Drafts you add here are not saved or shared.`,
+          `Aby se vaše výsledky objevily v ověřeném souhrnu, který vidí všichni, pošlete tento soubor s podepsanou smlouvou o sdílení dat na ${(A.DATA.site || {}).contact || "tým MTOP"}. Návrhy přidané zde se neukládají ani nesdílejí.`) })));
 
     // predictions preview
     const det = h("details", { class: "template" });
@@ -486,20 +514,42 @@
     fnoCb.addEventListener("change", () => { NS.includeFno = fnoCb.checked; render(root); });
     const fileIn = h("input", { type: "file", id: "pool-files", accept: ".json", multiple: true, class: "visually-hidden" });
     fileIn.addEventListener("change", async () => {
+      let demo = 0, bad = 0;
       for (const f of fileIn.files) {
         try {
           const j = JSON.parse(await f.text());
-          if (/^mtop-validation\/[12]$/.test(j.format || "") && j.stages) NS.imports.push(j);
-        } catch (e) { /* ignore unreadable files */ }
+          if (!/^mtop-validation\/[12]$/.test(j.format || "") || !j.stages) { bad++; continue; }
+          if (j.demo) { demo++; continue; }
+          NS.imports.push(Object.assign(j, { _draft: true }));
+        } catch (e) { bad++; }
       }
+      NS.poolMsg = demo || bad ? [demo ? tx(`${demo} file(s) from the synthetic demo were not added.`, `${demo} soubor(y) ze syntetické ukázky nebyly přidány.`) : "",
+        bad ? tx(`${bad} file(s) are not MTOP results files.`, `${bad} soubor(y) nejsou soubory výsledků MTOP.`) : ""].join(" ").trim() : null;
       render(root);
     });
+    // reviewed results (validation_pool.json, published by the MTOP team) for the current model version
+    const REVIEWED = ((A.DATA.validation_pool || {}).results || []);
+    const sameVersion = (j) => !B.fingerprint || !j.model_fingerprint || j.model_fingerprint === B.fingerprint;
+    const revCb = h("input", { type: "checkbox", id: "pool-rev" });
+    revCb.checked = NS.includeReviewed;
+    revCb.addEventListener("change", () => { NS.includeReviewed = revCb.checked; render(root); });
+    const draftCb = h("input", { type: "checkbox", id: "pool-draft" });
+    draftCb.checked = NS.includeDraft;
+    draftCb.addEventListener("change", () => { NS.includeDraft = draftCb.checked; render(root); });
+    const drafts = NS.imports.filter((j) => !j.demo);
+    const showDrafts = NS.includeDraft && drafts.length > 0;
     card.appendChild(h("div", { class: "chart-head" }, h("div", null,
-      h("div", { class: "chart-title", text: tx("Pooled performance across sites", "Souhrnný výkon napříč centry") }),
-      h("div", { class: "chart-sub", text: tx("Random-effects meta-analysis of AUROC (logit scale) with 95% prediction interval", "Metaanalýza AUROC s náhodnými efekty (logitová škála) s 95% predikčním intervalem") }))));
+      h("div", { class: "chart-title", text: showDrafts ? tx("Pooled performance across sites · draft", "Souhrnný výkon napříč centry · návrh")
+        : tx("Pooled performance across sites", "Souhrnný výkon napříč centry") }),
+      h("div", { class: "chart-sub", text: showDrafts
+        ? tx("Includes results added in this browser that have not been reviewed. Random-effects meta-analysis of AUROC (logit scale).", "Zahrnuje výsledky přidané v tomto prohlížeči, které nebyly ověřeny. Metaanalýza AUROC s náhodnými efekty (logitová škála).")
+        : tx("Random-effects meta-analysis of AUROC (logit scale) with 95% prediction interval", "Metaanalýza AUROC s náhodnými efekty (logitová škála) s 95% predikčním intervalem") }))));
     card.appendChild(h("div", { class: "controls" }, seg, h("label", { for: "pool-stage" }, A.t().stage), stSel,
       h("label", { for: "pool-fno" }, fnoCb, tx("FNO eras (internal–external)", "Období FNO (interně-externí)")),
-      h("label", { class: "btn", for: "pool-files" }, tx("Add results files", "Přidat soubory výsledků")), fileIn));
+      h("label", { for: "pool-rev" }, revCb, tx(`Reviewed centres (${REVIEWED.filter((e) => sameVersion(e.result)).length})`, `Ověřená centra (${REVIEWED.filter((e) => sameVersion(e.result)).length})`)),
+      drafts.length ? h("label", { for: "pool-draft" }, draftCb, tx(`My drafts (${drafts.length}, not reviewed)`, `Moje návrhy (${drafts.length}, neověřené)`)) : null,
+      h("label", { class: "btn", for: "pool-files" }, tx("Add results files as drafts", "Přidat soubory výsledků jako návrhy")), fileIn));
+    if (NS.poolMsg) card.appendChild(h("p", { class: "notice", text: NS.poolMsg }));
 
     const rows = [];
     const nm = netLearner(st, tg);
@@ -510,12 +560,25 @@
     if (NS.includeFno && iecv) {
       for (const e of iecv.eras) if (!e.suppressed) rows.push({ label: `FNO ${e.label}`, sub: `n ${e.n}`, est: e.auroc, lo: e.ci[0], hi: e.ci[1], logit: e.logit, se: e.se_logit, color: "var(--c1)" });
     }
-    NS.imports.forEach((j) => {
+    const prospective = (j) => j.period && j.development_period && j.period[0] > j.development_period[1];
+    const addRow = (j, label, color) => {
       const r = siteResult(j, st, tg, nm);
-      if (r && !r.insufficient && r.se_logit) rows.push({ label: j.site, sub: `n ${r.n}`, est: r.auroc, lo: r.auroc_ci[0], hi: r.auroc_ci[1], logit: Math.log(r.auroc / (1 - r.auroc)), se: r.se_logit, color: "var(--c2)" });
-    });
+      if (r && !r.insufficient && r.se_logit) {
+        rows.push({ label: prospective(j) ? `${label} · ${tx("prospective", "prospektivní")}` : label, sub: `n ${r.n}`, est: r.auroc, lo: r.auroc_ci[0], hi: r.auroc_ci[1],
+          logit: Math.log(r.auroc / (1 - r.auroc)), se: r.se_logit, color });
+      }
+    };
+    if (NS.includeReviewed) REVIEWED.filter((e) => sameVersion(e.result)).forEach((e) => addRow(e.result, e.site, "var(--c3)"));
+    if (showDrafts) drafts.filter(sameVersion).forEach((j) => addRow(j, `${j.site} · ${tx("draft", "návrh")}`, "var(--c2)"));
+    const older = REVIEWED.filter((e) => !sameVersion(e.result)).length + drafts.filter((j) => !sameVersion(j)).length;
+    if (older) card.appendChild(h("p", { class: "note", text: tx(`${older} result(s) were made with an earlier model version and are not pooled with this one.`,
+      `${older} výsledek/výsledky vznikly s dřívější verzí modelu a se současnou se neslučují.`) }));
+    const governance = h("p", { class: "note", text: tx(
+      `Reviewed centres are added by the MTOP team after a signed data-sharing agreement and a check of the results file (format, model version, aggregate numbers only, at least 10 events); they appear here for everyone. Files you add are drafts: they stay in this browser, are not saved or shared, and are marked as not reviewed. Results on the synthetic demo are never pooled.${REVIEWED.length ? "" : " No partner centre has been reviewed yet."}`,
+      `Ověřená centra přidává tým MTOP po podpisu smlouvy o sdílení dat a kontrole souboru výsledků (formát, verze modelu, jen souhrnná čísla, alespoň 10 událostí); zde je vidí všichni. Soubory, které přidáte vy, jsou návrhy: zůstávají v tomto prohlížeči, neukládají se ani nesdílejí a jsou označeny jako neověřené. Výsledky na syntetické ukázce se nikdy neslučují.${REVIEWED.length ? "" : " Zatím nebylo ověřeno žádné partnerské centrum."}`) });
     if (rows.length < 2) {
       card.appendChild(h("p", { class: "note", text: tx("At least two sites or eras are needed for pooling. Include the FNO eras or add results files.", "Ke sloučení jsou potřeba alespoň dvě centra nebo období. Zahrňte období FNO nebo přidejte soubory výsledků.") }));
+      card.appendChild(governance);
       return card;
     }
     const re = MX.randomEffects(rows.map((r) => r.logit), rows.map((r) => r.se));
@@ -530,9 +593,10 @@
     card.appendChild(h("p", { class: "note", text: tx(
       `I² ${num(re.i2 * 100)}% · τ² ${num(re.tau2, 3)} · 95% prediction interval ${num(pooled.piLo, 2)}–${num(pooled.piHi, 2)}: the range of AUROC to expect at a new site like these. FNO eras come from leave-one-era-out validation; they stand in for partner centres until real results arrive.`,
       `I² ${num(re.i2 * 100)} % · τ² ${num(re.tau2, 3)} · 95% predikční interval ${num(pooled.piLo, 2)}–${num(pooled.piHi, 2)}: rozsah AUROC, který lze čekat v novém podobném centru. Období FNO pocházejí z validace s vynecháním jednoho období; zastupují partnerská centra, dokud nepřijdou skutečné výsledky.`) }));
+    card.appendChild(governance);
     if (NS.imports.length) {
-      const clr = h("button", { class: "btn btn-ghost", type: "button" }, tx("Remove added sites", "Odebrat přidaná centra"));
-      clr.addEventListener("click", () => { NS.imports = []; render(root); });
+      const clr = h("button", { class: "btn btn-ghost", type: "button" }, tx("Remove my drafts", "Odebrat moje návrhy"));
+      clr.addEventListener("click", () => { NS.imports = []; NS.poolMsg = null; render(root); });
       card.appendChild(clr);
     }
     return card;

@@ -208,6 +208,12 @@ def cmd_studio(args):
     studio_main(args)
 
 
+def cmd_pool(args):
+    from .pool import main as pool_main
+
+    pool_main(args)
+
+
 def cmd_all(args):
     t = time.time()
     cmd_clean(args)
@@ -236,7 +242,7 @@ def main(argv=None):
                      ("extras", cmd_extras), ("adaptive", cmd_adaptive), ("fed-demo", cmd_fed_demo),
                      ("explorer", cmd_explorer), ("preprocessing", cmd_preprocessing), ("reporting", cmd_reporting),
                      ("associations", cmd_associations), ("report", cmd_report), ("site", cmd_site),
-                     ("all", cmd_all), ("synth", cmd_synth), ("studio", cmd_studio)]:
+                     ("all", cmd_all), ("synth", cmd_synth), ("studio", cmd_studio), ("pool", cmd_pool)]:
         p = sub.add_parser(name)
         p.set_defaults(fn=fn)
         if name in ("clean", "all", "studio"):
@@ -257,6 +263,13 @@ def main(argv=None):
                            help="rebuild only the calculator's comparator panel in extras.json")
         if name == "fed-demo":
             p.add_argument("--no-http", action="store_true", help="skip the run over HTTP sockets")
+        if name == "pool":
+            p.add_argument("action", choices=["check", "add", "list"])
+            p.add_argument("file", nargs="?", help="a centre's results file (mtop_results_*.json)")
+            p.add_argument("--site", help="the centre's name as agreed")
+            p.add_argument("--agreement", help="reference of the signed data-sharing agreement")
+            p.add_argument("--reviewer", help="who checked the file")
+            p.add_argument("--note", help="optional remark shown with the result")
         if name == "synth":
             p.add_argument("--n", type=int, default=600)
             p.add_argument("--seed", type=int, default=1)

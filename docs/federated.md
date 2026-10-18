@@ -113,6 +113,52 @@ such jobs.
 How often to update, which strategy to use and which alarms trigger an update are agreed by the
 network in advance.
 
+### Prospective validation of a model that keeps changing
+
+A model that is recalibrated every year and retrained by the network is validated as a series of
+versions, not as one model:
+
+1. **Every version is frozen and identified.** Each published model bundle has a SHA-256
+   fingerprint (About tab), its development years and a changelog entry. Results files record the
+   fingerprint, so results of different versions are never pooled together.
+2. **Prospective means after the version's development data.** A centre's results file records
+   the treatment years of its patients (optional `year` column) next to the model's development
+   years. Patients treated after those years are a prospective test of that version and are
+   marked as such in the pooled analysis. The strongest form is a silent period: the version is
+   frozen, scores new patients as they are treated (recorded with the fingerprint), and its
+   estimates are compared with the outcomes 90 days later, before anyone relies on it.
+3. **Updates follow a plan written in advance** (a predetermined change control plan): which
+   changes are routine (re-estimating the intercept on the latest complete years), which need a
+   new temporal or leave-one-centre-out validation before release (a refit, a new learner or
+   predictor), and which drift alarms trigger them. A routine recalibration keeps the model's
+   ranking of patients, so its discrimination evidence carries over and only calibration is
+   rechecked; anything else starts a new validation record.
+4. **The network validates what it trains.** A network refit is checked by leave-one-centre-out
+   validation (each centre scores the model trained without it) and then prospectively on the
+   period after the refit, centre by centre, from masked counts.
+
+### Results from other centres: drafts and the reviewed pool
+
+The Multicentre tab lets anyone validate MTOP on their own data in the browser. What they pool
+there is a **draft**: it stays in that browser, is not saved or shared, and is labelled as not
+reviewed. Results on the synthetic demo cohort cannot be pooled at all, and demo results files are
+refused when added.
+
+The pooled analysis that everyone sees uses only **reviewed** results, kept in
+`artifacts/public/validation_pool.json`. A centre sends its results file (aggregate numbers only)
+with the signed data-sharing agreement; the MTOP team checks it and adds it:
+
+```bash
+python -m mtop pool check mtop_results_hospital_x.json
+python -m mtop pool add mtop_results_hospital_x.json --site "Hospital X" --agreement "DUA 2026-03" --reviewer "V. Gajdošík"
+python -m mtop site    # then commit artifacts/public/validation_pool.json
+```
+
+The check refuses demo results, files without a model fingerprint and files with anything beyond
+aggregate results. It also removes every stage, outcome or model with fewer than 10 events or
+non-events, and any calibration group under 10 patients, before anything is published. The git
+history of the file is the record of who added what and when.
+
 ## What leaves a hospital, and what does not
 
 | | Leaves the hospital? |
