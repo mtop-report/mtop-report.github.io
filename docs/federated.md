@@ -137,10 +137,10 @@ versions, not as one model:
    validation (each centre scores the model trained without it) and then prospectively on the
    period after the refit, centre by centre, from masked counts.
 
-### Results from other centres: drafts and the reviewed pool
+### Results from other centres: previews and the reviewed pool
 
 The Multicentre tab lets anyone validate MTOP on their own data in the browser. What they pool
-there is a **draft**: it stays in that browser, is not saved or shared, and is labelled as not
+there is only a **preview** ("Preview in the pooled chart"): it stays in that browser, is not saved or shared, and is labelled as not
 reviewed. Results on the synthetic demo cohort cannot be pooled at all, and demo results files are
 refused when added.
 

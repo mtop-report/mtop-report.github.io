@@ -9,7 +9,7 @@
   const S = A.S;
   S.netStage = S.netStage || "admission";
   S.netTarget = S.netTarget || "good_outcome";
-  // imports: results files this viewer added (drafts: this browser only, never shared); demo: the
+  // imports: results files this viewer added (a preview: this browser only, never shared); demo: the
   // loaded data are the synthetic demo cohort, whose results can be looked at but never pooled
   const NS = { file: null, records: null, issues: null, results: null, preds: null, imports: [], includeFno: true, includeReviewed: true,
     includeDraft: true, label: "", running: false, progress: 0, error: null, demo: false, poolMsg: null };
@@ -466,10 +466,10 @@
     copyBtn.addEventListener("click", () => copyText(exportJSON(), copyBtn));
     const dl = h("button", { class: "btn", type: "button" }, tx("Prepare download", "Připravit ke stažení"));
     dl.addEventListener("click", () => { dl.replaceWith(downloadLink(exportJSON(), `mtop_results_${(NS.label || "site").replace(/[^a-z0-9]+/gi, "_")}.json`, "application/json")); });
-    // A draft stays in this browser. Only the MTOP team adds results to the reviewed pool that
+    // A preview stays in this browser. Only the MTOP team adds results to the reviewed pool that
     // everyone sees, after an agreement with the centre; demo results are never pooled.
     const addPool = h("button", { class: "btn btn-primary", type: "button", disabled: NS.demo ? true : null },
-      tx("Add to my drafts", "Přidat do mých návrhů"));
+      tx("Preview in the pooled chart", "Náhled v souhrnném grafu"));
     addPool.addEventListener("click", () => {
       if (NS.demo) return;
       NS.imports.push(Object.assign(JSON.parse(exportJSON()), { _draft: true }));
@@ -481,8 +481,8 @@
       h("p", { class: "note", text: NS.demo
         ? tx("These are results on the synthetic demo cohort. They show how the tool works and cannot be added to any pool.",
           "Jde o výsledky na syntetické ukázkové kohortě. Ukazují, jak nástroj funguje, a nelze je přidat do žádného souhrnu.")
-        : tx(`Drafts stay in this browser and are not saved or shared. To have your results in the reviewed pool that everyone sees, send this file with the signed data-sharing agreement to ${(A.DATA.site || {}).contact || "the MTOP team"}.`,
-          `Návrhy zůstávají v tomto prohlížeči a neukládají se ani nesdílejí. Aby se vaše výsledky objevily v ověřeném souhrnu, který vidí všichni, pošlete tento soubor s podepsanou smlouvou o sdílení dat na ${(A.DATA.site || {}).contact || "tým MTOP"}.`) })));
+        : tx(`The preview stays in this browser and is not saved or shared. To have your results in the reviewed pool that everyone sees, send this file with the signed data-sharing agreement to ${(A.DATA.site || {}).contact || "the MTOP team"}.`,
+          `Náhled zůstává v tomto prohlížeči a neukládá se ani nesdílí. Aby se vaše výsledky objevily v ověřeném souhrnu, který vidí všichni, pošlete tento soubor s podepsanou smlouvou o sdílení dat na ${(A.DATA.site || {}).contact || "tým MTOP"}.`) })));
 
     // predictions preview
     const det = h("details", { class: "template" });
@@ -539,7 +539,7 @@
     const drafts = NS.imports.filter((j) => !j.demo);
     const showDrafts = NS.includeDraft && drafts.length > 0;
     card.appendChild(h("div", { class: "chart-head" }, h("div", null,
-      h("div", { class: "chart-title", text: showDrafts ? tx("Pooled performance across sites · draft", "Souhrnný výkon napříč centry · návrh")
+      h("div", { class: "chart-title", text: showDrafts ? tx("Pooled performance across sites · preview", "Souhrnný výkon napříč centry · náhled")
         : tx("Pooled performance across sites", "Souhrnný výkon napříč centry") }),
       h("div", { class: "chart-sub", text: showDrafts
         ? tx("Includes results added in this browser that have not been reviewed. Random-effects meta-analysis of AUROC (logit scale).", "Zahrnuje výsledky přidané v tomto prohlížeči, které nebyly ověřeny. Metaanalýza AUROC s náhodnými efekty (logitová škála).")
@@ -547,8 +547,8 @@
     card.appendChild(h("div", { class: "controls" }, seg, h("label", { for: "pool-stage" }, A.t().stage), stSel,
       h("label", { for: "pool-fno" }, fnoCb, tx("FNO eras (internal–external)", "Období FNO (interně-externí)")),
       h("label", { for: "pool-rev" }, revCb, tx(`Reviewed centres (${REVIEWED.filter((e) => sameVersion(e.result)).length})`, `Ověřená centra (${REVIEWED.filter((e) => sameVersion(e.result)).length})`)),
-      drafts.length ? h("label", { for: "pool-draft" }, draftCb, tx(`My drafts (${drafts.length}, not reviewed)`, `Moje návrhy (${drafts.length}, neověřené)`)) : null,
-      h("label", { class: "btn", for: "pool-files" }, tx("Add results files as drafts", "Přidat soubory výsledků jako návrhy")), fileIn));
+      drafts.length ? h("label", { for: "pool-draft" }, draftCb, tx(`My previews (${drafts.length}, not reviewed)`, `Moje náhledy (${drafts.length}, neověřené)`)) : null,
+      h("label", { class: "btn", for: "pool-files" }, tx("Add results files to the preview", "Přidat soubory výsledků do náhledu")), fileIn));
     if (NS.poolMsg) card.appendChild(h("p", { class: "notice", text: NS.poolMsg }));
 
     const rows = [];
@@ -569,13 +569,13 @@
       }
     };
     if (NS.includeReviewed) REVIEWED.filter((e) => sameVersion(e.result)).forEach((e) => addRow(e.result, e.site, "var(--c3)"));
-    if (showDrafts) drafts.filter(sameVersion).forEach((j) => addRow(j, `${j.site} · ${tx("draft", "návrh")}`, "var(--c2)"));
+    if (showDrafts) drafts.filter(sameVersion).forEach((j) => addRow(j, `${j.site} · ${tx("preview", "náhled")}`, "var(--c2)"));
     const older = REVIEWED.filter((e) => !sameVersion(e.result)).length + drafts.filter((j) => !sameVersion(j)).length;
     if (older) card.appendChild(h("p", { class: "note", text: tx(`${older} result(s) were made with an earlier model version and are not pooled with this one.`,
       `${older} výsledek/výsledky vznikly s dřívější verzí modelu a se současnou se neslučují.`) }));
     const governance = h("p", { class: "note", text: tx(
-      `Reviewed centres are added by the MTOP team after a signed data-sharing agreement and a check of the results file (format, model version, aggregate numbers only, at least 10 events); they appear here for everyone. Files you add are drafts: they stay in this browser, are not saved or shared, and are marked as not reviewed. Results on the synthetic demo are never pooled.${REVIEWED.length ? "" : " No partner centre has been reviewed yet."}`,
-      `Ověřená centra přidává tým MTOP po podpisu smlouvy o sdílení dat a kontrole souboru výsledků (formát, verze modelu, jen souhrnná čísla, alespoň 10 událostí); zde je vidí všichni. Soubory, které přidáte vy, jsou návrhy: zůstávají v tomto prohlížeči, neukládají se ani nesdílejí a jsou označeny jako neověřené. Výsledky na syntetické ukázce se nikdy neslučují.${REVIEWED.length ? "" : " Zatím nebylo ověřeno žádné partnerské centrum."}`) });
+      `Reviewed centres are added by the MTOP team after a signed data-sharing agreement and a check of the results file (format, model version, aggregate numbers only, at least 10 events); they appear here for everyone. Files you add are only a preview: they stay in this browser, are not saved or shared, and are marked as not reviewed. Results on the synthetic demo are never pooled.${REVIEWED.length ? "" : " No partner centre has been reviewed yet."}`,
+      `Ověřená centra přidává tým MTOP po podpisu smlouvy o sdílení dat a kontrole souboru výsledků (formát, verze modelu, jen souhrnná čísla, alespoň 10 událostí); zde je vidí všichni. Soubory, které přidáte vy, jsou jen náhled: zůstávají v tomto prohlížeči, neukládají se ani nesdílejí a jsou označeny jako neověřené. Výsledky na syntetické ukázce se nikdy neslučují.${REVIEWED.length ? "" : " Zatím nebylo ověřeno žádné partnerské centrum."}`) });
     if (rows.length < 2) {
       card.appendChild(h("p", { class: "note", text: tx("At least two sites or eras are needed for pooling. Include the FNO eras or add results files.", "Ke sloučení jsou potřeba alespoň dvě centra nebo období. Zahrňte období FNO nebo přidejte soubory výsledků.") }));
       card.appendChild(governance);
@@ -595,7 +595,7 @@
       `I² ${num(re.i2 * 100)} % · τ² ${num(re.tau2, 3)} · 95% predikční interval ${num(pooled.piLo, 2)}–${num(pooled.piHi, 2)}: rozsah AUROC, který lze čekat v novém podobném centru. Období FNO pocházejí z validace s vynecháním jednoho období; zastupují partnerská centra, dokud nepřijdou skutečné výsledky.`) }));
     card.appendChild(governance);
     if (NS.imports.length) {
-      const clr = h("button", { class: "btn btn-ghost", type: "button" }, tx("Remove my drafts", "Odebrat moje návrhy"));
+      const clr = h("button", { class: "btn btn-ghost", type: "button" }, tx("Remove my previews", "Odebrat moje náhledy"));
       clr.addEventListener("click", () => { NS.imports = []; NS.poolMsg = null; render(root); });
       card.appendChild(clr);
     }
