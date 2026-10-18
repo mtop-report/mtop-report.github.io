@@ -76,15 +76,18 @@ features:
     monotone: 0
     default: M1
     label: {en: "Occlusion site", cs: "Místo okluze"}
-    help: {en: "Tandem: a cervical ICA/CCA lesion plus an intracranial occlusion. M3 and ACA occlusions are grouped with M2 until each has 30 patients in the registry.",
-           cs: "Tandem: léze krční ACI/ACC spolu s intrakraniálním uzávěrem. Uzávěry M3 a ACA jsou sloučeny s M2, dokud každý nebude mít v registru 30 pacientů."}
+    help: {en: "Tandem: a cervical ICA/CCA lesion plus an intracranial occlusion. M3 occlusions are grouped with M2 (same artery). A site needs at least 10 patients in the registry before the models can estimate it; the ACA is kept as its own choice but has no estimate yet.",
+           cs: "Tandem: léze krční ACI/ACC spolu s intrakraniálním uzávěrem. Uzávěry M3 jsou sloučeny s M2 (stejná tepna). Místo okluze musí mít v registru alespoň 10 pacientů, aby je modely mohly odhadnout; ACA je vedena jako samostatná volba, ale odhad pro ni zatím není."}
+    # `model: false`: offered for entry, no model term until the site has privacy.min_cell patients
     options:
       - {value: ICA, label: {en: "Intracranial ICA", cs: "Intrakraniální ACI"}}
       - {value: tandem, label: {en: "Tandem (cervical ICA/CCA + intracranial)", cs: "Tandem (krční ACI/ACC + intrakraniální)"}}
       - {value: cervical_ICA, label: {en: "Cervical ICA / CCA", cs: "Krční ACI / ACC"}}
       - {value: M1, label: {en: "MCA M1", cs: "ACM M1"}}
-      - {value: M2, label: {en: "MCA M2 or more distal (M3, ACA)", cs: "ACM M2 nebo distálněji (M3, ACA)"}}
-      - {value: basilar, label: {en: "Basilar artery (± vertebral)", cs: "A. basilaris (± AV)"}}
+      - {value: M2, label: {en: "MCA M2 / M3", cs: "ACM M2 / M3"}}
+      - {value: ACA, model: false, label: {en: "ACA · no estimate yet", cs: "ACA · zatím bez odhadu"}}
+      - {value: basilar, label: {en: "Basilar artery", cs: "A. basilaris"}}
+      - {value: basilar_vertebral, label: {en: "Basilar + vertebral", cs: "A. basilaris + AV"}}
       - {value: other_posterior, label: {en: "Vertebral / PCA", cs: "AV / ACP"}}
 
   - key: side_left
@@ -160,7 +163,7 @@ features:
     label: {en: "Admission route", cs: "Způsob přijetí"}
     options:
       - {value: 0, label: {en: "Direct to FNO", cs: "Přímo do FNO"}}
-      - {value: 1, label: {en: "Transferred (drip-and-ship)", cs: "Překlad (drip-and-ship)"}}
+      - {value: 1, label: {en: "Transferred from another hospital", cs: "Překlad z jiné nemocnice"}}
 
   - key: onset_to_puncture
     stage: admission
@@ -424,7 +427,7 @@ features:
       - {value: aspiration, label: {en: "Thrombectomy: direct aspiration (ADAPT)", cs: "Trombektomie: přímá aspirace (ADAPT)"}}
       - {value: stent_retriever, label: {en: "Thrombectomy: stent retriever", cs: "Trombektomie: stentriever"}}
       - {value: solumbra, label: {en: "Thrombectomy: Solumbra (aspiration + stent retriever)", cs: "Trombektomie: Solumbra (aspirace + stentriever)"}}
-      - {value: combined, label: {en: "Combined procedure (two or more techniques)", cs: "Kombinovaný výkon (dvě a více technik)"}}
+      - {value: combined, label: {en: "Thrombectomy: combined procedure (two or more techniques)", cs: "Trombektomie: kombinovaný výkon (dvě a více technik)"}}
       - {value: none, label: {en: "No thrombectomy: stent, angioplasty or intra-arterial lysis", cs: "Bez trombektomie: stent, angioplastika nebo intraarteriální lýza"}}
       - {value: diagnostic, label: {en: "Diagnostic angiography only", cs: "Pouze diagnostická angiografie"}}
 

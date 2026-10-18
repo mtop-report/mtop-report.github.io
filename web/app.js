@@ -28,7 +28,7 @@
   const STAGES = B.stages.map((s) => s.id);
   const STAGE = Object.fromEntries(B.stages.map((s) => [s.id, s]));
   const FEAT = Object.fromEntries(B.features.map((f) => [f.key, f]));
-  const POSTERIOR = new Set(["basilar", "other_posterior"]);
+  const POSTERIOR = new Set(["basilar", "basilar_vertebral", "other_posterior"]);
   const TARGETS = ["good_outcome", "death90"];
   const REF = B.reference || "Logistic regression (splines)";
   // the temporal splits: primary (as in the 2026 analysis) and sensitivity
@@ -534,9 +534,40 @@
   }
 
   // ------------------------------------------------------------------ readout
+  // an entered category that has no model term yet (fewer than 10 patients in the registry, e.g. ACA)
+  function unmodelledChoice(x) {
+    for (const f of B.features) {
+      if (f.type !== "categorical" || !f.options || idx(f.stage) > idx(S.current)) continue;
+      const o = f.options.find((o2) => String(o2.value) === String(x[f.key]));
+      if (o && o.model === false) return { f, o };
+    }
+    return null;
+  }
+  function noEstimateCard(u) {
+    const name = L(u.o.label).replace(/ · .*/, "");
+    return h("div", { class: "card card-pad no-estimate", role: "status" },
+      h("h3", { text: tx(`No estimate for ${name} occlusions yet`, `Pro uzávěry ${name} zatím není odhad`) }),
+      h("p", { text: tx(
+        `The registry has fewer than 10 patients with this occlusion site. A site needs at least 10 before the models can learn its effect (and before an estimate built on it may be published), so ${name} is kept as its own category and gets an estimate once enough patients are recorded.`,
+        `Registr má s tímto místem okluze méně než 10 pacientů. Modely potřebují alespoň 10, aby se vliv místa okluze mohly naučit (a aby se odhad na něm založený směl zveřejnit), proto je ${name} vedena jako samostatná kategorie a odhad dostane, až bude zaznamenáno dost pacientů.`) }),
+      h("p", { class: "note", text: tx(
+        "For an approximate estimate, choose the modelled site you consider most similar.",
+        "Pro přibližný odhad zvolte modelované místo okluze, které považujete za nejpodobnější.") }));
+  }
+
   function updateReadout() {
     if (!readoutEl) return;
     const x = modelInputs();
+    const un = unmodelledChoice(x);
+    if (un) {
+      readoutEl.classList.remove("mini-on");
+      readoutEl.replaceChildren(noEstimateCard(un));
+      if (stickyEl) {
+        stickyEl.classList.remove("show");
+        $(".inner", stickyEl).replaceChildren(h("span", { text: tx("No estimate for this occlusion site yet", "Pro toto místo okluze zatím není odhad") }));
+      }
+      return;
+    }
     const preds = {};
     for (const st of STAGES) {
       if (idx(st) > idx(S.current)) break;
@@ -1642,8 +1673,8 @@
   };
   const SUBGRP = {
     anterior: ["anterior", "přední"], posterior: ["posterior", "zadní"], M1: ["MCA M1", "ACM M1"], ICA: ["intracranial ICA", "intrakraniální ACI"],
-    tandem: ["tandem", "tandem"], cervical_ICA: ["cervical ICA / CCA", "krční ACI / ACC"], M2: ["M2 or more distal", "M2 nebo distálněji"],
-    distal: ["M2–M3 / ACA", "M2–M3 / ACA"], "<80": ["under 80", "pod 80"], "80+": ["80 or older", "80 a více"], men: ["men", "muži"], women: ["women", "ženy"],
+    tandem: ["tandem", "tandem"], cervical_ICA: ["cervical ICA / CCA", "krční ACI / ACC"], M2: ["MCA M2 / M3", "ACM M2 / M3"],
+    "<80": ["under 80", "pod 80"], "80+": ["80 or older", "80 a více"], men: ["men", "muži"], women: ["women", "ženy"],
     ivt: ["with IVT", "s IVT"], no_ivt: ["without IVT", "bez IVT"], direct: ["direct", "přímo"], transfer: ["transferred", "překlad"],
     "<10": ["below 10", "pod 10"], "10-19": ["10–19", "10–19"], "20+": ["20 or more", "20 a více"], "<=6h": ["≤ 6 h", "≤ 6 h"], ">6h": ["> 6 h", "> 6 h"],
     0: ["0", "0"], "1+": ["1 or more", "1 a více"], mt: ["thrombectomy", "trombektomie"], other: ["other treatment", "jiná léčba"], diagnostic: ["diagnostic only", "pouze diagnostika"],

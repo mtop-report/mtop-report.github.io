@@ -24,17 +24,17 @@ and the shared model plus 10 boosting steps on the centre's own patients, done l
 
 | Admission model, mean AUROC over the 4 centres | Alone | Network | Adapted |
 |---|---|---|---|
-| Death within 90 days | 0.750 | **0.771** | 0.774 |
-| Functional independence (mRS 0–2) | 0.741 | 0.744 | **0.749** |
+| Death within 90 days | 0.752 | **0.772** | 0.775 |
+| Functional independence (mRS 0–2) | 0.742 | 0.743 | **0.747** |
 
 The same comparison for the regressions, fitted exactly across the centres by federated Newton steps:
 
 | Admission model, mean AUROC | Alone | Network |
 |---|---|---|
-| Regression with splines, death | 0.669 | **0.755** |
-| Regression with splines, mRS 0–2 | 0.711 | **0.749** |
-| Linear regression, death | 0.679 | **0.758** |
-| Linear regression, mRS 0–2 | 0.713 | **0.749** |
+| Regression with splines, death | 0.667 | **0.754** |
+| Regression with splines, mRS 0–2 | 0.709 | **0.747** |
+| Linear regression, death | 0.676 | **0.756** |
+| Linear regression, mRS 0–2 | 0.710 | **0.747** |
 
 - **Regressions gain most**: with 33 predictors a regression fitted on one centre's few hundred
   patients overfits; fitted across the network it matches the boosted trees.
@@ -46,8 +46,8 @@ The same comparison for the regressions, fitted exactly across the centres by fe
   at home (AUROC 0.70–0.76 for mRS 0–2, 0.76–0.79 for death). Calibration differs between centres,
   which each centre can measure and correct locally.
 - **Exactness**: the federated model's 100 trees are identical to pooled training, split for split;
-  the spline logistic regression matches pooled fitting to 3e-08. Over real HTTP connections the
-  training took 301 rounds and 7 s, with about 3.5 MB sent per centre.
+  the spline logistic regression matches pooled fitting to 7e-08. Over real HTTP connections the
+  training took 301 rounds and 8 s, with about 3.6 MB sent per centre.
 
 Real partner centres differ more in case mix and practice than FNO's eras do. Measuring and
 handling that is what the network is for.

@@ -36,11 +36,14 @@ def derived(df: pd.DataFrame, key: str) -> pd.Series:
 def _column(df: pd.DataFrame, f: Feature) -> pd.DataFrame:
     if f.type == "categorical":
         src = df[f.key]
+        cats = [col.split("__", 1)[1] for col in f.columns]
+        ref = f.spec.get("reference")
+        # missing, or a category without a model term yet (e.g. ACA): not used by the model
+        unused = ~src.isin(cats + ([ref] if ref is not None else []))
         out = {}
-        for col in f.columns:
-            val = col.split("__", 1)[1]
+        for col, val in zip(f.columns, cats):
             v = (src == val).astype("float64")
-            v[src.isna()] = np.nan
+            v[unused] = np.nan
             out[col] = v
         return pd.DataFrame(out, index=df.index)
     if f.type == "derived":

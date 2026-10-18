@@ -19,7 +19,7 @@ patient ID in `reports/data_quality.xlsx` (local only). NIHSS 43 (died) and 99 (
 | Sex | `sex_male` | Before thrombectomy | binary | 1 = male, 0 = female |  |
 | Pre-stroke mRS | `mrs_pre` | Before thrombectomy | ordinal | 0 = 0 · no symptoms; 1 = 1 · no significant disability; 2 = 2 · slight disability; 3 = 3 · moderate disability; 4 = 4 · moderately severe; 5 = 5 · severe disability | monotone in LightGBM (− for mRS 0–2) |
 | NIHSS on admission | `nihss_adm` | Before thrombectomy | numeric | 0–42 | monotone in LightGBM (− for mRS 0–2) |
-| Occlusion site | `occlusion` | Before thrombectomy | categorical | ICA = Intracranial ICA; tandem = Tandem (cervical ICA/CCA + intracranial); cervical_ICA = Cervical ICA / CCA; M1 = MCA M1; M2 = MCA M2 or more distal (M3, ACA); basilar = Basilar artery (± vertebral); other_posterior = Vertebral / PCA | Tandem: a cervical ICA/CCA lesion plus an intracranial occlusion. M3 and ACA occlusions are grouped with M2 until each has 30 patients in the registry. |
+| Occlusion site | `occlusion` | Before thrombectomy | categorical | ICA = Intracranial ICA; tandem = Tandem (cervical ICA/CCA + intracranial); cervical_ICA = Cervical ICA / CCA; M1 = MCA M1; M2 = MCA M2 / M3; ACA = ACA · no estimate yet; basilar = Basilar artery; basilar_vertebral = Basilar + vertebral; other_posterior = Vertebral / PCA | Tandem: a cervical ICA/CCA lesion plus an intracranial occlusion. M3 occlusions are grouped with M2 (same artery). A site needs at least 10 patients in the registry before the models can estimate it; the ACA is kept as its own choice but has no estimate yet. |
 | Affected hemisphere | `side_left` | Before thrombectomy | binary | 1 = left, 0 = right or posterior |  |
 | ASPECTS | `aspects` | Before thrombectomy | numeric | 0–10 | monotone in LightGBM (+ for mRS 0–2); may be left unknown in the calculator; Non-contrast CT, middle cerebral artery territory. Recorded in the registry from 2016. |
 | IV thrombolysis | `ivt` | Before thrombectomy | binary | 1 = yes, 0 = no |  |
@@ -49,7 +49,7 @@ patient ID in `reports/data_quality.xlsx` (local only). NIHSS 43 (died) and 99 (
 | Pulse pressure | `pulse_pressure` | Before thrombectomy | derived | sbp - dbp |  |
 | Glucose above 7.8 mmol/L | `hyperglycemia` | Before thrombectomy | derived | glucose > 7.8 | monotone in LightGBM (− for mRS 0–2) |
 | Final reperfusion (mTICI) | `tici` | End of the procedure | ordinal | 0 = 0; 1 = 1; 2 = 2a; 3 = 2b; 4 = 3 | monotone in LightGBM (+ for mRS 0–2) |
-| Procedure | `technique` | End of the procedure | categorical | aspiration = Thrombectomy: direct aspiration (ADAPT); stent_retriever = Thrombectomy: stent retriever; solumbra = Thrombectomy: Solumbra (aspiration + stent retriever); combined = Combined procedure (two or more techniques); none = No thrombectomy: stent, angioplasty or intra-arterial lysis; diagnostic = Diagnostic angiography only |  |
+| Procedure | `technique` | End of the procedure | categorical | aspiration = Thrombectomy: direct aspiration (ADAPT); stent_retriever = Thrombectomy: stent retriever; solumbra = Thrombectomy: Solumbra (aspiration + stent retriever); combined = Thrombectomy: combined procedure (two or more techniques); none = No thrombectomy: stent, angioplasty or intra-arterial lysis; diagnostic = Diagnostic angiography only |  |
 | Stent placed | `stenting` | End of the procedure | binary | 1 = yes, 0 = no | Carotid or intracranial stent during the procedure. |
 | Angioplasty (PTA) | `angioplasty` | End of the procedure | binary | 1 = yes, 0 = no |  |
 | Intra-arterial thrombolysis | `ia_lysis` | End of the procedure | binary | 1 = yes, 0 = no | Local intra-arterial lysis (LIAT, EKOS) or an intra-arterial thrombolytic. |
@@ -120,25 +120,26 @@ patient ID in `reports/data_quality.xlsx` (local only). NIHSS 43 (died) and 99 (
 
 ## Codings of the registry's values
 
-**Occlusion site**
+**Occlusion site** (a model category needs at least 10 analysed patients; smaller codes join
+their clinical parent, and a code with no modelled parent is not used by the models)
 
-| Registry value | MTOP value |
-|---|---|
-| `M1-ACM` | M1 |
-| `M2-ACM` | M2 |
-| `M3-ACM` | M3 |
-| `ACA` | ACA |
-| `ACI-Intracranial` | ICA |
-| `ACI+ACM` | tandem |
-| `ACI-odstup +T typ` | tandem |
-| `ACC+ACI+ACM` | tandem_cca |
-| `ACI-odstup` | cervical_ICA |
-| `ACC` | CCA |
-| `AB` | basilar |
-| `AB+AV` | basilar_vertebral |
-| `AV` | vertebral |
-| `ACP` | PCA |
-| `Rekanalizace` | missing |
+| Registry value | Detailed code | Model category |
+|---|---|---|
+| `M1-ACM` | M1 | `M1` |
+| `M2-ACM` | M2 | `M2` |
+| `M3-ACM` | M3 | `M2` |
+| `ACA` | ACA | not used by the models yet (needs 10 patients and its own model term) |
+| `ACI-Intracranial` | ICA | `ICA` |
+| `ACI+ACM` | tandem | `tandem` |
+| `ACI-odstup +T typ` | tandem | `tandem` |
+| `ACC+ACI+ACM` | tandem_cca | `tandem` |
+| `ACI-odstup` | cervical_ICA | `cervical_ICA` |
+| `ACC` | CCA | `cervical_ICA` |
+| `AB` | basilar | `basilar` |
+| `AB+AV` | basilar_vertebral | `basilar_vertebral` (below 10 patients: `basilar`) |
+| `AV` | vertebral | `other_posterior` |
+| `ACP` | PCA | `other_posterior` |
+| `Rekanalizace` | missing | missing |
 
 **Hemisphere**
 
@@ -152,22 +153,22 @@ patient ID in `reports/data_quality.xlsx` (local only). NIHSS 43 (died) and 99 (
 
 | Registry value | MTOP value |
 |---|---|
-| `ADAPT` | thrombectomy |
-| `Solumbra` | thrombectomy |
-| `MT-stent retriever` | thrombectomy |
-| `kombinovaný výkon` | thrombectomy |
-| `MT+stent` | thrombectomy; stent |
-| `mechanická extrakce+cPTA` | thrombectomy; angioplasty |
-| `cPTA` | no thrombectomy; angioplasty |
-| `PTA` | no thrombectomy; angioplasty |
-| `Stent` | no thrombectomy; stent |
-| `Stent+PTA` | no thrombectomy; stent; angioplasty |
-| `cPTA+stent` | no thrombectomy; stent; angioplasty |
-| `EKOS+stent` | no thrombectomy; stent; IA lysis |
-| `LIAT` | no thrombectomy; IA lysis |
-| `EKOS+LIAT` | no thrombectomy; IA lysis |
-| `cPTA+LIAT` | no thrombectomy; angioplasty; IA lysis |
-| `PAG` | diagnostic |
+| `ADAPT` | thrombectomy: aspiration (ADAPT) |
+| `Solumbra` | thrombectomy: Solumbra (aspiration + stent retriever) |
+| `MT-stent retriever` | thrombectomy: stent retriever |
+| `kombinovaný výkon` | thrombectomy: combined procedure (two or more techniques) |
+| `MT+stent` | thrombectomy: technique from the extraction system; + stent |
+| `mechanická extrakce+cPTA` | thrombectomy: technique from the extraction system; + angioplasty |
+| `cPTA` | no thrombectomy in the label (technique from the extraction system if a device is recorded); + angioplasty |
+| `PTA` | no thrombectomy in the label (technique from the extraction system if a device is recorded); + angioplasty |
+| `Stent` | no thrombectomy in the label (technique from the extraction system if a device is recorded); + stent |
+| `Stent+PTA` | no thrombectomy in the label (technique from the extraction system if a device is recorded); + stent; + angioplasty |
+| `cPTA+stent` | no thrombectomy in the label (technique from the extraction system if a device is recorded); + stent; + angioplasty |
+| `EKOS+stent` | no thrombectomy in the label (technique from the extraction system if a device is recorded); + stent; + intra-arterial lysis |
+| `LIAT` | no thrombectomy in the label (technique from the extraction system if a device is recorded); + intra-arterial lysis |
+| `EKOS+LIAT` | no thrombectomy in the label (technique from the extraction system if a device is recorded); + intra-arterial lysis |
+| `cPTA+LIAT` | no thrombectomy in the label (technique from the extraction system if a device is recorded); + angioplasty; + intra-arterial lysis |
+| `PAG` | diagnostic angiography only |
 
 **Extraction system**
 

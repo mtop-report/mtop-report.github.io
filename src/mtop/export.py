@@ -114,6 +114,12 @@ def export_all() -> None:
         cols = feature_columns(stage)
         if list(X_all.columns) != cols:
             raise ValueError(f"column mismatch for {stage}")
+        # no published coefficient or split may rest on a category of fewer than min_cell patients
+        floor = int(cfg["privacy"]["min_cell"])
+        sparse = [c for c in cols if "__" in c and 0 < int((X_all[c] == 1).sum()) < floor]
+        if sparse:
+            raise ValueError(f"{stage}: model categories with fewer than {floor} patients: {sparse}; give the code a "
+                             "parent (clean.OCCLUSION_PARENT) or mark the option `model: false` in config/features.yaml")
         c2f = column_to_feature(stage)
         bundle["models"][stage] = {}
         for target in targets():

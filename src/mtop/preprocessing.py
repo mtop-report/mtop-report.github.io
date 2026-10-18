@@ -13,7 +13,8 @@ import json
 import numpy as np
 import pandas as pd
 
-from .clean import (ANESTHESIA, ANTITHROMBOTIC, DEVICE, ETIOLOGY, HEART, HEART3, OCCLUSION, PROCEDURE, RANGES, SIDE, TICI)
+from .clean import (ANESTHESIA, ANTITHROMBOTIC, DEVICE, ETIOLOGY, HEART, HEART3, OCCLUSION, OCCLUSION_PARENT, POSTERIOR_DETAIL, PROCEDURE,
+                    PROCEDURE_TECHNIQUE, RANGES, SIDE, TICI)
 from .cohort import flow, split_temporal, splits, stage_cohort
 from .config import features, settings, stage_ids, stage_spec
 from .features import design_matrix
@@ -74,13 +75,24 @@ RAW_MAP = {
     "Anesthesia": (["anesthesia"], "predictor"),
 }
 
+def _procedure_coding() -> dict:
+    """Procedure label -> "technique+additions" (tokens translated by the front end). Technique:
+    the label's own technique (ADAPT, stent retriever, Solumbra, combined procedure); "device" = a
+    thrombectomy whose technique comes from the extraction system; "none" = no thrombectomy in the
+    label (the extraction system still decides when a device is recorded); "diagnostic" = PAG."""
+    out = {}
+    for k, f in PROCEDURE.items():
+        tech = PROCEDURE_TECHNIQUE.get(k) or ("diagnostic" if f[4] else "device" if f[0] else "none")
+        adds = [n for n, on in zip(("stent", "angioplasty", "ia_lysis"), f[1:4]) if on]
+        out[k] = "+".join([tech] + adds)
+    return out
+
+
 # how each coded column's values were mapped (registry value -> model category)
 CODINGS = {
     "Occlusion site": {k: (v or "missing") for k, v in OCCLUSION.items()},
     "Hemisphere": SIDE,
-    "Intervention procedure": {k: ("diagnostic" if f[4] else "thrombectomy" if f[0] else "no thrombectomy")
-                               + ("; stent" if f[1] else "") + ("; angioplasty" if f[2] else "") + ("; IA lysis" if f[3] else "")
-                               for k, f in PROCEDURE.items()},
+    "Intervention procedure": _procedure_coding(),
     "Extraction system": DEVICE,
     "Anti-thrombotics before": ANTITHROMBOTIC,
     "Heart condition": {k: HEART3[v] for k, v in HEART.items()},
@@ -136,7 +148,10 @@ def variable_map(clean: pd.DataFrame, raw_prof: dict | None) -> list[dict]:
     """Registry column -> MTOP variables, role, completeness and the coding of its values. For the
     occlusion site also the model category each detailed code is pooled into."""
     prof = {c["column"]: c for c in (raw_prof or {}).get("columns", [])}
-    occ_model = clean.dropna(subset=["occlusion_detail"]).groupby("occlusion_detail")["occlusion"].first().to_dict()
+    occ_model = {}      # detailed code -> model category (None: the models do not use the site yet)
+    for code, g in clean.dropna(subset=["occlusion_detail"]).groupby("occlusion_detail"):
+        cats = g["occlusion"].dropna().unique()
+        occ_model[str(code)] = str(cats[0]) if len(cats) else None
     used_at = {f.key: f.stage for f in features()}
     rows = []
     for col, (vars_, role) in RAW_MAP.items():
@@ -232,7 +247,7 @@ def outcome_availability(clean: pd.DataFrame, min_cell: int) -> dict:
         ("nihss24_known", "NIHSS at 24 h recorded", "NIHSS za 24 h zaznamenáno", lambda g: (g["nihss_24h_status"] == "assessed").astype(float)),
         ("nihss7_known", "NIHSS on day 7 recorded", "NIHSS 7. den zaznamenáno", lambda g: (g["nihss_7d_status"] == "assessed").astype(float)),
         ("tici2b3", "mTICI 2b–3", "mTICI 2b–3", lambda g: g["reperfusion_2b3"]),
-        ("posterior", "Posterior circulation", "Zadní povodí", lambda g: g["occlusion"].isin(["basilar", "other_posterior"]).astype(float).where(g["occlusion"].notna())),
+        ("posterior", "Posterior circulation", "Zadní povodí", lambda g: g["occlusion_detail"].isin(POSTERIOR_DETAIL).astype(float).where(g["occlusion_detail"].notna())),
         ("diagnostic", "Diagnostic angiography only", "Pouze diagnostická angiografie", lambda g: g["diagnostic_only"]),
     ]
     if len(mis) >= min_cell and len(obs) >= min_cell:
@@ -312,7 +327,7 @@ def build_preprocessing(clean: pd.DataFrame) -> dict:
         "cholesterol": cholesterol_table(base, min_cell),
         "eras": [e[2] for e in ERAS],
         "ranges": {k: [float(a), float(b)] for k, (a, b) in RANGES.items()},
-        "min_category": int(cfg["cohort"].get("min_category", 30)),
+        "min_category": int(cfg["cohort"].get("min_category", cfg["privacy"]["min_cell"])),
     }
     with open(PUBLIC / "preprocessing.json", "w", encoding="utf-8") as fh:
         json.dump(out, fh, ensure_ascii=False, separators=(",", ":"))
@@ -364,11 +379,49 @@ def data_dictionary_md() -> str:
     for col, (vars_, role) in RAW_MAP.items():
         L.append(f"| `{col}` | {role} | {', '.join(f'`{v}`' for v in vars_) or '–'} |")
     L += ["", "## Codings of the registry's values", ""]
+    occ_f = next(f for f in features() if f.key == "occlusion")
+    allowed = {o["value"] for o in occ_f.spec["options"] if o.get("model", True)}
+    cfg = settings()
+    min_n = int(cfg["cohort"].get("min_category", cfg["privacy"]["min_cell"]))
     for col, mp in CODINGS.items():
-        L += [f"**{col}**", "", "| Registry value | MTOP value |", "|---|---|"]
-        L += [f"| `{k}` | {v} |" for k, v in mp.items()]
+        if col == "Occlusion site":
+            L += [f"**{col}** (a model category needs at least {min_n} analysed patients; smaller codes join",
+                  "their clinical parent, and a code with no modelled parent is not used by the models)", "",
+                  "| Registry value | Detailed code | Model category |", "|---|---|---|"]
+            L += [f"| `{k}` | {v} | {_occ_rule(v, allowed, min_n)} |" for k, v in mp.items()]
+        elif col == "Intervention procedure":
+            L += [f"**{col}**", "", "| Registry value | MTOP value |", "|---|---|"]
+            L += [f"| `{k}` | {'; '.join(PROC_TOKEN_EN[t] for t in v.split('+'))} |" for k, v in mp.items()]
+        else:
+            L += [f"**{col}**", "", "| Registry value | MTOP value |", "|---|---|"]
+            L += [f"| `{k}` | {v} |" for k, v in mp.items()]
         L.append("")
     return "\n".join(L) + "\n"
+
+
+PROC_TOKEN_EN = {
+    "aspiration": "thrombectomy: aspiration (ADAPT)", "stent_retriever": "thrombectomy: stent retriever",
+    "solumbra": "thrombectomy: Solumbra (aspiration + stent retriever)",
+    "combined": "thrombectomy: combined procedure (two or more techniques)",
+    "device": "thrombectomy: technique from the extraction system",
+    "none": "no thrombectomy in the label (technique from the extraction system if a device is recorded)",
+    "diagnostic": "diagnostic angiography only", "stent": "+ stent", "angioplasty": "+ angioplasty",
+    "ia_lysis": "+ intra-arterial lysis",
+}
+
+
+def _occ_rule(code, allowed, min_n: int) -> str:
+    """Model category of a detailed occlusion code as the configuration defines it (counts decide
+    only whether a category with a parent is big enough to stand alone)."""
+    if code == "missing":
+        return "missing"
+    v = code
+    while v not in allowed and v in OCCLUSION_PARENT:
+        v = OCCLUSION_PARENT[v]
+    if v not in allowed:
+        return f"not used by the models yet (needs {min_n} patients and its own model term)"
+    below = f" (below {min_n} patients: `{OCCLUSION_PARENT[v]}`)" if v in OCCLUSION_PARENT else ""
+    return f"`{v}`{below}"
 
 
 def write_data_dictionary() -> None:

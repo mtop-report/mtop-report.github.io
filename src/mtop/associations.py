@@ -27,8 +27,9 @@ OCCLUSION_REF = "M1"
 OCCLUSIONS = [("ICA", "Intracranial ICA", "Intrakraniální ACI"),
               ("tandem", "Tandem (cervical ICA/CCA + intracranial)", "Tandem (krční ACI/ACC + intrakraniální)"),
               ("cervical_ICA", "Cervical ICA / CCA", "Krční ACI / ACC"),
-              ("M2", "MCA M2 or more distal", "ACM M2 nebo distálněji"),
+              ("M2", "MCA M2 / M3", "ACM M2 / M3"),
               ("basilar", "Basilar artery", "Arteria basilaris"),
+              ("basilar_vertebral", "Basilar + vertebral artery", "A. basilaris + AV"),
               ("other_posterior", "Vertebral / PCA", "AV / ACP")]
 
 # key, English, Czech, unit (EN, CZ), group, kind
@@ -48,7 +49,7 @@ TERMS = [
 ] + [(f"occ_{k}", en, cs, ("vs MCA M1", "vs ACM M1"), "stroke", "occ") for k, en, cs in OCCLUSIONS] + [
     ("otp_h", "Onset to groin puncture", "Od vzniku do punkce", ("per hour", "na hodinu"), "treatment", "num"),
     ("ivt", "IV thrombolysis", "IV trombolýza", None, "treatment", "bin"),
-    ("transfer", "Transferred (drip-and-ship)", "Překlad (drip-and-ship)", None, "treatment", "bin"),
+    ("transfer", "Transferred from another hospital", "Překlad z jiné nemocnice", None, "treatment", "bin"),
     ("general_anaesthesia", "General anaesthesia", "Celková anestezie", ("vs sedation or local", "vs analgosedace/lokální"), "treatment", "bin"),
     ("procedure30", "Procedure duration", "Délka výkonu", ("per 30 min", "na 30 min"), "treatment", "num"),
     ("reperfusion", "Successful reperfusion (mTICI 2b–3)", "Úspěšná reperfuze (mTICI 2b–3)", None, "treatment", "bin"),

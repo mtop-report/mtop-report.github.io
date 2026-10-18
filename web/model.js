@@ -301,6 +301,9 @@
       if (cat !== undefined) {
         const v = inputs[key];
         if (v === null || v === undefined || v === "") return NaN;
+        // an option without a model term yet (too few patients, e.g. ACA) is not used by the model
+        const o = f && f.options ? f.options.find((o2) => String(o2.value) === String(v)) : null;
+        if (o && o.model === false) return NaN;
         return v === cat ? 1 : 0;
       }
       if (f && f.type === "derived") return derivedValue(key, val);

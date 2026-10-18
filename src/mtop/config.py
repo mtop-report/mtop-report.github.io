@@ -19,10 +19,12 @@ class Feature:
 
     @property
     def columns(self) -> list[str]:
-        """Model columns produced by this predictor (one-hot for categoricals)."""
+        """Model columns produced by this predictor (one-hot for categoricals). An option marked
+        `model: false` is offered for entry but has no model term yet (too few patients)."""
         if self.type == "categorical":
             ref = self.spec.get("reference")
-            return [f"{self.key}__{o['value']}" for o in self.spec["options"] if o["value"] != ref]
+            return [f"{self.key}__{o['value']}" for o in self.spec["options"]
+                    if o["value"] != ref and o.get("model", True)]
         return [self.key]
 
 

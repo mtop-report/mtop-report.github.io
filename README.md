@@ -10,7 +10,7 @@ known at each point:
 | Stage | Adds |
 |---|---|
 | 1 · Before thrombectomy | the 33 pre-procedural predictors of the 2026 FNO analysis: age, sex, pre-stroke mRS, NIHSS, ASPECTS, occlusion site, side, IVT (and whether it was given elsewhere, onset to IVT, IVT to puncture), transfer, onset to puncture, onset hour (night), weekend, glucose (hyperglycaemia), systolic and diastolic BP (pulse pressure), BMI, hypertension, diabetes, hyperlipidaemia, arrhythmia, previous stroke and TIA, smoking, alcohol, statin, heart disease, antithrombotics |
-| 2 · End of procedure | final mTICI, technique (aspiration, stent retriever, combined, no thrombectomy, diagnostic angiography only), stenting, angioplasty, intra-arterial lysis, procedure duration, onset to recanalisation, anaesthesia |
+| 2 · End of procedure | final mTICI, technique (aspiration, stent retriever, Solumbra, combined procedure, no thrombectomy, diagnostic angiography only), stenting, angioplasty, intra-arterial lysis, procedure duration, onset to recanalisation, anaesthesia |
 | 3 · 24 hours | NIHSS at 24 h, its change, early neurological improvement, symptomatic and asymptomatic ICH |
 | 4 · Day 7 | NIHSS on day 7, cerebral oedema, decompressive craniectomy |
 
@@ -81,38 +81,38 @@ pre-specified rule chose for the calculator.
 
 | Stage | n (events) | Regression + splines | Linear regression | LightGBM | XGBoost | MLP | Best published score |
 |---|---|---|---|---|---|---|---|
-| 1 · Before thrombectomy | 226 (60) | **0.811 (0.74–0.87)** | 0.806 (0.74–0.86) | 0.787 (0.71–0.85) | 0.799 (0.73–0.86) | 0.769 (0.70–0.83) | bedside items as a regression 0.794 |
-| 2 · End of procedure | 221 (59) | **0.846 (0.79–0.90)** | 0.841 (0.78–0.89) | 0.843 (0.78–0.90) | 0.830 (0.77–0.88) | 0.816 (0.75–0.87) | FNO bedside score 0.776 |
-| 3 · 24 hours | 120 (36) | **0.878 (0.81–0.93)** | 0.875 (0.81–0.93) | 0.887 (0.82–0.94) | 0.896 (0.83–0.94) | 0.856 (0.79–0.92) | MR PREDICTS@24H 0.904 |
-| 4 · Day 7 | 139 (52) | **0.882 (0.83–0.93)** | 0.883 (0.83–0.93) | 0.915 (0.87–0.95) | 0.917 (0.87–0.96) | 0.827 (0.76–0.89) | NIHSS day 7 0.924 |
+| 1 · Before thrombectomy | 226 (60) | **0.809 (0.74–0.87)** | 0.803 (0.74–0.86) | 0.800 (0.73–0.86) | 0.797 (0.72–0.86) | 0.786 (0.72–0.85) | bedside items as a regression 0.794 |
+| 2 · End of procedure | 221 (59) | **0.842 (0.79–0.90)** | 0.838 (0.78–0.89) | 0.829 (0.77–0.88) | 0.815 (0.75–0.87) | 0.816 (0.75–0.88) | FNO bedside score 0.776 |
+| 3 · 24 hours | 120 (36) | **0.883 (0.82–0.94)** | 0.882 (0.82–0.94) | 0.890 (0.83–0.94) | 0.885 (0.82–0.94) | 0.889 (0.83–0.94) | MR PREDICTS@24H 0.904 |
+| 4 · Day 7 | 139 (52) | **0.884 (0.83–0.93)** | 0.885 (0.83–0.93) | 0.921 (0.88–0.96) | 0.922 (0.88–0.96) | 0.858 (0.80–0.91) | NIHSS day 7 0.924 |
 
 **Death within 90 days**
 
 | Stage | n (events) | Regression + splines | Linear regression | LightGBM | XGBoost | MLP | Best published score |
 |---|---|---|---|---|---|---|---|
-| 1 · Before thrombectomy | 226 (40) | **0.736 (0.64–0.83)** | 0.726 (0.63–0.82) | 0.746 (0.66–0.82) | 0.759 (0.67–0.84) | 0.716 (0.62–0.80) | bedside items as a regression 0.760 |
-| 2 · End of procedure | 221 (38) | 0.744 (0.65–0.83) | 0.733 (0.63–0.83) | 0.780 (0.69–0.86) | **0.781 (0.69–0.86)** | 0.742 (0.64–0.84) | FNO bedside score 0.686 |
-| 3 · 24 hours | 120 (13) | **0.862 (0.73–0.95)** | 0.856 (0.72–0.95) | 0.858 (0.71–0.96) | 0.855 (0.70–0.96) | 0.856 (0.72–0.95) | MR PREDICTS@24H 0.849 |
-| 4 · Day 7 | 139 (6) | **0.799 (0.56–0.98)** | 0.816 (0.55–0.98) | 0.857 (0.68–0.98) | 0.847 (0.68–0.97) | 0.813 (0.62–0.97) | NIHSS day 7 0.856 |
+| 1 · Before thrombectomy | 226 (40) | **0.734 (0.64–0.82)** | 0.726 (0.63–0.82) | 0.748 (0.66–0.83) | 0.761 (0.67–0.84) | 0.733 (0.64–0.82) | bedside items as a regression 0.760 |
+| 2 · End of procedure | 221 (38) | **0.746 (0.65–0.83)** | 0.737 (0.64–0.83) | 0.777 (0.69–0.86) | 0.778 (0.69–0.86) | 0.742 (0.65–0.83) | FNO bedside score 0.686 |
+| 3 · 24 hours | 120 (13) | **0.859 (0.73–0.95)** | 0.853 (0.71–0.95) | 0.860 (0.70–0.96) | 0.855 (0.70–0.96) | 0.852 (0.71–0.96) | MR PREDICTS@24H 0.849 |
+| 4 · Day 7 | 139 (6) | **0.805 (0.57–0.98)** | 0.817 (0.55–0.98) | 0.837 (0.65–0.98) | 0.852 (0.68–0.97) | 0.812 (0.64–0.96) | NIHSS day 7 0.856 |
 
 The rule (from the 2026 analysis): regression with splines is the reference, and another model
 replaces it only if its paired 95% CI of the AUROC difference on the temporal test lies above zero,
 or in nested cross-validation (5 folds × 3 repeats on all years, admission stage) it gains ≥ 0.01
 AUROC on average and is better in ≥ 80% of folds, without worse calibration-in-the-large. Nested
-cross-validation, mRS 0–2 before thrombectomy: splines 0.763, linear 0.758, LightGBM 0.754,
-XGBoost 0.755, MLP 0.756. The test years are few (60 good outcomes, 6 deaths by day 7), so the
+cross-validation, mRS 0–2 before thrombectomy: splines 0.762, linear 0.758, LightGBM 0.756,
+XGBoost 0.756, MLP 0.758. The test years are few (60 good outcomes, 6 deaths by day 7), so the
 sensitivity split (development 2005–2020, test 2021–2025: 379 patients, 110 good outcomes) is also
-reported; there the tree models lead at the later stages (day 7, mRS 0–2: LightGBM 0.913 vs
-splines 0.808), which the Validation tab shows next to the primary split.
+reported; there the tree models lead at the later stages (day 7, mRS 0–2: LightGBM 0.917 vs
+splines 0.813), which the Validation tab shows next to the primary split.
 
 Calibration: the development models over-predicted good outcomes in 2023–2025 (regression with
-splines before thrombectomy: calibration intercept −0.40, slope 1.51, O/E 0.79). The published
+splines before thrombectomy: calibration intercept −0.41, slope 1.47, O/E 0.78). The published
 models are refitted on all years and their intercepts re-estimated on the pooled years 2023–2025.
 
 **Keeping the model up to date** (regression with splines, before thrombectomy, mRS 0–2, test years
 2018–2025, models trained only on earlier years): a model frozen in 2015 had calibration-in-the-large
-−0.41 and AUROC 0.730; refitting on all earlier years and re-estimating the intercept on the last
-years gave −0.04 and 0.770. Every learner is compared on the Adaptive tab.
+−0.42 and AUROC 0.718; refitting on all earlier years and re-estimating the intercept on the last
+years gave −0.03 and 0.769. Every learner is compared on the Adaptive tab.
 
 `python -m mtop report` writes the full tables to `reports/validation_report.md` (local only).
 
@@ -128,7 +128,14 @@ years gave −0.04 and 0.770. Every learner is compared on the Adaptive tab.
    because doing so would leak the outcome. Impossible time orders (IVT after puncture,
    recanalisation before puncture) set that time to missing and keep the patient. Codings the
    export does not document are marked "our reading" on the Registry page, to be confirmed with
-   the registry team.
+   the registry team. Occlusion site: tandem (ACI+ACM, ACI-odstup +T typ, ACC+ACI+ACM) is its own
+   category, apart from cervical ICA/CCA (ACI-odstup, ACC) and intracranial ICA; every recorded
+   value keeps its own detailed code, and a site needs at least 10 patients for its own model term
+   (M3 counts with M2; the ACA, too rare and part of no modelled group, is not used by the models
+   yet and gets no calculator estimate). Procedure: Solumbra (aspiration + stent retriever) and the
+   combined procedure ("kombinovaný výkon", two or more techniques) are separate categories; any
+   PENUMBRA + stent retriever device means Solumbra. Procedure labels that disagree with the
+   extraction device, stent or IAT columns are listed for review.
 2. **Cohort.** 1,577 registry records → 1,572 adults → 1,451 with a known 90-day mRS, whatever the
    procedure (88 diagnostic angiographies only). The end-of-procedure stage needs the final mTICI,
    the 24-h stage a 24-h NIHSS score and the day-7 stage a day-7 NIHSS score.
@@ -162,10 +169,21 @@ python -m mtop fed-demo                          # the four-centre demonstration
 
 How it works, what leaves a hospital, its limits and how a centre joins: [docs/federated.md](docs/federated.md).
 
+## Local data studio (FNO only)
+
+`python -m mtop studio` opens the registry at every stage of the cleaning on the analysis computer:
+the export as recorded, the cleaned registry, the analysed patients and the model inputs of each
+stage. Column names are in English or Czech. Every value the cleaning set to missing, repaired or
+flagged for review is marked in place, and any value can be corrected (apply the suggestion, type
+the right value, or confirm it is correct). Corrections go to a corrections file with the author,
+time and reason and are applied at the next cleaning; the Excel file is never overwritten. It is
+password-protected, listens on this computer only and is not part of the public app. See
+[docs/studio.md](docs/studio.md).
+
 ## Data protection
 
-- Patient-level files never enter git: `data/raw/`, `data/processed/`, `artifacts/private/` and
-  `reports/` are ignored, and CI fails if a tracked file could contain patient data
+- Patient-level files never enter git: `data/raw/`, `data/processed/`, `data/studio/`,
+  `artifacts/private/` and `reports/` are ignored, and CI fails if a tracked file could contain patient data
   (`scripts/check_no_patient_data.sh`).
 - Only `artifacts/public/` is published: tree structure and leaf values (every leaf ≥ 20
   patients), aggregate statistics with small groups suppressed, and validation summaries.
@@ -195,12 +213,13 @@ open site/index.html          # the app; works offline from the file
 python -m mtop all --input data/synthetic/registry_synthetic.xlsx --quick
 ```
 
-Individual steps: `python -m mtop clean | nested | train [--split primary|sensitivity] | deploy | export | extras | adaptive | fed-demo | explorer | preprocessing | reporting | associations | report | site | synth`.
+Individual steps: `python -m mtop clean | nested | train [--split primary|sensitivity] | deploy | export | extras | adaptive | fed-demo | explorer | preprocessing | reporting | associations | report | site | synth | studio`.
 
 ## Updating with new patients
 
 1. Add rows to the master Excel file and put it in `data/raw/`.
-2. `python -m mtop all`, then read `reports/data_quality.xlsx` and fix the source where needed.
+2. `python -m mtop studio` to review the findings and record corrections (or read
+   `reports/data_quality.xlsx`), then `python -m mtop all`.
 3. Check `reports/validation_report.md`, then commit `artifacts/public/` and push. GitHub Actions
    re-runs the tests and redeploys the app.
 
@@ -208,9 +227,9 @@ Individual steps: `python -m mtop clean | nested | train [--split primary|sensit
 
 ```
 config/            features.yaml (predictors, stages, UI labels EN/CZ), settings.yaml, federated.yaml
-src/mtop/          clean · cohort · features · learners · lgbm · tuning · lr · splines · treejson · train · nested ·
-                   metrics · scores · export · extras · adaptive · explorer · preprocessing · reporting ·
-                   associations · report · site · synth · cli
+src/mtop/          clean · corrections · cohort · features · learners · lgbm · tuning · lr · splines · treejson · train ·
+                   nested · metrics · scores · export · extras · adaptive · explorer · preprocessing · reporting ·
+                   associations · report · site · synth · studio · studio_app · studio_data · cli
 src/mtop/fed/      federated network: schema · bins · secagg · gbdt · logreg · site · coordinator · server · client · demo
 web/               index.html template, styles.css, app.js + view_*.js, charts.js, model.js (all models + explanations),
                    models_extra.js (comparators, mRS layer), metrics.js (in-browser validation), i18n.js,
@@ -219,7 +238,7 @@ scripts/           check_no_patient_data.sh (CI guard), make_brand.py (regenerat
 artifacts/public/  published model bundle, validation and explorer aggregates (committed)
 data/synthetic/    synthetic registry for CI and demos (committed)
 tests/             cleaning rules, JS↔Python parity for every model, privacy rules, federated network, end-to-end synthetic run
-docs/              model card (TRIPOD+AI), data dictionary, federated network
+docs/              model card (TRIPOD+AI), data dictionary, federated network, local data studio
 .github/workflows/ ci.yml (tests), pages.yml (build and deploy the app)
 ```
 
@@ -234,6 +253,9 @@ docs/              model card (TRIPOD+AI), data dictionary, federated network
 - With 33 predictors before the procedure, the development data fall short of the Riley sample-size
   criteria for the regression (Standards tab); the models are penalised and validated on later
   years for that reason.
+- Procedure labels and the device, stent and IAT columns disagree in several dozen records (for
+  example "ADAPT" with a stent retriever as the device, or a thrombectomy label with the extraction
+  system "žádný"). The label is kept, and the records are listed for review in the data studio.
 
 ## Citation and licence
 

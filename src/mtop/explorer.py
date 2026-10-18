@@ -14,6 +14,7 @@ import json
 import numpy as np
 import pandas as pd
 
+from .clean import POSTERIOR_DETAIL, POSTERIOR_OCCLUSIONS
 from .cohort import flow, split_temporal
 from .config import settings
 from .paths import PUBLIC
@@ -95,17 +96,18 @@ LABELS = {
                    "2b": ("2b", "2b"), "3": ("3", "3")},
     "occlusion": {"ICA": ("Intracranial ICA", "Intrakraniální ACI"), "tandem": ("Tandem (cervical ICA/CCA + intracranial)", "Tandem (krční ACI/ACC + intrakraniální)"),
                   "cervical_ICA": ("Cervical ICA / CCA", "Krční ACI / ACC"), "M1": ("MCA M1", "ACM M1"),
-                  "M2": ("MCA M2 or more distal", "ACM M2 nebo distálněji"),
-                  "basilar": ("Basilar", "Basilaris"), "other_posterior": ("Vertebral / PCA", "AV / ACP")},
+                  "M2": ("MCA M2 / M3", "ACM M2 / M3"),
+                  "basilar": ("Basilar", "Basilaris"), "basilar_vertebral": ("Basilar + vertebral", "Basilaris + AV"),
+                  "other_posterior": ("Vertebral / PCA", "AV / ACP")},
     "technique": {"aspiration": ("Thrombectomy: aspiration (ADAPT)", "Trombektomie: aspirace (ADAPT)"),
                   "stent_retriever": ("Thrombectomy: stent retriever", "Trombektomie: stentriever"),
-                  "solumbra": ("Thrombectomy: Solumbra", "Trombektomie: Solumbra"),
-                  "combined": ("Combined procedure (2+ techniques)", "Kombinovaný výkon (2+ techniky)"),
+                  "solumbra": ("Thrombectomy: Solumbra (aspiration + stent retriever)", "Trombektomie: Solumbra (aspirace + stentriever)"),
+                  "combined": ("Thrombectomy: combined procedure (2+ techniques)", "Trombektomie: kombinovaný výkon (2+ techniky)"),
                   "none": ("No thrombectomy: stent, PTA or IA lysis", "Bez trombektomie: stent, PTA nebo IA lýza"),
                   "diagnostic": ("Diagnostic angiography only", "Pouze diagnostická angiografie")},
     "anesthesia": {"general": ("General", "Celková"), "sedation": ("Conscious sedation", "Analgosedace"), "local": ("Local only", "Lokální")},
     "ivt": {"yes": ("IVT", "IVT"), "no": ("No IVT", "Bez IVT")},
-    "transfer": {"direct": ("Direct to FNO", "Přímo do FNO"), "transfer": ("Drip-and-ship", "Drip-and-ship")},
+    "transfer": {"direct": ("Direct to FNO", "Přímo do FNO"), "transfer": ("Transferred from another hospital", "Překlad z jiné nemocnice")},
     "sex": {"male": ("Men", "Muži"), "female": ("Women", "Ženy")},
     "sich": {"no": ("No sICH", "Bez sICH"), "yes": ("sICH", "sICH")},
     "mrs_pre_group": {"0": ("0 · no symptoms", "0 · bez příznaků"), "1": ("1", "1"), "2": ("2", "2"), "≥3": ("≥3", "≥3")},
@@ -127,7 +129,7 @@ def _derive(d: pd.DataFrame) -> pd.DataFrame:
     d["era"] = pd.cut(d["year"], [0, 2012, 2015, 2019, 2022, 3000], labels=["2005–2012", "2013–2015", "2016–2019", "2020–2022", "2023–2025"])
     d["age_group"] = pd.cut(d["age"], [0, 59.999, 69.999, 79.999, 200], labels=["<60", "60–69", "70–79", "≥80"])
     d["nihss_group"] = pd.cut(d["nihss_adm"], [-1, 9, 15, 20, 99], labels=["0–9", "10–15", "16–20", "≥21"])
-    anterior = ~d["occlusion"].isin(["basilar", "other_posterior"])
+    anterior = ~d["occlusion"].isin(POSTERIOR_OCCLUSIONS)
     d["aspects_group"] = pd.cut(d["aspects"].where((d["year"] >= 2016) & anterior), [-1, 5, 7, 10], labels=["0–5", "6–7", "8–10"])
     d["otp_group"] = pd.cut(d["onset_to_puncture"], [0, 150, 240, 360, 720, 1e9],
                             labels=["≤150 min", "151–240", "241–360", "361–720", ">720"])
@@ -245,7 +247,7 @@ def _table1(base: pd.DataFrame, min_cell: int) -> dict:
     """Table 1 with standardised mean differences (SMD): development (2005-2022) vs validation
     (2023-2025) patients, and mRS 0-2 vs 3-6 (the earlier pipeline's baseline-by-outcome table).
     |SMD| > 0.1 is the usual mark of a relevant difference."""
-    base = base.assign(aspects_anterior=base["aspects"].where(~base["occlusion"].isin(["basilar", "other_posterior"])))
+    base = base.assign(aspects_anterior=base["aspects"].where(~base["occlusion"].isin(POSTERIOR_OCCLUSIONS)))
     dev, test = split_temporal(base)
     good, poor = base[base["good_outcome"] == 1], base[base["good_outcome"] == 0]
     groups = {"all": base, "dev": dev, "test": test, "good": good, "poor": poor}
@@ -279,7 +281,7 @@ def _table1(base: pd.DataFrame, min_cell: int) -> dict:
         {"section": {"en": "The stroke", "cs": "CMP"}},
         cont("nihss", "NIHSS on admission", "NIHSS při přijetí", "nihss_adm"),
         cont("aspects", "ASPECTS (anterior circulation)", "ASPECTS (přední povodí)", "aspects_anterior"),
-        prop("posterior", "Posterior circulation", "Zadní povodí", lambda g: g["occlusion"].isin(["basilar", "other_posterior"]).astype(float).where(g["occlusion"].notna())),
+        prop("posterior", "Posterior circulation", "Zadní povodí", lambda g: g["occlusion_detail"].isin(POSTERIOR_DETAIL).astype(float).where(g["occlusion_detail"].notna())),
         prop("ica", "Intracranial ICA occlusion", "Uzávěr intrakraniální ACI", cat("occlusion", "ICA")),
         prop("tandem", "Tandem occlusion", "Tandemový uzávěr", cat("occlusion", "tandem")),
         {"section": {"en": "History and medication", "cs": "Anamnéza a medikace"}},
@@ -303,7 +305,7 @@ def _table1(base: pd.DataFrame, min_cell: int) -> dict:
         {"section": {"en": "Pathway", "cs": "Cesta pacienta"}},
         prop("ivt", "IV thrombolysis", "IV trombolýza", yn("ivt")),
         prop("ivt_external", "IV thrombolysis in another hospital", "IV trombolýza v jiné nemocnici", yn("ivt_external")),
-        prop("transfer", "Transferred (drip-and-ship)", "Překlad (drip-and-ship)", yn("transfer")),
+        prop("transfer", "Transferred from another hospital", "Překlad z jiné nemocnice", yn("transfer")),
         cont("otp", "Onset to puncture, min", "Od vzniku do punkce, min", "onset_to_puncture"),
         prop("night", "Onset at night (22–6 h)", "Vznik v noci (22–6 h)", lambda g: ((g["onset_hour"] >= 22) | (g["onset_hour"] < 6)).astype(float).where(g["onset_hour"].notna())),
         prop("weekend", "Onset at the weekend", "Vznik o víkendu", yn("weekend")),

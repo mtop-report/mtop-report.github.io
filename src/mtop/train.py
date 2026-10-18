@@ -36,6 +36,7 @@ import pandas as pd
 
 from . import learners as Lr
 from . import metrics as M
+from .clean import POSTERIOR_DETAIL, POSTERIOR_OCCLUSIONS
 from .cohort import split_temporal, splits, stage_cohort
 from .config import settings, stage_ids, targets
 from .features import column_to_feature, design_matrix, monotone_vector
@@ -71,11 +72,17 @@ def threshold_table(y, p, min_cell: int) -> list[dict]:
     return rows
 
 
+def _occ_detail(d: pd.DataFrame) -> pd.Series:
+    """Detailed occlusion code (circulation of sites the models do not use, e.g. ACA, stays known)."""
+    return d["occlusion_detail"] if "occlusion_detail" in d else d["occlusion"]
+
+
 SUBGROUPS = [
-    ("circulation", lambda d: np.where(d["occlusion"].isin(["basilar", "other_posterior"]), "posterior",
-                                       np.where(d["occlusion"].notna(), "anterior", None))),
+    ("circulation", lambda d: np.where(_occ_detail(d).isin(POSTERIOR_DETAIL + POSTERIOR_OCCLUSIONS), "posterior",
+                                       np.where(_occ_detail(d).notna(), "anterior", None))),
     ("occlusion", lambda d: d["occlusion"].map({"M1": "M1", "ICA": "ICA", "tandem": "tandem", "cervical_ICA": "cervical_ICA",
-                                                "M2": "M2", "basilar": "posterior", "other_posterior": "posterior"})),
+                                                "M2": "M2", "basilar": "posterior", "basilar_vertebral": "posterior",
+                                                "other_posterior": "posterior"})),
     ("age", lambda d: np.where(d["age"] >= 80, "80+", np.where(d["age"].notna(), "<80", None))),
     ("sex", lambda d: d["sex_male"].map({1.0: "men", 0.0: "women"})),
     ("ivt", lambda d: d["ivt"].map({1.0: "ivt", 0.0: "no_ivt"})),

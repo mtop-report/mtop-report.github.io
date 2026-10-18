@@ -28,7 +28,9 @@ is still to do, is on the app's **Standards** tab. Numbers come from `artifacts/
   tab, items 8a–8c). Missing in 7.7 % of adults overall and 21.5 % in 2023–2025; complete-case,
   with an analysis of who lacks it on the Registry page.
 - Cleaning: range checks, logged numeric conversion, onset-year repair from neighbouring IDs and
-  cross-field checks; flagged values are kept and listed for review at FNO. NIHSS 43 (died) and 99
+  cross-field checks (including the procedure label against the extraction device, stent and IAT
+  columns); flagged values are kept and listed for review at FNO, where the local data studio
+  ([studio.md](studio.md)) shows them in every version of the data and records corrections. NIHSS 43 (died) and 99
   (not assessable) are status codes, never scores. The full data report (flow, checks, codings,
   missing data, Table 1) is on the Registry page; the dictionary is in [data_dictionary.md](data_dictionary.md).
 
@@ -36,12 +38,16 @@ is still to do, is on the app's **Standards** tab. Numbers come from `artifacts/
 
 49 inputs in `config/features.yaml`: the 33 pre-procedural predictors of the 2026 FNO analysis
 (including derived night onset, IVT-to-puncture time, pulse pressure and hyperglycaemia); at the
-end of the procedure mTICI, technique (aspiration, stent retriever, combined, no thrombectomy,
-diagnostic only), stenting, angioplasty, intra-arterial lysis, procedure duration, onset to
-recanalisation and anaesthesia; at 24 hours NIHSS, its change, early neurological improvement and
+end of the procedure mTICI, technique (aspiration, stent retriever, Solumbra, combined procedure,
+no thrombectomy, diagnostic only), stenting, angioplasty, intra-arterial lysis, procedure duration,
+onset to recanalisation and anaesthesia; at 24 hours NIHSS, its change, early neurological improvement and
 haemorrhage; on day 7 NIHSS, oedema and decompressive craniectomy. Not used: thrombolytic agent
 (the IVT variables carry it), cholesterol (missingness tied to outcome) and aetiology (known only
-after the decisions the model supports).
+after the decisions the model supports). Occlusion site in the models: intracranial ICA, tandem
+(cervical ICA/CCA lesion + intracranial occlusion), cervical ICA/CCA, MCA M1, MCA M2/M3, basilar,
+basilar + vertebral, vertebral/PCA. Each detailed registry code is kept; a site needs at least 10
+patients for its own term, so the ACA (fewer) is not used by the models yet and the calculator
+gives no estimate for it.
 
 ## 4. Missing data
 
@@ -60,8 +66,8 @@ apply (onset to IVT without IVT) stay missing, as in the registry.
   candidate's paired 95 % CI of the AUROC difference on the temporal test lies above zero, or in
   nested cross-validation it gains ≥ 0.01 AUROC on average and is better in ≥ 80 % of folds, in
   both cases with calibration-in-the-large at most 0.05 worse. Chosen: regression with splines for
-  every stage and outcome except death at the end of the procedure (XGBoost).
-- Sample size: with 33 pre-procedural predictors (88 regression parameters) the development data
+  every stage and outcome.
+- Sample size: with 33 pre-procedural predictors (92 regression parameters) the development data
   fall short of the Riley criteria (Standards tab); estimation is penalised (L2) and the expected
   shrinkage is reported.
 
@@ -73,7 +79,7 @@ apply (onset to IVT without IVT) stay missing, as in the registry.
 - Measures: AUROC, Brier, calibration intercept and slope, O/E, ICI, decision curves, thresholds,
   subgroups (with bootstrap CIs), recalibration on newer patients; 2,000 bootstrap resamples.
 - Results: README and the Validation tab. Before thrombectomy, mRS 0–2: regression with splines
-  AUROC 0.811 (0.745–0.869); development model calibration intercept −0.40, slope 1.51.
+  AUROC 0.809 (0.743–0.867); development model calibration intercept −0.41, slope 1.47.
 
 ## 7. Deployed models
 

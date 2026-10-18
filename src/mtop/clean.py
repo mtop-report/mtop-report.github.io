@@ -57,24 +57,53 @@ OCCLUSION_DETAIL = {
     "AB": "basilar", "AB+AV": "basilar_vertebral", "AV": "vertebral", "ACP": "PCA",
     "Rekanalizace": None,  # already recanalised at angiography: no occlusion to classify
 }
-# The models need enough patients per category (estimable effects, and no coefficient that describes
-# fewer than privacy.min_cell patients): a detailed category with fewer than cohort.min_category
-# patients is pooled into its clinical parent until it reaches that size.
-OCCLUSION_PARENT = {"M3": "M2", "ACA": "M2", "tandem_cca": "tandem", "CCA": "cervical_ICA",
+# Model categories are the occlusion options in config/features.yaml. Each needs enough patients for an
+# estimable effect, and no published coefficient may describe fewer than privacy.min_cell patients, so a
+# detailed code that is not a model category, or whose category has fewer than cohort.min_category
+# patients, goes to its clinical parent: M3 to MCA M2/M3 (same artery), ACC+ACI+ACM to tandem, CCA to
+# cervical ICA/CCA, AB+AV to basilar (only while it is too small to stand alone), vertebral and PCA to
+# vertebral/PCA. The ACA has no parent: it is not a branch of any modelled artery, so until it has
+# enough patients for its own estimate the models do not use the site (missing) and the calculator
+# gives no estimate for ACA occlusions.
+OCCLUSION_PARENT = {"M3": "M2", "tandem_cca": "tandem", "CCA": "cervical_ICA",
                     "basilar_vertebral": "basilar", "vertebral": "other_posterior", "PCA": "other_posterior"}
 OCCLUSION = dict(OCCLUSION_DETAIL)      # raw value -> detailed code (pooled for the models in clean_registry)
+POSTERIOR_DETAIL = ("basilar", "basilar_vertebral", "vertebral", "PCA")
+ANTERIOR_DETAIL = ("M1", "M2", "M3", "ACA", "ICA", "tandem", "tandem_cca", "cervical_ICA", "CCA")
 
 
-def pool_occlusion(detail: pd.Series, counts: pd.Series, min_n: int, allowed) -> pd.Series:
-    """Model category for each detailed occlusion code: rare codes go to their parent (repeatedly)
-    until the category has >= min_n patients and is one of the model's options (`allowed`)."""
-    def group(v):
-        if _null(v):
-            return None
-        while (counts.get(v, 0) < min_n or v not in allowed) and v in OCCLUSION_PARENT:
-            v = OCCLUSION_PARENT[v]
-        return v
-    return detail.map(group)
+def occlusion_model_map(counts, min_n: int, allowed) -> dict:
+    """Detailed occlusion code -> model category, or None when the models do not use the site.
+
+    Codes move to their parent (repeatedly) while their current category is not a model category or
+    holds fewer than `min_n` patients (pooled over every code in it). A code that ends in no model
+    category (the ACA: no parent among the modelled sites) is not used by the models. A model
+    category without a parent stays even when small; export refuses to publish a model in which a
+    category describes fewer than privacy.min_cell patients."""
+    counts = {k: int(v) for k, v in dict(counts).items()}
+    codes = set(counts) | {v for v in OCCLUSION_DETAIL.values() if v} | set(OCCLUSION_PARENT)
+    m = {c: c for c in codes}
+
+    def size():
+        s = {}
+        for code, cat in m.items():
+            s[cat] = s.get(cat, 0) + counts.get(code, 0)
+        return s
+
+    while True:
+        s = size()
+        moved = {code: OCCLUSION_PARENT[cat] for code, cat in m.items()
+                 if (cat not in allowed or s.get(cat, 0) < min_n) and cat in OCCLUSION_PARENT}
+        if not moved:
+            break
+        m.update(moved)
+    return {code: (cat if cat in allowed else None) for code, cat in m.items()}
+
+
+def pool_occlusion(detail: pd.Series, counts, min_n: int, allowed) -> pd.Series:
+    """Model category for each detailed occlusion code (see occlusion_model_map); None = not used."""
+    m = occlusion_model_map(counts, min_n, allowed)
+    return pd.Series([None if _null(v) else m.get(v) for v in detail], index=detail.index, dtype=object)
 
 
 SIDE = {"levá hemisféra": "left", "pravá hemisféra": "right", "zadní povodí": "posterior"}
@@ -334,8 +363,41 @@ def _nihss_followup(raw: pd.Series, name: str, ids: pd.Series, log: IssueLog):
     return score, status
 
 
-POSTERIOR_OCCLUSIONS = ("basilar", "other_posterior")
+POSTERIOR_OCCLUSIONS = ("basilar", "basilar_vertebral", "other_posterior")   # model categories
 ANTERIOR_OCCLUSIONS = ("M1", "M2", "ICA", "tandem", "cervical_ICA")
+
+
+THROMBECTOMY_DEVICES = ("aspiration", "stent_retriever", "solumbra")
+
+
+def procedure_flags(c, proc, explicit, device, stent_raw, ids, log: IssueLog) -> None:
+    """Procedure label against the extraction system, stent and IAT columns. Only the technique of a
+    thrombectomy label without a device becomes missing (it already was); everything else is a
+    review flag and the coded values stay as they are."""
+    def flag(mask, column, raw_fn, text, note_fn):
+        for idx in c.index[mask.fillna(False)]:
+            log.add(ids.at[idx], column, raw_fn(idx), text, None, note_fn(idx))
+
+    dev_raw = c["device_raw"]
+    no_dev = device.isna() | (device == "none")
+    label = lambda i: proc.at[i]                                          # noqa: E731
+    dev_note = lambda i: f"extraction system: {dev_raw.at[i] or '(empty)'}"  # noqa: E731
+    flag((c["mt_label"] == 1) & explicit.isna() & no_dev, "procedure", label,
+         "technique unknown: thrombectomy label without an extraction device -> missing", dev_note)
+    flag((c["mt_label"] == 1) & explicit.notna() & (device == "none"), "procedure", label,
+         "flag only: thrombectomy procedure (ADAPT, stent retriever, Solumbra or combined), but the extraction "
+         "system is 'žádný' (none)", dev_note)
+    flag((c["mt_label"] == 0) & device.isin(THROMBECTOMY_DEVICES), "procedure", label,
+         "flag only: no thrombectomy in the procedure label, but a thrombectomy device is recorded "
+         "(technique taken from the device)", dev_note)
+    mismatch = ((explicit == "aspiration") & device.isin(["stent_retriever", "solumbra"])) | \
+               ((explicit == "stent_retriever") & device.isin(["aspiration", "solumbra"]))
+    flag(mismatch, "procedure", label,
+         "flag only: the technique in the procedure label differs from the extraction device (label kept)", dev_note)
+    flag((c["stent_proc"] == 1) & (stent_raw == "žádný"), "stenting", label,
+         "flag only: stent in the procedure label, but 'Stent combo' is 'žádný' (none)", lambda i: "Stent combo: žádný")
+    flag((c["ia_lysis_proc"] == 1) & (c["iat"] == 0), "ia_lysis", label,
+         "flag only: intra-arterial lysis in the procedure label, but IAT = NE", lambda i: "IAT: NE")
 
 
 def consistency_flags(c: pd.DataFrame, ids: pd.Series, log: IssueLog) -> None:
@@ -353,11 +415,13 @@ def consistency_flags(c: pd.DataFrame, ids: pd.Series, log: IssueLog) -> None:
          "IVT = no, but an onset-to-IVT time is recorded", lambda i: f"{c.at[i, 'onset_to_ivt']:g} min")
     flag((c["ivt"] == 0) & c["agent"].isin(["alteplase", "tenecteplase"]) & (c["ia_lysis"] != 1), "ivt", lambda i: "NE",
          "IVT = no and no intra-arterial lysis, but a thrombolytic is recorded", lambda i: str(c.at[i, "agent"]))
-    flag((c["occlusion"] == "basilar") & c["side"].isin(["left", "right"]), "side", lambda i: c.at[i, "side"],
+    # site checks use the detailed codes, so they do not depend on how the models pool them
+    occ = c["occlusion_detail"]
+    flag(occ.isin(["basilar", "basilar_vertebral"]) & c["side"].isin(["left", "right"]), "side", lambda i: c.at[i, "side"],
          "basilar occlusion recorded with a lateral hemisphere")
-    flag(c["occlusion"].isin(ANTERIOR_OCCLUSIONS) & (c["side"] == "posterior"), "side", lambda i: "posterior",
+    flag(occ.isin(ANTERIOR_DETAIL) & (c["side"] == "posterior"), "side", lambda i: "posterior",
          "anterior-circulation occlusion recorded as posterior circulation", lambda i: f"occlusion {c.at[i, 'occlusion_raw']}")
-    flag(c["occlusion"].isin(POSTERIOR_OCCLUSIONS) & (c["aspects"] < 10), "aspects", lambda i: c.at[i, "aspects"],
+    flag(occ.isin(POSTERIOR_DETAIL) & (c["aspects"] < 10), "aspects", lambda i: c.at[i, "aspects"],
          "ASPECTS below 10 in a posterior-circulation stroke (check whether pc-ASPECTS was entered)",
          lambda i: f"occlusion {c.at[i, 'occlusion_raw']}")
     late = (c["onset_to_recan"] - c["onset_to_puncture"]) - c["procedure_min"]
@@ -402,6 +466,18 @@ CHECK_GROUPS = [
      "Rekanalizace zapsaná více než 30 min po konci výkonu"),
     ("flag only: coded as died", "flag", "Coded as died by day 7 (NIHSS 43), but 90-day mRS is not 6",
      "Kódováno jako úmrtí do 7. dne (NIHSS 43), ale mRS za 90 dní není 6"),
+    ("technique unknown: thrombectomy label", "missing", "Thrombectomy in the procedure label but no extraction device: technique missing",
+     "Trombektomie v označení výkonu, ale bez extrakčního systému: technika chybí"),
+    ("flag only: thrombectomy procedure (", "flag", "Thrombectomy procedure (ADAPT, stent retriever, Solumbra or combined), but the extraction system is 'none'",
+     "Trombektomie (ADAPT, stentriever, Solumbra nebo kombinovaný výkon), ale extrakční systém je „žádný“"),
+    ("flag only: no thrombectomy in the procedure label", "flag", "No thrombectomy in the procedure label, but a thrombectomy device is recorded",
+     "Bez trombektomie v označení výkonu, ale je uveden extrakční systém"),
+    ("flag only: the technique in the procedure label", "flag", "Technique in the procedure label differs from the extraction device",
+     "Technika v označení výkonu se liší od extrakčního systému"),
+    ("flag only: stent in the procedure label", "flag", "Stent in the procedure label, but the stent column says none",
+     "Stent v označení výkonu, ale sloupec stentu uvádí „žádný“"),
+    ("flag only: intra-arterial lysis in the procedure label", "flag", "Intra-arterial lysis in the procedure label, but IAT = no",
+     "Intraarteriální lýza v označení výkonu, ale IAT = ne"),
     ("flag only: 90-day mRS", "flag", "90-day mRS at least 2 points better than pre-stroke mRS",
      "mRS za 90 dní nejméně o 2 body lepší než před CMP"),
 ]
@@ -543,6 +619,7 @@ def clean_registry(raw: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     c.loc[stent_device.isna() & c["stent_proc"].isna(), "stenting"] = np.nan
     c["ia_lysis"] = pd.concat([c["iat"], c["ia_lysis_proc"]], axis=1).max(axis=1, skipna=True)
     c.loc[c["iat"].isna() & c["ia_lysis_proc"].isna(), "ia_lysis"] = np.nan
+    procedure_flags(c, proc, explicit, device, stent_raw, ids, log)
 
     c["anesthesia"] = _map(raw["Anesthesia"], ANESTHESIA, "anesthesia", ids, log)
     c["procedure_min"] = _range(_num(raw["Procedure duration"], "procedure_min", ids, log), "procedure_min", ids, log)
@@ -592,10 +669,16 @@ def clean_registry(raw: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     # model category of the occlusion site: rare codes pooled (counts among adults with a 90-day mRS)
     from .config import features, settings
     occ_f = next(f for f in features() if f.key == "occlusion")
-    allowed = {o["value"] for o in occ_f.spec["options"]}
+    allowed = {o["value"] for o in occ_f.spec["options"] if o.get("model", True)}
     eligible = c["mrs90"].notna() & ~(c["age"] < 18)
     counts = c.loc[eligible, "occlusion_detail"].value_counts()
-    c["occlusion"] = pool_occlusion(c["occlusion_detail"], counts, int(settings()["cohort"].get("min_category", 30)), allowed)
+    cfg = settings()
+    min_n = int(cfg["cohort"].get("min_category", cfg["privacy"]["min_cell"]))
+    c["occlusion"] = pool_occlusion(c["occlusion_detail"], counts, min_n, allowed)
+    for o in occ_f.spec["options"]:
+        if not o.get("model", True) and counts.get(o["value"], 0) >= min_n:
+            print(f"clean: occlusion site {o['value']} now has {int(counts[o['value']])} patients; "
+                  "set model: true for it in config/features.yaml so that the next training gives it its own estimate")
     consistency_flags(c, ids, log)
     c = c.drop(columns=["ivt_location"])
     c["weekend"] = c["onset_date"].dt.dayofweek.map(lambda d: np.nan if _null(d) else float(d >= 5)).astype("float64")
