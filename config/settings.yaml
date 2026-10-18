@@ -44,8 +44,8 @@ selection:
   deployable: ["Logistic regression (splines)", "Logistic regression", "LightGBM", "XGBoost",
                "EBM", "LR + interactions", "LR + multiple imputation", "Stacking"]
   # validated and reported, never chosen or published (reasons in docs/amendment_1.md)
-  comparison: ["MLP", "CatBoost", "Probability averaging", "FT-Transformer", "FT-Transformer, tuned",
-               "TabPFN v2", "TabICL v2"]
+  comparison: ["MLP", "EBM (defaults)", "CatBoost", "Probability averaging", "FT-Transformer",
+               "FT-Transformer, tuned", "TabPFN v2", "TabICL v2"]   # EBM (defaults): amendment 1a
 
 nested_cv:                # internal validation on all years (admission stage, mRS 0-2), as in the 2026 analysis
   folds: 5

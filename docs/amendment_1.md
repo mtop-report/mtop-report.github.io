@@ -75,3 +75,20 @@ knowing them cannot make a replacement easier.
   candidates to the learners it could already publish.
 - A model offered in the calculator must be publishable and explainable, and its validation must be
   that of the published version.
+
+## Amendment 1a (19 October 2026, the same night, before the validation runs)
+
+**The candidate EBM keeps 10 pair terms on 32 bins.** With interpret's default number of pair terms
+(three per input, 126 at admission) on 64 bins, every published EBM is 1.5 to 2 MB; the calculator
+would carry 16 of them (the EBM itself and the stacking's EBM, for 4 stages and 2 outcomes), about 30 MB,
+on a page used on phones. The candidate EBM, also inside the stacking, is therefore: at least 20
+patients per leaf, 10 pair terms (interpret's earlier default) on at most 32 bins, otherwise the
+defaults (about 100-130 kB per model). The **default EBM** (interpret's defaults throughout, as in the
+2026 report) joins the comparison-only learners, so its result is reported either way.
+
+What was known when 1a was written: a code check of the amendment-1 specifications on the primary
+split's admission stage (mRS 0-2) had shown temporal-test AUROCs of 0.807 for the EBM with 126 pairs and
+at least 20 patients per leaf, 0.806 for LR + interactions and 0.802 for LR + multiple imputation
+(reference 0.809). The change is made for the size of the published page; no alternative EBM was
+evaluated on the test patients to choose it (only its size on the development patients was measured).
+The other specifications are unchanged.
