@@ -74,7 +74,9 @@ apply (onset to IVT without IVT) stay missing, as in the registry.
   candidate's AUROC on the temporal test is higher with a Holm-adjusted paired-bootstrap p below
   0.05 (over the seven alternatives), or in nested cross-validation it gains ≥ 0.01 AUROC on average
   and is better in ≥ 80 % of folds, in both cases with calibration-in-the-large at most 0.05 worse.
-  CHOSEN_LINE
+  Chosen: regression with splines for every stage and outcome. No alternative met the Holm-adjusted
+  temporal criterion; in nested cross-validation the closest was regression with multiple
+  imputation (+0.005 AUROC on average, better in 9 of 15 folds; the rule asks for +0.01 and 12).
 - Sample size: with 33 pre-procedural predictors (92 regression parameters) the development data
   fall short of the Riley criteria (Standards tab); estimation is penalised (L2) and the expected
   shrinkage is reported.
