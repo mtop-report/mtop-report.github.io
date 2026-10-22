@@ -17,7 +17,8 @@ from mtop.config import settings
 from mtop.paths import PUBLIC
 
 FILES = ["model_bundle.json", "validation.json", "explorer.json", "extras.json", "adaptive.json", "federated.json",
-         "associations.json", "data_checks.json", "preprocessing.json", "raw_profile.json", "reporting.json"]
+         "associations.json", "data_checks.json", "preprocessing.json", "raw_profile.json", "reporting.json",
+         "analyses.json", "shap.json"]
 # column names that may appear as labels (never with values) in the data report
 COLUMN_LABELS = {"preprocessing.json": ("Patient ID", "onset_date"), "raw_profile.json": ("Patient ID",),
                  "data_checks.json": ("onset_date",)}
@@ -132,13 +133,26 @@ def test_validation_bins_and_no_extremes():
                         assert "lo" not in r and "hi" not in r
 
 
+def _published_specs(entry):
+    """Every published model of a stage and outcome, including the stacking's own base models."""
+    for name, spec in entry["learners"].items():
+        yield name, spec
+        for i, b in enumerate(spec.get("bases", [])):
+            if "same_as" in b:
+                assert b["same_as"] in entry["learners"], name
+            else:
+                yield f"{name} base {i}", b
+
+
 def test_tree_leaves_are_large():
     b = _load("model_bundle.json")
     min_leaf = int(settings()["privacy"]["min_leaf"])
     for per_target in b["models"].values():
         for entry in per_target.values():
-            for name, spec in entry["learners"].items():
+            for name, spec in _published_specs(entry):
                 assert "feature_infos" not in json.dumps(spec)
+                if spec["kind"] == "ebm":           # every EBM bin and leaf rests on >= min_leaf patients
+                    assert spec["spec"]["min_samples_leaf"] >= min_leaf, name
                 if spec["kind"] in ("lgbm", "xgb"):
                     # counted on the training patients at export (treejson.min_leaf_count / leaf_counts)
                     assert spec["min_leaf_count"] >= min_leaf, name
@@ -287,3 +301,32 @@ def test_demo_csv_is_synthetic_template():
     if not f.exists():
         pytest.skip("demo not built")
     assert f.read_text(encoding="utf-8").splitlines()[0].split(",") == template_columns()
+
+
+def test_shap_summaries_are_aggregates():
+    """Mean |SHAP| per predictor over at least min_cell test patients; no per-patient values."""
+    s = _load("shap.json")
+    k = int(settings()["privacy"]["min_cell"])
+    for sp in s["splits"].values():
+        for per in sp["stages"].values():
+            for models in per.values():
+                for name, m in models.items():
+                    assert set(m) <= {"method", "n", "importance", "share", "check"}, name
+                    assert m["n"] >= k
+                    assert all(isinstance(v, (int, float)) for v in m["importance"].values())
+                    assert set(m["check"]) <= {"auroc", "auroc_saved", "max_abs_dp", "additivity"}
+
+
+def test_report_analyses_suppress_small_counts():
+    a = _load("analyses.json")
+    k = int(settings()["privacy"]["min_cell"])
+    t = a.get("time_to_puncture", {})
+    for b in t.get("bands", []):
+        assert b["n"] is None or b["n"] >= k
+        if b["n"] is None:
+            assert "good" not in b
+    for r in a.get("decline", {}).get("oe_by_year", []):
+        assert r["n"] >= k
+    mo = a.get("missing_outcome", {})
+    if mo:
+        assert mo["n_missing"] >= k and mo["n_all"] - mo["n_missing"] >= k

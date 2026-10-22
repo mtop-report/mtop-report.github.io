@@ -400,6 +400,73 @@ def procedure_flags(c, proc, explicit, device, stent_raw, ids, log: IssueLog) ->
          "flag only: intra-arterial lysis in the procedure label, but IAT = NE", lambda i: "IAT: NE")
 
 
+def _norm_name(s) -> str:
+    import unicodedata
+
+    t = unicodedata.normalize("NFD", str(s)).encode("ascii", "ignore").decode().lower()
+    return "".join(ch for ch in t if ch.isalnum())
+
+
+def future_values(raw: pd.DataFrame, c: pd.DataFrame, ids: pd.Series, log: IssueLog) -> list[str]:
+    """Predictors collected for future versions (config/future.yaml): CT perfusion, the CTA collateral
+    score and serum GFAP. Parsed and checked like any other field when the export has them (they are
+    not model inputs); returns the keys found. CT perfusion values must add up: mismatch volume =
+    Tmax > 6 s minus the core, ratio = Tmax > 6 s / core, relative mismatch = mismatch / Tmax > 6 s."""
+    from .config import future_columns
+
+    spec = future_columns()["columns"]
+    by_norm = {_norm_name(col): col for col in raw.columns}
+    found = []
+    for f in spec:
+        names = [f["key"]] + list(f.get("raw", []))
+        col = next((by_norm[_norm_name(n)] for n in names if _norm_name(n) in by_norm), None)
+        if col is None:
+            continue
+        key, kind = f["key"], f["type"]
+        if kind == "binary":
+            c[key] = _yes_no(raw[col].map(lambda v: {"1": "ANO", "0": "NE", "1.0": "ANO", "0.0": "NE"}.get(str(v).strip(), v)),
+                             key, ids, log)
+        elif kind == "text":
+            c[key] = raw[col].map(_s)
+        else:
+            v = _num(raw[col], key, ids, log)
+            lo, hi = f.get("min", -np.inf), f.get("max", np.inf)
+            bad = v.notna() & ((v < lo) | (v > hi) | ((kind == "ordinal") & (v != v.round())))
+            for idx in v.index[bad]:
+                log.add(ids.at[idx], key, v.at[idx], f"outside {lo:g}-{hi:g} -> missing")
+            v[bad] = np.nan
+            c[key] = v
+        found.append(key)
+    perf = [k for k in ("ctp_core_ml", "ctp_tmax6_ml", "ctp_mismatch_ml", "ctp_mismatch_ratio", "ctp_mismatch_rel") if k in c]
+    if perf and "ctp_done" not in c:
+        c["ctp_done"] = c[perf].notna().any(axis=1).map(lambda b: 1.0 if b else np.nan).astype("float64")
+        found.append("ctp_done")
+
+    def flag(mask, column, text, note_fn):
+        for idx in c.index[mask.fillna(False)]:
+            log.add(ids.at[idx], column, c.at[idx, column], f"flag only: CT perfusion {text}", None, note_fn(idx))
+
+    if {"ctp_core_ml", "ctp_tmax6_ml"} <= set(c):
+        core, tmax = c["ctp_core_ml"], c["ctp_tmax6_ml"]
+        flag(core > tmax, "ctp_core_ml", "core larger than the Tmax > 6 s volume", lambda i: f"Tmax > 6 s {tmax.at[i]:g} mL")
+        if "ctp_mismatch_ml" in c:
+            mm = c["ctp_mismatch_ml"]
+            flag((mm - (tmax - core)).abs() > np.maximum(2.0, 0.05 * tmax), "ctp_mismatch_ml",
+                 "mismatch volume is not Tmax > 6 s minus the core",
+                 lambda i: f"Tmax {tmax.at[i]:g} - core {core.at[i]:g} = {tmax.at[i] - core.at[i]:g} mL")
+        if "ctp_mismatch_ratio" in c:
+            ratio = c["ctp_mismatch_ratio"]
+            expect = tmax / core.where(core > 0)
+            flag((ratio - expect).abs() > 0.1 * expect + 0.1, "ctp_mismatch_ratio", "mismatch ratio is not Tmax > 6 s / core",
+                 lambda i: f"Tmax {tmax.at[i]:g} / core {core.at[i]:g} = {expect.at[i]:.1f}")
+    if {"ctp_mismatch_ml", "ctp_tmax6_ml", "ctp_mismatch_rel"} <= set(c):
+        tmax, mm, rel = c["ctp_tmax6_ml"], c["ctp_mismatch_ml"], c["ctp_mismatch_rel"]
+        expect = 100 * mm / tmax.where(tmax > 0)
+        flag((rel - expect).abs() > 2.0, "ctp_mismatch_rel", "relative mismatch is not mismatch / Tmax > 6 s",
+             lambda i: f"100 x {mm.at[i]:g} / {tmax.at[i]:g} = {expect.at[i]:.0f}%")
+    return found
+
+
 def consistency_flags(c: pd.DataFrame, ids: pd.Series, log: IssueLog) -> None:
     """Cross-field checks. Values are kept; each record is listed for review at the source."""
     def flag(mask, column, raw_fn, text, note_fn=lambda i: ""):
@@ -478,6 +545,8 @@ CHECK_GROUPS = [
      "Stent v označení výkonu, ale sloupec stentu uvádí „žádný“"),
     ("flag only: intra-arterial lysis in the procedure label", "flag", "Intra-arterial lysis in the procedure label, but IAT = no",
      "Intraarteriální lýza v označení výkonu, ale IAT = ne"),
+    ("flag only: CT perfusion", "flag", "CT perfusion values that do not add up (core, Tmax > 6 s, mismatch, ratio)",
+     "Hodnoty CT perfuze, které si neodpovídají (jádro, Tmax > 6 s, mismatch, poměr)"),
     ("flag only: 90-day mRS", "flag", "90-day mRS at least 2 points better than pre-stroke mRS",
      "mRS za 90 dní nejméně o 2 body lepší než před CMP"),
 ]
@@ -680,6 +749,7 @@ def clean_registry(raw: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
             print(f"clean: occlusion site {o['value']} now has {int(counts[o['value']])} patients; "
                   "set model: true for it in config/features.yaml so that the next training gives it its own estimate")
     consistency_flags(c, ids, log)
+    future_values(raw, c, ids, log)          # CT perfusion, collaterals, GFAP: collected, not modelled yet
     c = c.drop(columns=["ivt_location"])
     c["weekend"] = c["onset_date"].dt.dayofweek.map(lambda d: np.nan if _null(d) else float(d >= 5)).astype("float64")
 

@@ -6,6 +6,9 @@
             by the pre-specified rule, deploy (artifacts/private); --split primary|sensitivity
   deploy    choose the model per stage and outcome by the pre-specified rule, refit the publishable
             learners on all years and recalibrate them to the recent era (artifacts/private)
+  compare   further learners from the 2026 report and poster (EBM, CatBoost, stacking, FT-Transformer
+            ...), validated next to the main ones but never chosen or published; also re-tests every
+            published score; chunks by --split/--stage/--nested, then --merge
   export    browser models + validation summary (artifacts/public)
   extras    calculator extras: comparators, mRS distribution layer, bootstrap uncertainty
             (--comparators-only refreshes just the comparator panel)
@@ -18,6 +21,11 @@
   reporting sample-size calculations for the reporting-standards page (artifacts/public)
   associations  factors associated with 90-day outcome: unadjusted and adjusted odds ratios
             (multiple imputation; artifacts/public)
+  analyses  from the 2026 report: missing-outcome sensitivity, why outcomes fell in 2023-2025, time to
+            groin puncture (artifacts/public/analyses.json)
+  shap      SHAP values of every validated model on the same test patients (exact where a method
+            exists, sampled otherwise); mean |SHAP| per predictor (artifacts/public/shap.json);
+            chunks by --split/--stage/--learner, --assemble to rebuild the public file only
   report    Table 1, figures and a validation summary for the manuscript (reports/)
   site      build the self-contained web app (site/index.html)
   all       everything above, in order
@@ -117,9 +125,25 @@ def cmd_deploy(args):
     from .train import choose_and_deploy
 
     base, _ = flow(_load_clean())
-    out = choose_and_deploy(base, paths.PRIVATE)
+    out = choose_and_deploy(base, paths.PRIVATE, names=getattr(args, "learner", None), stages=getattr(args, "stage", None))
     for st, tg in out["selection"].items():
         print(f"deploy {st}: " + ", ".join(f"{t} -> {v['chosen']}" for t, v in tg.items()))
+
+
+def cmd_compare(args):
+    from . import compare as C
+
+    if args.merge:
+        C.merge(paths.PRIVATE)
+        return
+    from .cohort import flow
+
+    base, _ = flow(_load_clean())
+    if args.nested:
+        a, _, b = args.nested.partition("-")
+        C.run_nested(base, paths.PRIVATE, list(range(int(a), int(b or a) + 1)), args.learner, tag=args.tag)
+    else:
+        C.run_temporal(base, paths.PRIVATE, args.split, args.stage, args.learner, tag=args.tag)
 
 
 def cmd_export(args):
@@ -170,6 +194,26 @@ def cmd_associations(args):
     from .associations import build_associations
 
     build_associations(_load_clean(), m=5 if getattr(args, "quick", False) else 20)
+
+
+def cmd_analyses(args):
+    from .analyses import build_analyses
+
+    build_analyses(_load_clean())
+
+
+def cmd_shap(args):
+    from . import shap_all as SH
+
+    if not getattr(args, "assemble", False):
+        from .cohort import flow
+
+        base, _ = flow(_load_clean())
+        SH.run(base, paths.PRIVATE, getattr(args, "split", None) or "primary", getattr(args, "stage", None),
+               getattr(args, "learner", None))
+    out = SH.assemble(paths.PRIVATE)
+    print("shap: " + ", ".join(f"{k} {sum(len(t) for t in v['stages'].values())} stage/outcome results"
+                               for k, v in out["splits"].items()))
 
 
 def cmd_report(args):
@@ -227,6 +271,8 @@ def cmd_all(args):
     cmd_preprocessing(args)
     cmd_reporting(args)
     cmd_associations(args)
+    cmd_analyses(args)
+    cmd_shap(args)
     cmd_report(args)
     cmd_site(args)
     print(f"all done in {time.time() - t:.0f}s")
@@ -234,14 +280,22 @@ def cmd_all(args):
 
 def main(argv=None):
     paths.ensure_dirs()
+    import os
+
+    if os.environ.get("MTOP_THREADS"):            # also cap the BLAS / OpenMP pools (parallel runs)
+        from threadpoolctl import threadpool_limits
+
+        from .tuning import threads
+
+        threadpool_limits(limits=threads())
     ap = argparse.ArgumentParser(prog="mtop", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     for name, fn in [("clean", cmd_clean), ("nested", cmd_nested), ("train", cmd_train), ("deploy", cmd_deploy),
-                     ("export", cmd_export),
+                     ("compare", cmd_compare), ("export", cmd_export),
                      ("extras", cmd_extras), ("adaptive", cmd_adaptive), ("fed-demo", cmd_fed_demo),
                      ("explorer", cmd_explorer), ("preprocessing", cmd_preprocessing), ("reporting", cmd_reporting),
-                     ("associations", cmd_associations), ("report", cmd_report), ("site", cmd_site),
+                     ("associations", cmd_associations), ("analyses", cmd_analyses), ("shap", cmd_shap), ("report", cmd_report), ("site", cmd_site),
                      ("all", cmd_all), ("synth", cmd_synth), ("studio", cmd_studio), ("pool", cmd_pool)]:
         p = sub.add_parser(name)
         p.set_defaults(fn=fn)
@@ -258,6 +312,21 @@ def main(argv=None):
             p.add_argument("--quick", action="store_true", help="fewer tuning trials / bootstrap refits, for testing")
         if name == "train":
             p.add_argument("--split", choices=["primary", "sensitivity"], help="run one split only")
+        if name == "deploy":
+            p.add_argument("--learner", action="append", help="refit only this learner (repeat), keep the others")
+            p.add_argument("--stage", action="append", help="only this stage (repeat)")
+        if name == "compare":
+            p.add_argument("--split", choices=["primary", "sensitivity"], default="primary")
+            p.add_argument("--stage", action="append", help="stage id (repeat for several; default all)")
+            p.add_argument("--learner", action="append", help="comparison learner (repeat; default all available)")
+            p.add_argument("--nested", help="nested-CV outer folds to run, e.g. 0-4 (admission, mRS 0-2)")
+            p.add_argument("--merge", action="store_true", help="fold the finished chunks into the training results")
+            p.add_argument("--tag", default="main", help="name of this run's chunk files (parallel runs need different tags)")
+        if name == "shap":
+            p.add_argument("--split", choices=["primary", "sensitivity"], default="primary")
+            p.add_argument("--stage", action="append", help="stage id (repeat; default all)")
+            p.add_argument("--learner", action="append", help="only this model (repeat; default every validated model)")
+            p.add_argument("--assemble", action="store_true", help="only rebuild artifacts/public/shap.json from the chunks")
         if name == "extras":
             p.add_argument("--comparators-only", action="store_true",
                            help="rebuild only the calculator's comparator panel in extras.json")

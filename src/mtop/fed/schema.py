@@ -7,6 +7,12 @@ English or Czech spellings. Unrecognised or out-of-range values become missing a
 Optional column `year` (year of treatment) lets the network work on ranges of years: monitoring
 performance year by year, recalibrating to recent patients, refitting on a sliding window. It
 never leaves the hospital either; jobs only select patients by it.
+
+Optional columns for future versions (config/future.yaml: CT perfusion volumes, the CTA collateral
+score, serum GFAP with its sampling time and assay) are read and range-checked when present. No job
+uses them as a model input; the site only reports how many patients have them recorded, which
+counts toward the rule that a new predictor is tested once 100 patients with mRS 0-2 and 100 with
+mRS 3-6 have it (amendment 1).
 """
 from __future__ import annotations
 
@@ -16,7 +22,7 @@ import unicodedata
 import numpy as np
 import pandas as pd
 
-from ..config import features
+from ..config import features, future_columns
 
 POSTERIOR = {"basilar", "basilar_vertebral", "other_posterior"}
 TICI = {"0": 0.0, "1": 1.0, "2a": 2.0, "2": 2.5, "2b": 3.0, "2c": 4.0, "3": 4.0}
@@ -46,7 +52,8 @@ def norm(s) -> str:
     return re.sub(r"[^a-z0-9]", "", s.lower())
 
 
-OPTIONAL_COLUMNS = ["year"]
+FUTURE = {c["key"]: c for c in future_columns()["columns"]}
+OPTIONAL_COLUMNS = ["year"] + list(FUTURE)
 
 
 def template_columns() -> list[str]:
@@ -103,6 +110,29 @@ def _parse(f, raw, issues: dict):
     return v
 
 
+def _future(spec: dict, raw, issues: dict):
+    """A value of a column collected for future versions; outside its range or unreadable -> missing."""
+    s = "" if raw is None else str(raw).strip()
+    if s == "" or re.fullmatch(r"(?i)(na|nan|null|unknown|-)", s):
+        return None if spec["type"] == "text" else np.nan
+    if spec["type"] == "text":
+        return s[:80]
+    if spec["type"] == "binary":
+        if norm(s) in BIN:
+            return float(BIN[norm(s)])
+        issues[spec["key"]] = issues.get(spec["key"], 0) + 1
+        return np.nan
+    try:
+        v = float(s.replace(",", "."))
+    except ValueError:
+        v = np.nan
+    lo, hi = spec.get("min", -np.inf), spec.get("max", np.inf)
+    if np.isnan(v) or v < lo or v > hi or (spec["type"] == "ordinal" and not v.is_integer()):
+        issues[spec["key"]] = issues.get(spec["key"], 0) + 1
+        return np.nan
+    return v
+
+
 def read_site_csv(path) -> tuple[pd.DataFrame, dict]:
     """Parse a registry export in the MTOP template. Returns typed data and a mapping report."""
     raw = pd.read_csv(path, sep=None, engine="python", dtype=str, keep_default_na=False)
@@ -130,12 +160,21 @@ def read_site_csv(path) -> tuple[pd.DataFrame, dict]:
     if ycol is not None:
         df["year"] = [_year(v) for v in raw[ycol].tolist()]
         found.append("year")
+    future_found = []
+    for key, spec in FUTURE.items():
+        col = by_norm.get(norm(key))
+        if col is not None:
+            df[key] = [_future(spec, v, issues) for v in raw[col].tolist()]
+            future_found.append(key)
+    found.extend(future_found)
     df.loc[df["occlusion"].isin(POSTERIOR), "side_left"] = 0.0
     df["nihss_change_24h"] = df["nihss_24h"] - df["nihss_adm"]
     df["good_outcome"] = (df["mrs90"] <= 2).astype(float).where(df["mrs90"].notna())
     df["death90"] = (df["mrs90"] == 6).astype(float).where(df["mrs90"].notna())
     report = {"rows": int(len(df)), "columns_found": found, "columns_missing": missing,
-              "unrecognised_values": issues, "with_outcome": int(df["mrs90"].notna().sum())}
+              "unrecognised_values": issues, "with_outcome": int(df["mrs90"].notna().sum()),
+              # optional columns for future versions: patients with the value and a known outcome
+              "future_recorded": {k: int((df[k].notna() & df["mrs90"].notna()).sum()) for k in future_found}}
     return df, report
 
 

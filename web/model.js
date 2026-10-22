@@ -1,9 +1,12 @@
 /* MTOP browser models
  * Tree ensembles (LightGBM and XGBoost) with exact TreeSHAP attributions (Lundberg et al.,
  * Nat Mach Intell 2020), mirroring the libraries' own decision rules so results match
- * LightGBM `pred_contrib=True` and XGBoost `pred_contribs=True`; and the penalised logistic
- * regressions (linear and with restricted cubic splines), whose exact Shapley values are the
- * coefficient times the standardised value of each term.
+ * LightGBM `pred_contrib=True` and XGBoost `pred_contribs=True`; the penalised logistic
+ * regressions (linear, with restricted cubic splines, and with interactions of centred inputs),
+ * whose exact Shapley values are the coefficient times the standardised value of each term (an
+ * interaction split half and half); the explainable boosting machine (EBM), additive by
+ * construction (pair terms split half and half); and the stacking, whose attribution is the
+ * meta-model's weighted sum of its base models' attributions.
  * No patient data is needed or sent anywhere: everything runs in the browser.
  */
 (function (root) {
@@ -207,7 +210,32 @@
       const i = spec.base_columns.indexOf(v);
       for (const z of rcsTerms(base[i], knots)) { row.push(z); owner.push(i); }
     }
+    // interactions (LR + interactions): products of centred inputs, owned half by each input
+    for (const [ia, ib, ca, cb] of spec.products || []) {
+      const a = base[ia], b = base[ib];
+      row.push(miss(a) || miss(b) ? NaN : (Number(a) - ca) * (Number(b) - cb));
+      owner.push([ia, ib]);
+    }
     return { row, owner };
+  }
+
+  // ---------------------------------------------------------------- EBM (explainable boosting)
+  /** Interval of v among the cut points: 0 for a missing value, else 1 + the number of cut points <= v
+   *  (a value equal to a cut point belongs to the upper interval, as in interpret). */
+  function ebmBin(cuts, v) {
+    if (miss(v) || Number.isNaN(Number(v))) return 0;
+    const x = Number(v);
+    let lo = 0, hi = cuts.length;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (cuts[mid] <= x) lo = mid + 1; else hi = mid; }
+    return lo + 1;
+  }
+
+  /** Score of every term for one model row (main terms: one input; pair terms: two inputs). */
+  function ebmTerms(spec, x) {
+    return spec.terms.map((t) => {
+      if (t.f.length === 1) { const k = ebmBin(t.cuts[0], x[t.f[0]]); return k === 0 ? t.miss : t.s[k - 1]; }
+      return t.s[ebmBin(t.cuts[0], x[t.f[0]])][ebmBin(t.cuts[1], x[t.f[1]])];
+    });
   }
 
   /** Penalised logistic regression pipeline (median imputation + indicators, scaling): per-coefficient
@@ -232,6 +260,9 @@
     if (L.kind === "lgbm" || L.kind === "xgb") return rawTrees(L, x);
     if (L.kind === "lr") return lrRaw(L.spec, x);
     if (L.kind === "spline") return lrRaw(L.spec, splineExpand(L.spec, x).row);
+    if (L.kind === "ebm") return ebmTerms(L.spec, x).reduce((a, b) => a + b, L.spec.intercept);
+    // stacking: the meta-model on the base models' log-odds
+    if (L.kind === "stack") return L.bases.reduce((s, b, k) => s + L.meta.coef[k] * raw(b, x), L.meta.intercept);
     throw new Error(`unknown learner ${L.kind}`);
   }
 
@@ -245,14 +276,29 @@
   /** Exact attributions per model column on the log-odds scale: base + sum(phi) = raw score. */
   function shap(L, x) {
     if (L.kind === "lgbm" || L.kind === "xgb") return shapTrees(L, x, x.length);
+    const phi = new Array(x.length).fill(0);
+    // a term owned by two inputs (interaction, EBM pair) is split half and half
+    const add = (o, v) => { if (Array.isArray(o)) { phi[o[0]] += v / 2; phi[o[1]] += v / 2; } else phi[o] += v; };
+    if (L.kind === "ebm") {
+      ebmTerms(L.spec, x).forEach((v, i) => { const f = L.spec.terms[i].f; add(f.length === 1 ? f[0] : f, v); });
+      return { base: L.spec.intercept, phi };
+    }
+    if (L.kind === "stack") {
+      let base = L.meta.intercept;
+      L.bases.forEach((b, k) => {
+        const s = shap(b, x), w = L.meta.coef[k];
+        base += w * s.base;
+        s.phi.forEach((v, i) => { phi[i] += w * v; });
+      });
+      return { base, phi };
+    }
     let t;
     if (L.kind === "lr") t = lrTerms(L.spec, x, x.map((_, i) => i));
     else {
       const e = splineExpand(L.spec, x);
       t = lrTerms(L.spec, e.row, e.owner);
     }
-    const phi = new Array(x.length).fill(0);
-    t.terms.forEach((v, i) => { phi[t.own[i]] += v; });
+    t.terms.forEach((v, i) => add(t.own[i], v));
     return { base: t.intercept, phi };
   }
 
@@ -311,7 +357,7 @@
     });
   }
 
-  const api = { prepare, predict, raw, rawTrees, shap, explain, buildRow, derivedValue, sigmoid, rcsTerms, splineExpand, lrRaw };
+  const api = { prepare, predict, raw, rawTrees, shap, explain, buildRow, derivedValue, sigmoid, rcsTerms, splineExpand, lrRaw, ebmBin, ebmTerms };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   root.MTOPModel = api;
 })(typeof globalThis !== "undefined" ? globalThis : this);

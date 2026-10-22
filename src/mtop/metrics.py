@@ -201,6 +201,34 @@ def bootstrap_ci(y, preds: dict, n_boot=2000, seed=0, ref=None, calibration=True
     return out
 
 
+def delong_p(y, p1, p2) -> float | None:
+    """Two-sided p-value of DeLong's test for two correlated AUROCs on the same patients (DeLong et
+    al., Biometrics 1988), as in the 2026 report; None when the two predictions are identical."""
+    from scipy.stats import norm
+
+    y = np.asarray(y, int)
+    a, b = np.asarray(p1, float), np.asarray(p2, float)
+    if np.allclose(a, b):
+        return None
+
+    def components(p):
+        x, z = p[y == 1], p[y == 0]
+        v10 = ((z[None, :] < x[:, None]).sum(1) + 0.5 * (z[None, :] == x[:, None]).sum(1)) / len(z)
+        v01 = ((x[None, :] > z[:, None]).sum(1) + 0.5 * (x[None, :] == z[:, None]).sum(1)) / len(x)
+        return v10, v01
+
+    a10, a01 = components(a)
+    b10, b01 = components(b)
+    m, n = len(a10), len(a01)
+    s10 = np.cov(np.vstack([a10, b10]))
+    s01 = np.cov(np.vstack([a01, b01]))
+    var = (s10[0, 0] + s10[1, 1] - 2 * s10[0, 1]) / m + (s01[0, 0] + s01[1, 1] - 2 * s01[0, 1]) / n
+    if not var > 0:
+        return None
+    zstat = (a10.mean() - b10.mean()) / np.sqrt(var)
+    return float(2 * norm.sf(abs(zstat)))
+
+
 def oe_ratio(y, p) -> float:
     """Observed / expected events (1 = calibrated in the large; < 1 = the model over-predicts)."""
     e = float(np.sum(p))

@@ -113,6 +113,8 @@ def build_site():
         "logo_svg": logo.read_text(encoding="utf-8").strip() if logo.exists() else "",
         "federated": _load("federated.json"),
         "validation_pool": _load("validation_pool.json", {"results": []}),
+        "analyses": _load("analyses.json", {}),
+        "shap": _load("shap.json"),
         "site": site_cfg,
     }
     tpl = (WEB / "index.html").read_text(encoding="utf-8")

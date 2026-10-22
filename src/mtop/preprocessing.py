@@ -375,6 +375,25 @@ def data_dictionary_md() -> str:
         if isinstance(sp.get("help"), dict):
             notes.append(sp["help"]["en"])
         L.append(f"| {sp['label']['en']} | `{f.key}` | {stage_title[f.stage]} | {f.type} | {vals} | {'; '.join(notes)} |")
+    from .config import future_columns
+
+    fut = future_columns()
+    n = int(fut.get("min_patients_per_outcome", 100))
+    L += ["", "## Optional columns collected for future versions", "",
+          "From `config/future.yaml`. Not model inputs: the models, the calculator estimate and the validation",
+          "tool ignore them. They are optional columns of the partner template; the FNO cleaning reads them",
+          "under the registry names listed, sets out-of-range values to missing and flags CT perfusion values",
+          "that do not add up (mismatch = Tmax > 6 s − core, ratio = Tmax > 6 s / core, relative = mismatch /",
+          f"Tmax > 6 s). A predictor enters a model only after its added value is tested, once at least {n}",
+          f"patients with mRS 0–2 and {n} with mRS 3–6 at 90 days have it recorded (for death: {n} deaths and",
+          f"{n} survivors); see `docs/amendment_1.md`.", "",
+          "| Column | Key | Type | Values | Registry names | Notes |", "|---|---|---|---|---|---|"]
+    for c in fut["columns"]:
+        vals = c["values"]["en"] if isinstance(c.get("values"), dict) else (
+            "text" if c["type"] == "text" else f"{c.get('min', '')}–{c.get('max', '')}")
+        raw = ", ".join(f"`{r}`" for r in c.get("raw", []))
+        note = c["note"]["en"] if isinstance(c.get("note"), dict) else ""
+        L.append(f"| {c['label']['en']} | `{c['key']}` | {c['type']} | {vals} | {raw} | {note} |")
     L += ["", "## Registry columns", "", "| Registry column | Role | MTOP variables |", "|---|---|---|"]
     for col, (vars_, role) in RAW_MAP.items():
         L.append(f"| `{col}` | {role} | {', '.join(f'`{v}`' for v in vars_) or '–'} |")

@@ -308,3 +308,30 @@ def test_template_columns_are_the_shared_dictionary():
     from mtop.extras import template_columns as extras_template
 
     assert template_columns() == extras_template()
+
+
+def test_future_columns_are_optional_and_never_model_inputs(tmp_path):
+    """CT perfusion, collaterals and GFAP (config/future.yaml) may be in a centre's export or not;
+    when present they are range-checked and counted, and no stage uses them."""
+    from mtop.fed.schema import FUTURE, OPTIONAL_COLUMNS
+
+    assert {"ctp_core_ml", "ctp_tmax6_ml", "collaterals_tan", "gfap_pg_ml", "gfap_hours"} <= set(FUTURE)
+    assert set(FUTURE) <= set(OPTIONAL_COLUMNS) and not set(FUTURE) & set(template_columns())
+    df = synthetic_frame(120, 41)
+    f = tmp_path / "with_future.csv"
+    write_site_csv(df, f)
+    plain, rep0 = read_site_csv(f)
+    assert rep0["future_recorded"] == {}
+    raw = pd.read_csv(f, dtype=str, keep_default_na=False)
+    raw["ctp_core_ml"] = ["12.5"] * 100 + ["-3"] + [""] * 19          # one below the range
+    raw["Collaterals_Tan"] = ["2"] * 60 + ["5"] + ["1.5"] + [""] * 58   # 5 and 1.5 are not grades
+    raw["gfap_assay"] = ["Alinity i"] * 120
+    raw.to_csv(f, index=False)
+    typed, rep = read_site_csv(f)
+    assert rep["future_recorded"]["ctp_core_ml"] == int(typed["mrs90"].iloc[:100].notna().sum())
+    assert rep["unrecognised_values"]["ctp_core_ml"] == 1 and rep["unrecognised_values"]["collaterals_tan"] == 2
+    assert typed["gfap_assay"].iloc[0] == "Alinity i"
+    a, b = SiteNode("A", plain), SiteNode("B", typed)
+    for stage in ("admission", "d7"):
+        (_, B1, _), (_, B2, _) = a.cohort(stage, TARGET), b.cohort(stage, TARGET)
+        assert np.array_equal(B1, B2)                                     # same model inputs

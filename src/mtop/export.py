@@ -24,7 +24,7 @@ import pandas as pd
 from . import __version__
 from . import learners as Lr
 from .cohort import flow, stage_cohort
-from .config import features, settings, stage_ids, targets
+from .config import features, future_columns, settings, stage_ids, targets
 from .features import column_to_feature, design_matrix, feature_columns
 from .paths import PRIVATE, PROCESSED, PUBLIC
 from .train import load_deployed, load_results, subgroup_auroc_ci
@@ -43,6 +43,17 @@ def clean_json(o):
         return int(o)
     if isinstance(o, np.bool_):
         return bool(o)
+    return o
+
+
+def rounded(o, digits: int = 5):
+    """Floats rounded for the aggregate results files (a p-value below 10^-digits becomes 0)."""
+    if isinstance(o, dict):
+        return {k: rounded(v, digits) for k, v in o.items()}
+    if isinstance(o, (list, tuple)):
+        return [rounded(v, digits) for v in o]
+    if isinstance(o, float):
+        return round(o, digits)
     return o
 
 
@@ -86,6 +97,50 @@ def imputation_values(base, k: int = IMPUTE_K) -> dict:
     return out
 
 
+FUTURE_GROUPS = {"perfusion": ["ctp_core_ml", "ctp_tmax6_ml"], "collaterals": ["collaterals_tan"],
+                 "gfap": ["gfap_pg_ml", "gfap_hours"]}
+
+
+def future_summary(base: pd.DataFrame, min_cell: int) -> dict:
+    """Predictors collected for future versions (config/future.yaml): the column descriptions for the
+    partner template and the calculator preview, and how many registry patients with a known 90-day
+    outcome have each group recorded, by outcome (the 100 + 100 rule of amendment 1). Counts of
+    1 to min_cell - 1 are published as null (suppressed); a group the export lacks is null."""
+    spec = future_columns()
+    cols = [{k: v for k, v in c.items() if k != "raw"} for c in spec["columns"]]
+
+    def count(mask) -> int | None:
+        n = int(mask.sum())
+        return n if n == 0 or n >= min_cell else None
+
+    fno = {}
+    for g, keys in FUTURE_GROUPS.items():
+        if not all(k in base.columns for k in keys):
+            fno[g] = None
+            continue
+        has = base[keys].notna().all(axis=1)
+        good, died = base["good_outcome"] == 1, base["death90"] == 1
+        fno[g] = {"n": count(has), "good": count(has & good), "poor": count(has & ~good),
+                  "died": count(has & died), "survived": count(has & ~died)}
+    return {"min_per_outcome": int(spec.get("min_patients_per_outcome", 100)), "columns": cols,
+            "groups": FUTURE_GROUPS, "fno": fno}
+
+
+def share_stack_bases(learners: dict) -> dict:
+    """A stacking base identical to a published learner (the same settings refitted on the same
+    patients, as the reference and XGBoost are) is published once, as {"same_as": name}; the browser
+    links it back (web/app.js). The base never uses the learner's recent-era intercept."""
+    strip = lambda d: json.dumps({k: v for k, v in d.items() if k != "intercept_recent"}, sort_keys=True)  # noqa: E731
+    for L in learners.values():
+        if L.get("kind") != "stack":
+            continue
+        for i, (b, name) in enumerate(zip(L["bases"], L.get("base_names", []))):
+            other = learners.get(name)
+            if other is not None and other is not L and strip(other) == strip(b):
+                L["bases"][i] = {"same_as": name}
+    return learners
+
+
 def export_all() -> None:
     PUBLIC.mkdir(parents=True, exist_ok=True)
     cfg = settings()
@@ -106,6 +161,7 @@ def export_all() -> None:
         "recent_era_from_year": cfg["split"]["recent_era_from_year"],
         "reference": Lr.REFERENCE,
         "impute": imputation_values(base),
+        "future": future_summary(base, int(cfg["privacy"]["min_cell"])),
         "models": {},
     }
     for stage in stage_ids():
@@ -126,7 +182,7 @@ def export_all() -> None:
             pk = load_deployed(PRIVATE, stage, target)
             if pk["columns"] != cols:
                 raise ValueError(f"deployed columns differ for {stage}/{target}")
-            learners = {name: Lr.export(m["fitted"], m["shift"], X_all, min_leaf) for name, m in pk["models"].items()}
+            learners = share_stack_bases({name: Lr.export(m["fitted"], m["shift"], X_all, min_leaf) for name, m in pk["models"].items()})
             bundle["models"][stage][target] = {
                 "chosen": pk["chosen"], "columns": cols, "column_feature": [c2f[c] for c in cols],
                 "n_train": int(len(d)), "learners": learners,
@@ -148,17 +204,22 @@ def export_all() -> None:
                         if "auroc" in row and key in c:
                             row["auroc_ci"] = c[key]
 
+    sel_cfg = cfg["selection"]
     validation = {
         "generated": bundle["generated"], "version": __version__,
         "meta": results["primary"]["meta"] if "primary" in results else {},
+        # candidates for the model choice (published) and learners validated for comparison only
+        "groups": {"candidates": list(sel_cfg["deployable"]), "comparison": list(sel_cfg.get("comparison", ["MLP"])),
+                   "multiplicity": sel_cfg.get("multiplicity"), "alpha": sel_cfg.get("alpha", 0.05),
+                   "amendment": "docs/amendment_1.md"},
         "selection": dep["selection"], "nested": nested,
         "splits": {label: {"test_from_year": r["test_from_year"], "stages": r["stages"]} for label, r in results.items()},
         "deployed": dep["deployed"],
     }
     canon = json.dumps(bundle["models"], sort_keys=True, separators=(",", ":")).encode("utf-8")
     bundle["fingerprint"] = hashlib.sha256(canon).hexdigest()
-    for name, obj in (("model_bundle.json", bundle), ("validation.json", validation)):
+    for name, obj in (("model_bundle.json", clean_json(bundle)), ("validation.json", rounded(clean_json(validation)))):
         with open(PUBLIC / name, "w", encoding="utf-8") as fh:
-            json.dump(clean_json(obj), fh, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+            json.dump(obj, fh, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
     print(f"export: model_bundle.json {(PUBLIC / 'model_bundle.json').stat().st_size / 1e6:.2f} MB, "
           f"validation.json {(PUBLIC / 'validation.json').stat().st_size / 1e6:.2f} MB")

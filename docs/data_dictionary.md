@@ -65,6 +65,30 @@ patient ID in `reports/data_quality.xlsx` (local only). NIHSS 43 (died) and 99 (
 | Cerebral oedema | `edema` | Day 7 | binary | 1 = yes, 0 = no | monotone in LightGBM (− for mRS 0–2) |
 | Decompressive craniectomy | `decompression` | Day 7 | binary | 1 = yes, 0 = no |  |
 
+## Optional columns collected for future versions
+
+From `config/future.yaml`. Not model inputs: the models, the calculator estimate and the validation
+tool ignore them. They are optional columns of the partner template; the FNO cleaning reads them
+under the registry names listed, sets out-of-range values to missing and flags CT perfusion values
+that do not add up (mismatch = Tmax > 6 s − core, ratio = Tmax > 6 s / core, relative = mismatch /
+Tmax > 6 s). A predictor enters a model only after its added value is tested, once at least 100
+patients with mRS 0–2 and 100 with mRS 3–6 at 90 days have it recorded (for death: 100 deaths and
+100 survivors); see `docs/amendment_1.md`.
+
+| Column | Key | Type | Values | Registry names | Notes |
+|---|---|---|---|---|---|
+| CT perfusion done | `ctp_done` | binary | 1 = done, 0 = not done | `ctp done`, `ctp`, `perfuze provedena`, `ct perfuze` | Record 0 when perfusion was not done: it is done selectively, so 'not done' carries information. |
+| Ischaemic core, rCBF < 30% (mL) | `ctp_core_ml` | numeric | 0–500 | `rCBF <30/ml`, `rcbf 30 ml`, `rcbf<30`, `core volume`, `core ml` |  |
+| Hypoperfusion, Tmax > 6 s (mL) | `ctp_tmax6_ml` | numeric | 0–1000 | `Tmax >6s/ml`, `tmax 6s ml`, `tmax>6s`, `tmax6`, `hypoperfusion volume` |  |
+| Mismatch volume (mL) | `ctp_mismatch_ml` | numeric | 0–1000 | `mismatch volume/ml`, `mismatch volume`, `mismatch ml` | Tmax > 6 s minus the core; checked against the two volumes. |
+| Mismatch ratio | `ctp_mismatch_ratio` | numeric | 1–1000 | `mismatch ratio` | Tmax > 6 s divided by the core; leave empty when the core is 0 (the ratio is infinite). |
+| Relative mismatch (%) | `ctp_mismatch_rel` | numeric | 0–100 | `Relative mismatch/%`, `relative mismatch`, `relative mismatch %` | Mismatch volume as a share of the Tmax > 6 s volume. |
+| Perfusion software | `ctp_software` | text | for example RAPID, Olea, syngo.via | `ctp software`, `perfusion software`, `software perfuze` | Volumes differ between programs and thresholds; needed to pool centres. |
+| CTA collateral score (Tan, 0-3) | `collaterals_tan` | ordinal | 0 absent, 1 filling <= 50%, 2 > 50% but < 100%, 3 100% of the occluded territory | `collateral score`, `collaterals`, `kolateraly`, `tan score`, `cta collaterals` | The scale MR PREDICTS uses: once recorded, MR PREDICTS can be validated with its published formula. |
+| Serum GFAP (pg/mL) | `gfap_pg_ml` | numeric | 0–1000000 | `gfap`, `gfap pg/ml`, `serum gfap` |  |
+| Onset to GFAP sampling (h) | `gfap_hours` | numeric | 0–168 | `gfap time`, `gfap hours`, `onset to gfap`, `cas odberu gfap` | GFAP rises over the first day; the time decides at which stage it can be used. |
+| GFAP assay | `gfap_assay` | text | for example Abbott Alinity i, Roche Elecsys, Simoa | `gfap assay`, `gfap method`, `metoda gfap` | Assays are not interchangeable. |
+
 ## Registry columns
 
 | Registry column | Role | MTOP variables |

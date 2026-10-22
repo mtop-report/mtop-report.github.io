@@ -92,3 +92,31 @@ at least 20 patients per leaf, 0.806 for LR + interactions and 0.802 for LR + mu
 (reference 0.809). The change is made for the size of the published page; no alternative EBM was
 evaluated on the test patients to choose it (only its size on the development patients was measured).
 The other specifications are unchanged.
+
+## Notes on carrying out amendment 1 (22 October 2026, after the runs)
+
+Facts about how the runs were done. None of them changes the rule, the candidates or what was
+compared on the test patients.
+
+- **FT-Transformer, tuned** (12 Optuna trials) took about 27 minutes per stage and outcome on the
+  analysis computer (2 CPU cores, no GPU), so it was run on the primary split's admission stage
+  only, for both outcomes. The default FT-Transformer ran on every stage of both splits and in the
+  nested cross-validation. Both are comparison-only learners and cannot affect the model choice.
+- **TabPFN v2 and TabICL v2** have not been run: their weight files could not be transferred to the
+  analysis computer (the upload failed). They stay on the list of comparison-only learners. Once the
+  files are on a computer inside the hospital, `python -m mtop compare --tag tab --learner "TabPFN v2"
+  --learner "TabICL v2"` runs them offline, without any online service, and `python -m mtop compare
+  --merge` adds their results, dated by the run.
+- **Nested cross-validation** of the amendment-1 and comparison-only learners re-tunes the reference
+  and XGBoost inside each of the 15 outer folds (20 trials, the nested budget) and passes their
+  settings to the stacking and the multiple imputation, as `src/mtop/compare.py` documents.
+- **Chunks.** The runs were split by split, stage and fold and merged afterwards
+  (`python -m mtop compare --merge`). All were run against the same saved training results of
+  18 October 2026; chunks written from 22 October also carry a fingerprint of the reference's saved
+  test predictions, so a chunk computed on other training results is not merged.
+- **Reporting added alongside.** SHAP values of every validated model on the same test patients
+  (`python -m mtop shap`; exact where the model allows it, sampled Shapley values for the MLP and the
+  averaged probabilities, expected gradients for the FT-Transformers), DeLong's test next to the paired bootstrap, the updating analysis for every
+  published score, and three analyses from the 2026 report: missing 90-day outcomes in the test
+  years, why outcomes fell in 2023–2025, and time to groin puncture. They describe the models; none
+  of them enters the model choice.

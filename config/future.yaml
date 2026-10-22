@@ -1,0 +1,98 @@
+# Predictors collected for future model versions (amendment 1, item 5; docs/amendment_1.md).
+# They are NOT model inputs: the models, the calculator estimate and the validation tool ignore them.
+# Each enters a model only after its added value has been tested, once at least 100 patients with
+# mRS 0-2 and 100 with mRS 3-6 at 90 days have it recorded (for death: 100 deaths and 100 survivors).
+#
+# key: column in the partner template and in the cleaned registry
+# raw: column names accepted in the FNO registry export (compared without case, spaces or symbols)
+# type: numeric | binary | ordinal | text; min/max: plausible range (outside -> missing, logged)
+min_patients_per_outcome: 100
+columns:
+  - key: ctp_done
+    group: perfusion
+    type: binary
+    label: {en: "CT perfusion done", cs: "CT perfuze provedena"}
+    values: {en: "1 = done, 0 = not done", cs: "1 = provedena, 0 = neprovedena"}
+    note: {en: "Record 0 when perfusion was not done: it is done selectively, so 'not done' carries information.",
+           cs: "Pokud perfuze nebyla provedena, zapište 0: provádí se výběrově, takže i „neprovedena“ nese informaci."}
+    raw: ["ctp done", "ctp", "perfuze provedena", "ct perfuze"]
+  - key: ctp_core_ml
+    group: perfusion
+    type: numeric
+    min: 0
+    max: 500
+    label: {en: "Ischaemic core, rCBF < 30% (mL)", cs: "Jádro infarktu, rCBF < 30 % (ml)"}
+    raw: ["rCBF <30/ml", "rcbf 30 ml", "rcbf<30", "core volume", "core ml"]
+  - key: ctp_tmax6_ml
+    group: perfusion
+    type: numeric
+    min: 0
+    max: 1000
+    label: {en: "Hypoperfusion, Tmax > 6 s (mL)", cs: "Hypoperfuze, Tmax > 6 s (ml)"}
+    raw: ["Tmax >6s/ml", "tmax 6s ml", "tmax>6s", "tmax6", "hypoperfusion volume"]
+  - key: ctp_mismatch_ml
+    group: perfusion
+    type: numeric
+    min: 0
+    max: 1000
+    label: {en: "Mismatch volume (mL)", cs: "Objem mismatche (ml)"}
+    note: {en: "Tmax > 6 s minus the core; checked against the two volumes.", cs: "Tmax > 6 s minus jádro; kontroluje se proti oběma objemům."}
+    raw: ["mismatch volume/ml", "mismatch volume", "mismatch ml"]
+  - key: ctp_mismatch_ratio
+    group: perfusion
+    type: numeric
+    min: 1
+    max: 1000
+    label: {en: "Mismatch ratio", cs: "Poměr mismatche"}
+    note: {en: "Tmax > 6 s divided by the core; leave empty when the core is 0 (the ratio is infinite).",
+           cs: "Tmax > 6 s děleno jádrem; při nulovém jádru nechte prázdné (poměr je nekonečný)."}
+    raw: ["mismatch ratio"]
+  - key: ctp_mismatch_rel
+    group: perfusion
+    type: numeric
+    min: 0
+    max: 100
+    label: {en: "Relative mismatch (%)", cs: "Relativní mismatch (%)"}
+    note: {en: "Mismatch volume as a share of the Tmax > 6 s volume.", cs: "Objem mismatche jako podíl objemu Tmax > 6 s."}
+    raw: ["Relative mismatch/%", "relative mismatch", "relative mismatch %"]
+  - key: ctp_software
+    group: perfusion
+    type: text
+    label: {en: "Perfusion software", cs: "Software perfuze"}
+    values: {en: "for example RAPID, Olea, syngo.via", cs: "například RAPID, Olea, syngo.via"}
+    note: {en: "Volumes differ between programs and thresholds; needed to pool centres.", cs: "Objemy se mezi programy a prahy liší; nutné pro sloučení center."}
+    raw: ["ctp software", "perfusion software", "software perfuze"]
+  - key: collaterals_tan
+    group: collaterals
+    type: ordinal
+    min: 0
+    max: 3
+    label: {en: "CTA collateral score (Tan, 0-3)", cs: "Skóre kolaterál na CTA (Tan, 0-3)"}
+    values: {en: "0 absent, 1 filling ≤ 50%, 2 > 50% but < 100%, 3 100% of the occluded territory",
+             cs: "0 chybí, 1 plnění ≤ 50 %, 2 > 50 % ale < 100 %, 3 100 % postiženého povodí"}
+    note: {en: "The scale MR PREDICTS uses: once recorded, MR PREDICTS can be validated with its published formula.",
+           cs: "Škála, kterou používá MR PREDICTS: jakmile se bude evidovat, lze MR PREDICTS validovat publikovaným vzorcem."}
+    raw: ["collateral score", "collaterals", "kolateraly", "tan score", "cta collaterals"]
+  - key: gfap_pg_ml
+    group: gfap
+    type: numeric
+    min: 0
+    max: 1000000
+    label: {en: "Serum GFAP (pg/mL)", cs: "Sérový GFAP (pg/ml)"}
+    raw: ["gfap", "gfap pg/ml", "serum gfap"]
+  - key: gfap_hours
+    group: gfap
+    type: numeric
+    min: 0
+    max: 168
+    label: {en: "Onset to GFAP sampling (h)", cs: "Od vzniku k odběru GFAP (h)"}
+    note: {en: "GFAP rises over the first day; the time decides at which stage it can be used.",
+           cs: "GFAP během prvního dne stoupá; čas rozhoduje, ve které fázi ho lze použít."}
+    raw: ["gfap time", "gfap hours", "onset to gfap", "cas odberu gfap"]
+  - key: gfap_assay
+    group: gfap
+    type: text
+    label: {en: "GFAP assay", cs: "Metoda GFAP"}
+    values: {en: "for example Abbott Alinity i, Roche Elecsys, Simoa", cs: "například Abbott Alinity i, Roche Elecsys, Simoa"}
+    note: {en: "Assays are not interchangeable.", cs: "Metody nejsou zaměnitelné."}
+    raw: ["gfap assay", "gfap method", "metoda gfap"]

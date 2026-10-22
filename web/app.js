@@ -62,6 +62,11 @@
     + '<g class="ti-sun"><circle cx="12" cy="12" r="4.4"/><path d="M12 2.4v2.2M12 19.4v2.2M2.4 12h2.2M19.4 12h2.2M5.2 5.2l1.55 1.55M17.25 17.25l1.55 1.55M5.2 18.8l1.55-1.55M17.25 6.75l1.55-1.55"/></g>'
     + '<path class="ti-moon" d="M20.2 14.9A8.4 8.4 0 0 1 9.1 3.8a8.4 8.4 0 1 0 11.1 11.1Z"/></svg>';
 
+  // a stacking base identical to a published learner is published once (export.share_stack_bases)
+  // and linked back here; a base is evaluated without the learner's recent-era intercept
+  for (const per of Object.values(B.models)) for (const e of Object.values(per)) {
+    for (const Lm of Object.values(e.learners)) if (Lm.kind === "stack") Lm.bases = Lm.bases.map((b) => (b.same_as ? e.learners[b.same_as] : b));
+  }
   const STAGES = B.stages.map((s) => s.id);
   const STAGE = Object.fromEntries(B.stages.map((s) => [s.id, s]));
   const FEAT = Object.fromEntries(B.features.map((f) => [f.key, f]));
@@ -383,17 +388,22 @@
     return card;
   }
 
+  // predictors collected for future versions; labels from config/future.yaml where it describes them
+  const FUTURE_LABEL = Object.fromEntries((((B.future || {}).columns) || []).map((c) => [c.key, [c.label.en, c.label.cs]]));
+  const fl = (key, en, cs) => FUTURE_LABEL[key] || [en, cs];
   const PREVIEW = {
     admission: [
-      { label: ["CT perfusion core volume", "Objem jádra infarktu (CT perfuze)"], unit: "mL", status: "candidate" },
-      { label: ["CTA collateral score (0–3)", "Skóre kolaterál na CTA (0–3)"], unit: "", status: "candidate" },
+      { label: fl("ctp_core_ml", "Ischaemic core, rCBF < 30% (mL)", "Jádro infarktu, rCBF < 30 % (ml)"), unit: "mL", status: "collecting" },
+      { label: fl("ctp_tmax6_ml", "Hypoperfusion, Tmax > 6 s (mL)", "Hypoperfuze, Tmax > 6 s (ml)"), unit: "mL", status: "collecting" },
+      { label: ["Mismatch: volume, ratio, relative", "Mismatch: objem, poměr, relativní"], unit: "mL · × · %", status: "collecting" },
+      { label: fl("collaterals_tan", "CTA collateral score (Tan, 0-3)", "Skóre kolaterál na CTA (Tan, 0-3)"), unit: "0–3", status: "template" },
     ],
     procedure: [
       { label: ["Number of device passes", "Počet průchodů"], unit: "", status: "candidate" },
       { label: ["eTICI 2c / 3 distinction", "Rozlišení eTICI 2c / 3"], unit: "", status: "candidate" },
     ],
     h24: [
-      { label: ["Serum GFAP", "Sérový GFAP"], unit: "pg/mL", status: "collecting" },
+      { label: ["Serum GFAP, with sampling time and assay", "Sérový GFAP s časem odběru a metodou"], unit: "pg/mL", status: "collecting" },
       { label: ["Serum neurofilament light (NfL)", "Sérový neurofilament (NfL)"], unit: "pg/mL", status: "candidate" },
     ],
     d7: [
@@ -407,6 +417,7 @@
     collecting: () => ({ cls: "st-progress", text: tx("Being collected", "Sbírá se") }),
     planned: () => ({ cls: "st-planned", text: tx("Planned", "Plánováno") }),
     candidate: () => ({ cls: "st-planned", text: tx("Candidate", "Kandidát") }),
+    template: () => ({ cls: "st-planned", text: tx("In the template", "V šabloně") }),
     proposed: () => ({ cls: "st-planned", text: tx("Proposed", "Navrženo") }),
   };
 
@@ -427,9 +438,14 @@
         h("div", { class: "preview-row" }, h("input", { id, type: "text", disabled: true, placeholder: it.unit || "–" }), statusChip(it.status))));
     });
     det.appendChild(grid);
-    det.appendChild(h("p", { class: "help", text: st === "h24"
-      ? tx("GFAP is being collected at FNO. It will enter the model once enough patients with known 90-day outcome are available, after its added value has been tested.", "GFAP se ve FNO sbírá. Do modelu vstoupí, až bude dost pacientů se známým výsledkem za 90 dní a jeho přínos bude ověřen.")
-      : tx("Not recorded in the registry yet. Shown to illustrate how later versions could use it.", "Registr je zatím neeviduje. Zobrazeno pro ilustraci, jak by je mohly využít další verze.") }));
+    const nMin = (B.future || {}).min_per_outcome || 100;
+    const rule = tx(` Each enters a model only once at least ${nMin} patients with mRS 0–2 and ${nMin} with mRS 3–6 have it recorded, and only if it adds value when tested (amendment 1).`,
+      ` Do modelu vstoupí, až je bude mít zaznamenáno alespoň ${nMin} pacientů s mRS 0–2 a ${nMin} s mRS 3–6, a jen pokud test prokáže přínos (dodatek 1).`);
+    const help = {
+      admission: tx("CT perfusion volumes are recorded at FNO for new patients; the collateral score and the perfusion columns are optional columns of the partner template.", "Objemy z CT perfuze se ve FNO evidují u nových pacientů; skóre kolaterál a sloupce perfuze jsou nepovinnými sloupci partnerské šablony.") + rule,
+      h24: tx("GFAP is being collected at FNO, with the time from onset to sampling (which decides the stage it can be used at) and the assay; it is an optional column of the partner template.", "GFAP se ve FNO sbírá i s časem od vzniku k odběru (podle něj se určí fáze, kdy jej lze použít) a metodou; je nepovinným sloupcem partnerské šablony.") + rule,
+    }[st] || tx("Not recorded in the registry yet. Shown to illustrate how later versions could use it.", "Registr je zatím neeviduje. Zobrazeno pro ilustraci, jak by je mohly využít další verze.");
+    det.appendChild(h("p", { class: "help", text: help }));
     return det;
   }
 
@@ -818,6 +834,7 @@
     if (v === null || v === undefined || Number.isNaN(v)) return "";
     if (name === "SPAN-100") return v ? tx("positive", "pozitivní") : tx("negative", "negativní");
     if (name === "PRE") return `${v > 0 ? "+" : ""}${num(v)}`;
+    if (name === "THRIVE-EVT") return tx(`published formula ${pct(XE.sig(v))}`, `publikovaný vzorec ${pct(XE.sig(v))}`);
     if (name.startsWith("NIHSS")) return `NIHSS ${num(v)}`;
     return tx(`${num(v)} points`, `${num(v)} b.`);
   }
@@ -913,9 +930,10 @@
     }
     list.appendChild(h("div", { class: "orow ohead" }, h("div"), h("div", { class: "scale" }, h("span", { text: "0%" }), h("span", { text: "50%" }), h("span", { text: "100%" })), h("div"), h("div", { class: "au", text: "AUROC" })));
     card.appendChild(list);
+    const nL = Object.keys(e.learners).length;
     card.appendChild(h("p", { class: "note", text: tx(
-      `The four learners use exactly the same ${e.columns.length} model inputs and are shifted to the ${RECENT} outcome level. Published scores are mapped to probabilities with a logistic recalibration on the FNO registry; THRIVE-c, MR PREDICTS@24H and the bedside-variables regression are their predictor sets refitted on the registry (MR PREDICTS@24H without the collateral score, which the registry does not record). * AUROC measured at an earlier stage.`,
-      `Čtyři modely používají přesně stejných ${e.columns.length} vstupů a jsou posunuty na úroveň výsledků ${RECENT}. Publikovaná skóre jsou převedena na pravděpodobnosti logistickou rekalibrací na registru FNO; THRIVE-c, MR PREDICTS@24H a regrese z položek bedside skóre jsou jejich sady prediktorů přepočtené na registru (MR PREDICTS@24H bez skóre kolaterál, které registr neeviduje). * AUROC změřené v dřívější fázi.`) }));
+      `All ${nL} learners use exactly the same ${e.columns.length} model inputs and are shifted to the ${RECENT} outcome level. Published scores, including the published THRIVE-EVT formula, are mapped to probabilities with a logistic recalibration on the FNO registry; THRIVE-c, MR PREDICTS, MR PREDICTS@24H and the bedside-variables regression are their predictor sets refitted on the registry (both MR PREDICTS models without the collateral score, which the registry does not record). Every score here is tested at this stage on the Validation tab. * AUROC measured at an earlier stage.`,
+      `${nL >= 5 ? `Všech ${nL} modelů používá` : `Všechny ${nL} modely používají`} přesně stejných ${e.columns.length} vstupů a jsou posunuty na úroveň výsledků ${RECENT}. Publikovaná skóre včetně publikovaného vzorce THRIVE-EVT jsou převedena na pravděpodobnosti logistickou rekalibrací na registru FNO; THRIVE-c, MR PREDICTS, MR PREDICTS@24H a regrese z položek bedside skóre jsou jejich sady prediktorů přepočtené na registru (oba modely MR PREDICTS bez skóre kolaterál, které registr neeviduje). Každé skóre zde je otestováno v této fázi na kartě Validace. * AUROC změřené v dřívější fázi.`) }));
     return card;
   }
 
@@ -1279,6 +1297,14 @@
     C.lineChart(fo.body, { height: 230, x: { type: "cat", cats: yrs }, y: { domain: [0, 70], ticks: [0, 20, 40, 60] }, series: oSeries, tipFmt: (v) => pct100(v, 0), endLabels: false, aria: "outcomes by year" });
     two.appendChild(outCard);
     root.appendChild(two);
+    const AN = DATA.analyses || {};
+    if (AN.time_to_puncture || AN.decline) {
+      const two2 = h("div", { class: "grid-2 block" });
+      if (AN.time_to_puncture) two2.appendChild(punctureCard(AN.time_to_puncture));
+      if (AN.decline) two2.appendChild(declineOeCard(AN.decline));
+      root.appendChild(two2);
+      if (AN.decline) root.appendChild(declineCard(AN.decline));
+    }
 
     // small multiples
     root.appendChild(h("div", { class: "view-head", style: "margin-top:8px" }, h("div", null, h("h2", { style: "font-size:19px", text: t().trendTitle }), h("p", { text: t().trendSub }))));
@@ -1320,6 +1346,92 @@
       "Tok pacientů, všechny kontroly dat, mapa proměnných, chybějící data podle období, dostupnost výsledku za 90 dní a tabulka 1 jsou v části <b>Data a předzpracování</b> výše.") }));
   }
 
+  // ------------------------------------------------------------------ analyses of the 2026 report
+  const orTx = (e, d = 2) => (e ? `${num(e.or, d)} (${num(e.lo, d)}–${num(e.hi, d)})` : "–");
+  const pTx = (p) => (p === null || p === undefined ? "–" : p < 0.001 ? "p < 0.001" : `p = ${num(p, 3)}`);
+
+  // Each hour from onset to groin puncture: adjusted odds of mRS 0-2, and the standardised chance
+  function punctureCard(a) {
+    const card = h("div", { class: "card card-pad" });
+    const pts = a.standardised.map((r) => ({ x: r.hours - 1, y: r.p * 100 }));
+    const f = C.figure(card, {
+      title: tx("What each hour to puncture costs", "Kolik stojí každá hodina do punkce"),
+      sub: tx(`Chance of mRS 0–2 if every patient had been punctured at that hour, other factors as recorded · ${num(a.n)} patients with a recorded time`,
+        `Šance na mRS 0–2, kdyby každý pacient měl punkci v danou hodinu, ostatní faktory jak byly zaznamenány · ${num(a.n)} pacientů se zaznamenaným časem`),
+      table: { columns: [tx("Hours from onset", "Hodiny od vzniku"), tx("Standardised chance of mRS 0–2", "Standardizovaná šance na mRS 0–2")], rows: a.standardised.map((r) => [`${r.hours} h`, pct(r.p, 1)])
+        .concat((a.bands || []).map((b) => [`${tx("observed", "pozorováno")} ${b.band}`, b.good === undefined ? `n ${b.n === null ? `<${E.min_cell}` : num(b.n)}` : `${pct(b.good, 1)} (${pct(b.lo, 0)}–${pct(b.hi, 0)}), n ${num(b.n)}`])) },
+      labels: { table: t().showTable, chart: t().showChart } });
+    C.lineChart(f.body, { height: 200, x: { type: "cat", cats: a.standardised.map((r) => `${r.hours} h`) }, y: { domain: [0, 60], ticks: [0, 20, 40, 60], fmt: (v) => pct100(v) },
+      series: [{ label: tx("mRS 0–2", "mRS 0–2"), color: "var(--blue)", dots: true, points: pts }], tipFmt: (v) => pct100(v, 1), aria: tx("Standardised chance by hour", "Standardizovaná šance podle hodiny") });
+    const facts = [
+      [tx("Each hour in the first 6 h", "Každá hodina v prvních 6 h"), `OR ${orTx(a.per_hour_0_6)}`],
+      [tx("Each hour after 6 h", "Každá hodina po 6 h"), `OR ${orTx(a.per_hour_after_6)} · ${tx("slopes differ", "sklony se liší")}, ${pTx(a.slope_change_p)}`],
+      [tx("First 6 h, with IV thrombolysis", "Prvních 6 h, s IV trombolýzou"), `OR ${orTx(a.per_hour_0_6_ivt)}`],
+      [tx("First 6 h, without IV thrombolysis", "Prvních 6 h, bez IV trombolýzy"), `OR ${orTx(a.per_hour_0_6_no_ivt)} · ${tx("difference", "rozdíl")} ${pTx(a.interaction_p)}`],
+      [tx("First 6 h, also adjusted for the year", "Prvních 6 h, adjustováno i na rok"), `OR ${orTx(a.per_hour_0_6_year)}`],
+    ];
+    card.appendChild(h("dl", { class: "facts" }, facts.map(([k, v]) => h("div", null, h("dt", { text: k }), h("dd", { text: v })))));
+    card.appendChild(h("p", { class: "note", text: tx(
+      `Odds ratios per hour for mRS 0–2 with 95% CI, adjusted for age, sex, pre-stroke disability, risk factors, NIHSS, ASPECTS, glucose, blood pressure, occlusion site, IV thrombolysis and transfer; a two-piece line (bend at 6 h); missing values imputed 20 times. Late-window patients were selected by imaging, which is one reason the curve flattens after 6 h.`,
+      `Poměry šancí na hodinu pro mRS 0–2 s 95% IS, adjustované na věk, pohlaví, předchozí disabilitu, rizikové faktory, NIHSS, ASPECTS, glykémii, krevní tlak, místo okluze, IV trombolýzu a překlad; lomená přímka (zlom v 6 h); chybějící hodnoty 20× imputovány. Pacienti v pozdním okně byli vybráni podle zobrazení, což je jeden z důvodů, proč se křivka po 6 h oplošťuje.`) }));
+    return card;
+  }
+
+  // Observed / expected mRS 0-2 by year, from a model fitted on 2016-2022
+  function declineOeCard(a) {
+    const card = h("div", { class: "card card-pad" });
+    const rows = a.oe_by_year || [];
+    const f = C.figure(card, {
+      title: tx("Observed against expected, by year", "Pozorováno vůči očekávanému podle roku"),
+      sub: tx("mRS 0–2 observed / expected with 95% CI; expected from the reference model fitted on 2016–2022 (each earlier year left out of its own fit)",
+        "mRS 0–2 pozorováno / očekáváno s 95% IS; očekávání z referenčního modelu natrénovaného na letech 2016–2022 (každý dřívější rok vynechán z vlastního fitu)"),
+      table: { columns: [tx("Year", "Rok"), "n", tx("Observed", "Pozorováno"), tx("Expected", "Očekáváno"), "O/E (95% CI)"],
+        rows: rows.map((r) => [r.year, num(r.n), pct(r.observed, 1), pct(r.expected, 1), `${num(r.oe, 2)} (${num(r.lo, 2)}–${num(r.hi, 2)})`]) },
+      labels: { table: t().showTable, chart: t().showChart } });
+    C.lineChart(f.body, { height: 200, x: { type: "cat", cats: rows.map((r) => String(r.year)) }, y: { domain: [0.4, 1.4], ticks: [0.4, 0.6, 0.8, 1, 1.2, 1.4], fmt: (v) => num(v, 1) },
+      marker: null, series: [{ label: "O/E", color: "var(--blue)", dots: true, points: rows.map((r, i) => ({ x: i, y: r.oe, lo: r.lo, hi: r.hi, n: r.n })) }],
+      refY: 1, tipFmt: (v, p) => `${num(v, 2)} (${num(p.lo, 2)}–${num(p.hi, 2)}) · n ${p.n}`, aria: "O/E by year" });
+    card.appendChild(h("p", { class: "note", text: tx(
+      "1 means as many good outcomes as the patients' recorded characteristics predict; below 1, fewer. The years 2023–2025 sit below 1: their outcomes were worse than their characteristics explain.",
+      "1 znamená tolik dobrých výsledků, kolik předpovídají zaznamenané charakteristiky pacientů; pod 1 méně. Roky 2023–2025 leží pod 1: jejich výsledky byly horší, než charakteristiky vysvětlují.") }));
+    return card;
+  }
+
+  // Why outcomes fell in 2023-2025: distribution, process of care, adjusted odds and explained share
+  function declineCard(a) {
+    const card = h("div", { class: "card card-pad block" });
+    const lbl = (i) => `${a.periods[i][0]}–${a.periods[i][1]}`;
+    const legend = [0, 1, 2, 3, 4, 5, 6].map((m) => ({ label: `mRS ${m}`, color: MRS_COLORS[m] }));
+    const rows = [0, 1].map((i) => ({ label: lbl(i), n: a.n[i], segs: a.mrs[i].map((v) => v * 100) }));
+    const f = C.figure(card, {
+      title: tx(`Why outcomes were worse in ${lbl(1)}`, `Proč byly výsledky v letech ${lbl(1)} horší`),
+      sub: tx(`90-day mRS of patients treated ${lbl(0)} and ${lbl(1)}, admission stage (${pTx(a.mrs_p)}, χ²)`, `mRS za 90 dní u pacientů léčených ${lbl(0)} a ${lbl(1)}, fáze přijetí (${pTx(a.mrs_p)}, χ²)`),
+      legend, table: { columns: [tx("Period", "Období"), "n"].concat(legend.map((l) => l.label)), rows: rows.map((r) => [r.label, num(r.n)].concat(r.segs.map((v) => pct100(v, 1)))) },
+      labels: { table: t().showTable, chart: t().showChart } });
+    C.grotta(f.body, { rows, colors: MRS_COLORS, inkOn: MRS_INK, segLabels: legend.map((l) => l.label), fmt: (v) => pct100(v, 1), nLabel: "n", aria: "mRS by period" });
+    const ex = a.explained || {};
+    const changed = [
+      [tx(`mRS 0–2, ${lbl(0)} → ${lbl(1)}`, `mRS 0–2, ${lbl(0)} → ${lbl(1)}`), `${pct(a.good[0], 1)} → ${pct(a.good[1], 1)}`],
+      [tx("IV thrombolysis", "IV trombolýza"), `${pct(a.ivt[0])} → ${pct(a.ivt[1])}`],
+      [tx("Median onset to puncture", "Medián od vzniku do punkce"), `${num(a.otp_median[0])} → ${num(a.otp_median[1])} min`],
+      [tx("Expected from the earlier model", "Očekáváno podle dřívějšího modelu"), `${pct(a.good[0], 1)} → ${pct(ex.expected_late, 1)}`],
+    ];
+    const accounted = [
+      [tx("Odds of mRS 0–2, later vs earlier", "Šance na mRS 0–2, později vs dříve"), `OR ${orTx(a.or_crude)}`],
+      [tx("… adjusted for patient characteristics", "… adjustováno na charakteristiky pacientů"), `OR ${orTx(a.or_adjusted)}`],
+      [tx("… and for IVT, transfer, time to puncture", "… a na IVT, překlad, čas do punkce"), `OR ${orTx(a.or_adjusted_process)}`],
+      [tx("Share of the drop explained", "Vysvětlený podíl poklesu"), `${pct(ex.share)} (${pct(ex.lo)}–${pct(ex.hi)})`],
+    ];
+    const factList = (title, rows) => h("div", null, h("div", { class: "facts-title", text: title }),
+      h("dl", { class: "facts" }, rows.map(([k, v]) => h("div", null, h("dt", { text: k }), h("dd", { text: v })))));
+    card.appendChild(h("div", { class: "facts-pair" }, factList(tx("What changed", "Co se změnilo"), changed),
+      factList(tx("Is it the patients?", "Jsou to pacienti?"), accounted)));
+    card.appendChild(h("p", { class: "note", text: tx(
+      `A model fitted on ${lbl(0)} expects ${pct(ex.expected_late, 1)} of the ${lbl(1)} patients to reach mRS 0–2; ${pct(a.good[1], 1)} did. Their recorded characteristics therefore explain about ${pct(ex.share)} of the drop (95% bootstrap interval ${pct(ex.lo)}–${pct(ex.hi)}, ${ex.n_boot} resamples); the rest is not explained by anything the registry records. Odds ratios adjusted for strong prognostic factors move away from 1 even without confounding, so the adjusted odds ratio being lower than the crude one does not mean the later patients were healthier; the explained share, on the probability scale, is the measure to read. Missing 90-day outcomes in the later years are a further uncertainty (Validation tab). Adjusted models: logistic regression with 20 imputations, Rubin's rules.`,
+      `Model natrénovaný na letech ${lbl(0)} očekává, že mRS 0–2 dosáhne ${pct(ex.expected_late, 1)} pacientů z let ${lbl(1)}; dosáhlo ho ${pct(a.good[1], 1)}. Zaznamenané charakteristiky tedy vysvětlují asi ${pct(ex.share)} poklesu (95% bootstrapový interval ${pct(ex.lo)}–${pct(ex.hi)}, ${ex.n_boot} výběrů); zbytek nevysvětluje nic, co registr eviduje. Poměry šancí adjustované na silné prognostické faktory se vzdalují od 1 i bez zkreslení, takže nižší adjustovaný poměr šancí neznamená, že pozdější pacienti byli zdravější; měřítkem je vysvětlený podíl na škále pravděpodobností. Další nejistotou jsou chybějící výsledky za 90 dní v pozdějších letech (karta Validace). Adjustované modely: logistická regrese s 20 imputacemi, Rubinova pravidla.`) }));
+    return card;
+  }
+
   // ================================================================== validation
   const MODEL_NAMES = {
     "Logistic regression (splines)": { en: "Regression with splines", cs: "Regrese se splajny" },
@@ -1336,13 +1448,37 @@
     "HIAT2": { en: "HIAT2 score", cs: "Skóre HIAT2" },
     "PRE": { en: "PRE score", cs: "Skóre PRE" },
     "MR PREDICTS@24H": { en: "MR PREDICTS@24H predictors (refit)", cs: "Prediktory MR PREDICTS@24H (přepočteno)" },
+    "MR PREDICTS": { en: "MR PREDICTS predictors (refit)", cs: "Prediktory MR PREDICTS (přepočteno)" },
+    "THRIVE-EVT": { en: "THRIVE-EVT (published formula)", cs: "THRIVE-EVT (publikovaný vzorec)" },
+    "CLEAR": { en: "CLEAR score", cs: "Skóre CLEAR" },
+    "BET": { en: "BET score", cs: "Skóre BET" },
     "Bedside score": { en: "FNO bedside score (7 items)", cs: "Bedside skóre FNO (7 položek)" },
     "Bedside variables (regression)": { en: "Bedside items as a regression", cs: "Položky bedside skóre jako regrese" },
+    "EBM": { en: "EBM", cs: "EBM" },
+    "LR + interactions": { en: "Regression + interactions", cs: "Regrese + interakce" },
+    "LR + multiple imputation": { en: "Regression + multiple imputation", cs: "Regrese + vícenásobná imputace" },
+    "Stacking": { en: "Stacking", cs: "Stacking" },
+    "EBM (defaults)": { en: "EBM, default settings", cs: "EBM, výchozí nastavení" },
+    "CatBoost": { en: "CatBoost", cs: "CatBoost" },
+    "Probability averaging": { en: "Averaged probabilities", cs: "Průměr pravděpodobností" },
+    "FT-Transformer": { en: "FT-Transformer", cs: "FT-Transformer" },
+    "FT-Transformer, tuned": { en: "FT-Transformer, tuned", cs: "FT-Transformer, laděný" },
+    "TabPFN v2": { en: "TabPFN v2", cs: "TabPFN v2" },
+    "TabICL v2": { en: "TabICL v2", cs: "TabICL v2" },
   };
-  const LEARNERS = ["Logistic regression (splines)", "Logistic regression", "LightGBM", "XGBoost", "MLP"];
-  const MODEL_COLORS = ["var(--c1)", "var(--c2)", "var(--c3)", "var(--c4)", "var(--c5)", "var(--c6)"];
+  // The calculator's candidates in a fixed colour order (amendment 1, docs/amendment_1.md); learners
+  // validated for comparison only are grey and dashed in the charts, published scores grey and thin.
+  const MODEL_GROUPS = V.groups || { candidates: ["Logistic regression (splines)", "Logistic regression", "LightGBM", "XGBoost"], comparison: ["MLP"] };
+  const CANDIDATES = MODEL_GROUPS.candidates;
+  const COMPARISON = MODEL_GROUPS.comparison || [];
+  const LEARNERS = CANDIDATES.concat(COMPARISON);
+  const MODEL_COLORS = ["var(--c1)", "var(--c2)", "var(--c3)", "var(--c4)", "var(--c5)", "var(--c6)", "var(--c7)", "var(--c8)"];
+  const GREY = "var(--faint)";
   const mname = (k) => L(MODEL_NAMES[k] || { en: k, cs: k });
-  const mcolor = (k) => { const i = LEARNERS.indexOf(k); return i >= 0 ? MODEL_COLORS[i] : "var(--faint)"; };
+  const mcolor = (k) => { const i = CANDIDATES.indexOf(k); return i >= 0 && i < MODEL_COLORS.length ? MODEL_COLORS[i] : GREY; };
+  const isComp = (k) => COMPARISON.includes(k);
+  const dotOf = (k) => h("span", { class: isComp(k) ? "dot comp" : "dot", style: isComp(k) ? null : `background:${mcolor(k)}` });
+  const pFmt = (p) => (p === null || p === undefined ? "–" : p < 0.001 ? "<0.001" : num(p, 3));
   const signed = (v, d = 2) => (v === null || v === undefined ? "–" : `${v > 0 ? "+" : v < 0 ? "−" : ""}${num(Math.abs(v), d)}`);
   const ciTxt = (ci, d = 3) => (ci && ci.length === 2 ? `${num(ci[0], d)}–${num(ci[1], d)}` : "");
   const sciTxt = (ci, d = 3) => (ci && ci.length === 2 ? `${signed(ci[0], d)} to ${signed(ci[1], d)}` : "");
@@ -1367,35 +1503,44 @@
     for (const k of Object.keys(V.splits)) spSel.appendChild(h("option", { value: k, selected: k === S.valSplit ? true : null },
       k === "primary" ? tx(`${yearsOf(k)} (primary)`, `${yearsOf(k)} (hlavní)`) : tx(`${yearsOf(k)} (sensitivity)`, `${yearsOf(k)} (citlivostní)`)));
     spSel.addEventListener("change", () => { S.valSplit = spSel.value; renderValidation(); });
+    S.valLines = S.valLines || "candidates";
+    const linesSeg = h("div", { class: "mini-seg", role: "group", "aria-label": tx("Models drawn in the charts", "Modely v grafech") },
+      [["candidates", tx("Candidates", "Kandidáti")], ["all", tx("All models", "Všechny modely")]].map(([k, lbl]) => h("button", {
+        type: "button", "aria-pressed": String(S.valLines === k), onclick: () => { S.valLines = k; renderValidation(); } }, lbl)));
     root.appendChild(h("div", { class: "controls" }, h("span", { text: t().outcome }), seg, h("label", { for: "val-stage" }, t().stage), stSel,
-      h("label", { for: "val-split" }, tx("Test years", "Testovací roky")), spSel));
+      h("label", { for: "val-split" }, tx("Test years", "Testovací roky")), spSel, h("span", { text: tx("Charts", "Grafy") }), linesSeg));
 
     const tg = S.valTarget, st = S.valStage;
     const vt = valRes(st, tg);
     const models = vt.models;
-    const learners = LEARNERS.filter((k) => models[k]);
+    const cands = CANDIDATES.filter((k) => models[k]);
+    const comps = COMPARISON.filter((k) => models[k]);
+    const learners = cands.concat(comps);
     const scores = Object.keys(models).filter((k) => !LEARNERS.includes(k));
+    const allLines = S.valLines === "all";
+    const shownL = allLines ? learners : cands;             // learners drawn in the charts
     const chosen = ((V.selection || {})[st] || {})[tg] ? V.selection[st][tg].chosen : REF;
     if (!S.valModel || !models[S.valModel]) S.valModel = chosen;
 
     root.appendChild(selectionCard(st, tg));
 
-    // comparison table
+    // comparison table: candidates, comparison-only learners, published and bedside scores
     const cCard = h("div", { class: "card card-pad block" });
     cCard.appendChild(h("div", { class: "chart-head" }, h("div", null, h("div", { class: "chart-title", text: t().compTitle(L(STAGE[st].title)) }),
       h("div", { class: "chart-sub", text: tx(`${yrs}: n = ${num(vt.n_test)}, ${tg === "good_outcome" ? "mRS 0–2" : "deaths"} ${num(vt.events_test)} · development ${dyrs}: n = ${num(vt.n_dev)}, ${num(vt.events_dev)}`,
         `${yrs}: n = ${num(vt.n_test)}, ${tg === "good_outcome" ? "mRS 0–2" : "úmrtí"} ${num(vt.events_test)} · vývoj ${dyrs}: n = ${num(vt.n_dev)}, ${num(vt.events_dev)}`) }))));
     const nst = nestedFor(st, tg);
     const bestAuc = Math.max(...learners.map((k) => models[k].auroc));
-    const headCols = [t().model, "AUROC (95% CI)", t().dAuc(mname(REF)), t().brier, t().citl, t().slope, "O/E"].concat(nst ? [tx("Nested CV AUROC", "Vnořená CV AUROC")] : []);
+    const headCols = [t().model, "AUROC (95% CI)", t().dAuc(mname(REF)), tx("p (DeLong)", "p (DeLong)"), t().brier, t().citl, t().slope, "O/E"].concat(nst ? [tx("Nested CV AUROC", "Vnořená CV AUROC")] : []);
     const rowOf = (k) => {
       const r = models[k];
       const d = r.ci.delta_auroc_vs_ref;
       const nm = nst && nst.models[k];
-      return h("tr", { class: LEARNERS.includes(k) ? (k === chosen ? "chosen" : "") : "score" },
-        h("th", { scope: "row" }, h("span", { class: "dot", style: `background:${mcolor(k)}` }), mname(k), k === chosen ? h("span", { class: "tag", text: tx("chosen", "zvolen") }) : null),
+      return h("tr", { class: cands.includes(k) ? (k === chosen ? "chosen" : "") : isComp(k) ? "comp" : "score" },
+        h("th", { scope: "row" }, dotOf(k), mname(k), k === chosen ? h("span", { class: "tag", text: tx("chosen", "zvolen") }) : null),
         h("td", { class: r.auroc === bestAuc ? "best" : "" }, `${num(r.auroc, 3)} `, h("span", { class: "ci", text: ciTxt(r.ci.auroc) })),
         h("td", null, d ? `${signed(d.mean, 3)} ` : k === REF ? tx("reference", "reference") : "–", d ? h("span", { class: "ci", text: sciTxt(d.ci) }) : null),
+        h("td", { text: k === REF ? "–" : pFmt(r.delong_p) }),
         h("td", { text: num(r.brier, 3) }),
         h("td", null, `${signed(r.citl)} `, h("span", { class: "ci", text: sciTxt(r.ci.citl, 2) })),
         Math.abs(r.slope) > 5 ? h("td", { title: tx("Not estimable: one group has no outcome events (separation)", "Nelze odhadnout: jedna skupina nemá žádnou událost (separace)"), text: "n/e" })
@@ -1403,38 +1548,57 @@
         h("td", { text: num(r.oe, 2) }),
         ...(nst ? [h("td", { text: nm ? `${num(nm.auroc.mean, 3)} ± ${num(nm.auroc.sd, 3)}` : "–" })] : []));
     };
+    const sep = (text) => h("tr", { class: "sep" }, h("th", { colspan: headCols.length, text }));
     const tbl = h("table", { class: "data comp" },
       h("thead", null, h("tr", null, headCols.map((x) => h("th", { scope: "col", text: x })))),
-      h("tbody", null, learners.map(rowOf), scores.length ? h("tr", { class: "sep" }, h("th", { colspan: headCols.length, text: tx("Published and bedside scores", "Publikovaná a bedside skóre") })) : null, scores.map(rowOf)));
+      h("tbody", null, sep(tx("Candidates for the calculator", "Kandidáti pro kalkulačku")), cands.map(rowOf),
+        comps.length ? sep(tx("Validated for comparison only, never published", "Validováno jen pro srovnání, nezveřejňuje se")) : null, comps.map(rowOf),
+        scores.length ? sep(tx("Published and bedside scores", "Publikovaná a bedside skóre")) : null, scores.map(rowOf)));
     cCard.appendChild(h("div", { class: "table-scroll" }, tbl));
     cCard.appendChild(h("p", { class: "note", text: t().compNote(mname(REF)) }));
-    const tun = tuningBlock(vt.settings, yrs);
+    const missing = COMPARISON.filter((k) => !models[k] && !(k === "FT-Transformer, tuned" && st !== "admission"));
+    const notRun = [];
+    if (missing.some((k) => k === "TabPFN v2" || k === "TabICL v2")) notRun.push(tx("TabPFN v2 and TabICL v2 have not been run yet: they run only from local weight files inside the hospital (never through an online service), and the files are not yet on the computer that ran this analysis.",
+      "TabPFN v2 a TabICL v2 zatím neproběhly: spouštějí se jen z lokálních souborů vah uvnitř nemocnice (nikdy přes online službu) a soubory zatím nejsou na počítači, kde analýza běžela."));
+    if (models["FT-Transformer, tuned"] || st !== "admission") notRun.push(tx("The tuned FT-Transformer (12 trials) was run on the primary split's admission stage only, for its computing time; the default FT-Transformer on every stage.",
+      "Laděný FT-Transformer (12 pokusů) proběhl kvůli výpočetnímu času jen ve fázi přijetí hlavního rozdělení; výchozí FT-Transformer ve všech fázích."));
+    if (scores.some((k) => k.startsWith("MR PREDICTS"))) notRun.push(tx("HERMES is not a score: it is the pooled patient data of seven thrombectomy trials, on which MR PREDICTS (tested here) was validated and updated.",
+      "HERMES není skóre: jde o sloučená data pacientů ze sedmi studií trombektomie, na kterých byl validován a aktualizován MR PREDICTS (testovaný zde)."));
+    if (notRun.length) cCard.appendChild(h("p", { class: "note", text: notRun.join(" ") }));
+    const tun = tuningBlock(vt.settings, yrs, vt.comparison_settings);
     if (tun) cCard.appendChild(tun);
     root.appendChild(cCard);
 
     // AUROC across stages + ROC
+    const greyLegend = [];
+    if (allLines && comps.length) greyLegend.push({ label: tx("Comparison only (grey, dashed)", "Jen pro srovnání (šedě, čárkovaně)"), type: "line dash-grey" });
     const row1 = h("div", { class: "grid-2 block" });
     const aCard = h("div", { class: "card card-pad" });
-    const aSeries = learners.map((k, i) => ({
-      label: mname(k), color: mcolor(k), dots: true, offset: (i - (learners.length - 1) / 2) * 5,
+    const aKeys = shownL.filter((k) => STAGES.some((s2) => sp.stages[s2].targets[tg].models[k]));
+    const aSeries = aKeys.map((k, i) => ({
+      label: mname(k), color: mcolor(k), dots: true, dash: isComp(k), width: isComp(k) ? 1.4 : 2, offset: (i - (aKeys.length - 1) / 2) * (aKeys.length > 8 ? 3 : 5),
       points: STAGES.map((s2, j) => {
         const r = sp.stages[s2].targets[tg].models[k];
-        return { x: j, y: r.auroc, lo: r.ci.auroc[0], hi: r.ci.auroc[1] };
+        if (!r) return { x: j, y: null };
+        // intervals for the reference and the chosen model only (all of them are in the table)
+        return k === REF || k === chosen ? { x: j, y: r.auroc, lo: r.ci.auroc[0], hi: r.ci.auroc[1] } : { x: j, y: r.auroc, ci: r.ci.auroc };
       }),
     }));
     const fa = C.figure(aCard, {
-      title: t().aurocTitle, sub: t().aurocSub(yrs), legend: aSeries.map((s2) => ({ label: s2.label, color: s2.color, type: "line" })),
-      table: { columns: [t().model].concat(STAGES.map(stageLabel)), rows: learners.map((k) => [mname(k)].concat(STAGES.map((s2) => { const r = sp.stages[s2].targets[tg].models[k]; return `${num(r.auroc, 3)} (${ciTxt(r.ci.auroc)})`; }))) },
+      title: t().aurocTitle, sub: tx(`AUROC, ${yrs} patients; 95% bootstrap CI drawn for the reference${chosen !== REF ? " and the chosen model" : ""} (all intervals in the table)`,
+        `AUROC, pacienti ${yrs}; 95% bootstrapový IS zakreslen u reference${chosen !== REF ? " a zvoleného modelu" : ""} (všechny intervaly v tabulce)`), legend: aSeries.filter((s2) => !s2.dash).map((s2) => ({ label: s2.label, color: s2.color, type: "line" })).concat(greyLegend),
+      table: { columns: [t().model].concat(STAGES.map(stageLabel)), rows: learners.map((k) => [mname(k)].concat(STAGES.map((s2) => { const r = sp.stages[s2].targets[tg].models[k]; return r ? `${num(r.auroc, 3)} (${ciTxt(r.ci.auroc)})` : "–"; }))) },
       labels: { table: t().showTable, chart: t().showChart },
     });
     C.lineChart(fa.body, { height: 240, x: { type: "cat", cats: STAGES.map(stageLabel) }, y: { domain: [0.5, 1], ticks: [0.5, 0.6, 0.7, 0.8, 0.9, 1], fmt: (v) => num(v, 1) }, series: aSeries,
-      tipFmt: (v, p) => `${num(v, 3)} (${num(p.lo, 2)}–${num(p.hi, 2)})`, aria: t().aurocTitle });
+      tipFmt: (v, p) => { const c = p.lo !== undefined ? [p.lo, p.hi] : p.ci; return c ? `${num(v, 3)} (${num(c[0], 2)}–${num(c[1], 2)})` : num(v, 3); }, aria: t().aurocTitle });
     row1.appendChild(aCard);
     const rCard = h("div", { class: "card card-pad" });
-    const rKeys = learners.concat(scores);
-    const rSeries = rKeys.map((k) => ({ label: mname(k), color: mcolor(k), width: k === chosen ? 2.6 : LEARNERS.includes(k) ? 1.5 : 1.0, points: vt.curves.roc[k].map((p) => ({ x: p.fpr, y: p.tpr })) }));
-    const rLegend = rSeries.filter((s2) => learners.map(mname).includes(s2.label)).map((s2) => ({ label: s2.label, color: s2.color, type: "line" }));
-    if (scores.length) rLegend.push({ label: tx("Scores (grey)", "Skóre (šedě)"), color: "var(--faint)", type: "line" });
+    const rKeys = shownL.concat(allLines ? scores : []);
+    const lineOf = (k, w) => ({ label: mname(k), color: mcolor(k), dash: isComp(k), width: k === chosen ? 2.6 : cands.includes(k) ? w : isComp(k) ? 1.3 : 1.0 });
+    const rSeries = rKeys.map((k) => ({ ...lineOf(k, 1.5), points: vt.curves.roc[k].map((p) => ({ x: p.fpr, y: p.tpr })) }));
+    const rLegend = cands.map((k) => ({ label: mname(k), color: mcolor(k), type: "line" })).concat(greyLegend);
+    if (allLines && scores.length) rLegend.push({ label: tx("Scores (grey)", "Skóre (šedě)"), color: GREY, type: "line" });
     const fr = C.figure(rCard, { title: t().rocTitle, sub: `${L(STAGE[st].title)} · ${yrs}`, legend: rLegend,
       table: { columns: [t().fpr].concat(rKeys.map(mname)), rows: vt.curves.roc[REF].filter((_, i) => i % 5 === 0).map((p, j) => [num(p.fpr, 2)].concat(rKeys.map((k) => num(vt.curves.roc[k][j * 5].tpr, 2)))) },
       labels: { table: t().showTable, chart: t().showChart } });
@@ -1445,7 +1609,10 @@
 
     // per-model cards
     const mSel = h("select", { class: "sel", id: "val-model" });
-    for (const k of learners.concat(scores)) mSel.appendChild(h("option", { value: k, selected: k === S.valModel ? true : null }, mname(k)));
+    for (const [lbl, keys] of [[tx("Candidates for the calculator", "Kandidáti pro kalkulačku"), cands], [tx("Comparison only", "Jen pro srovnání"), comps], [tx("Published and bedside scores", "Publikovaná a bedside skóre"), scores]]) {
+      if (!keys.length) continue;
+      mSel.appendChild(h("optgroup", { label: lbl }, keys.map((k) => h("option", { value: k, selected: k === S.valModel ? true : null }, mname(k)))));
+    }
     mSel.addEventListener("change", () => { S.valModel = mSel.value; renderValidation(); });
     root.appendChild(h("div", { class: "view-head", style: "margin-top:6px" }, h("div", null,
       h("h2", { style: "font-size:19px", text: tx("One model in detail", "Jeden model podrobně") }),
@@ -1455,14 +1622,9 @@
     const vm = S.valModel;
     const row2 = h("div", { class: "grid-2 block" });
     row2.appendChild(calibrationCard(vt, vm, yrs));
-    const up = updatingCard(vt, learners, yrs);
-    if (up) row2.appendChild(up);
+    const thr0 = thresholdCard(vt, tg, vm, yrs);
+    if (thr0) row2.appendChild(thr0);
     root.appendChild(row2);
-    const row3 = h("div", { class: "grid-2 block" });
-    row3.appendChild(dcaCard(vt, learners, scores, chosen, yrs));
-    const thr = thresholdCard(vt, tg, vm, yrs);
-    if (thr) row3.appendChild(thr);
-    root.appendChild(row3);
     if (vt.subgroups && vt.subgroups[vm]) { const sg = subgroupCard(vt, vm, yrs); sg.classList.add("block"); root.appendChild(sg); }
     const row4 = h("div", { class: "grid-2 block" });
     const ic = importanceCard(st, tg, vm);
@@ -1470,11 +1632,26 @@
     const sc = stabilityCard(st, tg);
     if (sc) row4.appendChild(sc);
     if (row4.childNodes.length) root.appendChild(row4);
+    const shc = shapCompareCard(st, tg, learners);
+    if (shc) root.appendChild(shc);
+
+    // all models again: decision curves and recalibration on newer patients
+    root.appendChild(h("div", { class: "view-head", style: "margin-top:6px" }, h("div", null,
+      h("h2", { style: "font-size:19px", text: tx("Usefulness and updating", "Užitečnost a aktualizace") }),
+      h("p", { text: tx("Net benefit across decision thresholds, and how much recalibrating on newer patients helps, for every model.",
+        "Čistý přínos napříč rozhodovacími prahy a nakolik pomůže přepočet kalibrace na novějších pacientech, pro všechny modely.") }))));
+    const row3 = h("div", { class: "grid-2 block" });
+    row3.appendChild(dcaCard(vt, shownL, allLines ? scores : [], chosen, yrs, cands));
+    const up = updatingCard(vt, cands, allLines ? comps : [], scores, yrs);
+    if (up) row3.appendChild(up);
+    root.appendChild(row3);
     const oc = ordinalCard(st);
     if (oc) { oc.classList.add("block"); root.appendChild(oc); }
     const nc = nestedCard();
     if (nc) root.appendChild(nc);
     root.appendChild(driftCard(st, tg, vt, chosen, yrs, dyrs));
+    const mo = missingOutcomeCard();
+    if (mo) root.appendChild(mo);
   }
 
   function nestedFor(st, tg) {
@@ -1488,27 +1665,37 @@
     const sel = ((V.selection || {})[st] || {})[tg];
     const card = h("div", { class: "card card-pad block selection" });
     if (!sel) return card;
+    const holm = (V.groups || {}).multiplicity === "holm";
+    const m = Object.keys(sel.candidates).length;
     card.appendChild(h("div", { class: "chart-head" }, h("div", null,
       h("div", { class: "chart-title", text: tx("Which model the calculator uses, and why", "Který model kalkulačka používá a proč") }),
-      h("div", { class: "chart-sub", text: tx(`Rule fixed before testing (as in the 2026 analysis); temporal test ${yearsOf("primary")}${sel.nested_cv ? " and nested cross-validation on all years" : ""}`,
-        `Pravidlo stanovené před testováním (jako v analýze z roku 2026); časový test ${yearsOf("primary")}${sel.nested_cv ? " a vnořená křížová validace na všech letech" : ""}`) }))));
-    card.appendChild(h("p", { class: "callout", html: tx(
+      h("div", { class: "chart-sub", text: tx(`Rule fixed before testing (the 2026 analysis plan, amendment 1 of 19 October 2026); temporal test ${yearsOf("primary")}${sel.nested_cv ? " and nested cross-validation on all years" : ""}`,
+        `Pravidlo stanovené před testováním (plán analýzy z roku 2026, dodatek 1 z 19. října 2026); časový test ${yearsOf("primary")}${sel.nested_cv ? " a vnořená křížová validace na všech letech" : ""}`) }))));
+    card.appendChild(h("p", { class: "callout", html: holm ? tx(
+      `<b>${mname(sel.chosen)}</b>${sel.chosen === sel.reference ? " (the reference)" : ""} for ${stageLabel(st).toLowerCase()}, ${tg === "good_outcome" ? "mRS 0–2" : "death"}. ${mname(sel.reference)} is the reference; one of the other ${m} candidates replaces it only if its AUROC on the temporal test is higher with a Holm-adjusted paired-bootstrap p below 0.05 (adjusted for comparing ${m} candidates), or in nested cross-validation it gains at least 0.01 AUROC on average and is better in at least 80% of the folds, and in both cases its calibration-in-the-large is no more than 0.05 worse.`,
+      `<b>${mname(sel.chosen)}</b>${sel.chosen === sel.reference ? " (reference)" : ""} pro fázi ${stageLabel(st).toLowerCase()}, ${tg === "good_outcome" ? "mRS 0–2" : "úmrtí"}. ${mname(sel.reference)} je referencí; jeden z dalších ${m} kandidátů ji nahradí jen tehdy, když má na časovém testu vyšší AUROC s párovou bootstrapovou p po Holmově korekci pod 0,05 (korekce na srovnání ${m} kandidátů), nebo když ve vnořené křížové validaci získá v průměru alespoň 0,01 AUROC a je lepší v alespoň 80 % foldů, a v obou případech jeho kalibrace v celku není o více než 0,05 horší.`) : tx(
       `<b>${mname(sel.chosen)}</b>${sel.chosen === sel.reference ? " (the reference)" : ""} for ${stageLabel(st).toLowerCase()}, ${tg === "good_outcome" ? "mRS 0–2" : "death"}. ${mname(sel.reference)} is the reference; another model replaces it only if its paired 95% CI of the AUROC difference on the temporal test lies above zero, or in nested cross-validation it gains at least 0.01 AUROC on average and is better in at least 80% of the folds, and in both cases its calibration-in-the-large is no more than 0.05 worse.`,
       `<b>${mname(sel.chosen)}</b>${sel.chosen === sel.reference ? " (reference)" : ""} pro fázi ${stageLabel(st).toLowerCase()}, ${tg === "good_outcome" ? "mRS 0–2" : "úmrtí"}. ${mname(sel.reference)} je referencí; jiný model ji nahradí jen tehdy, když párový 95% IS rozdílu AUROC na časovém testu leží nad nulou, nebo když ve vnořené křížové validaci získá v průměru alespoň 0,01 AUROC a je lepší v alespoň 80 % foldů, a v obou případech jeho kalibrace v celku není o více než 0,05 horší.`) }));
     const rows = Object.entries(sel.candidates).map(([k, c]) => h("tr", { class: c.qualifies ? "chosen" : "" },
-      h("th", { scope: "row" }, h("span", { class: "dot", style: `background:${mcolor(k)}` }), mname(k)),
+      h("th", { scope: "row" }, dotOf(k), mname(k)),
       h("td", null, c.delta_test ? `${signed(c.delta_test.mean, 3)} ` : "–", c.delta_test ? h("span", { class: "ci", text: sciTxt(c.delta_test.ci) }) : null),
+      ...(holm ? [h("td", { text: c.delta_test ? pFmt(c.delta_test.p_two_sided) : "–" }), h("td", { text: pFmt(c.p_holm) })] : []),
       h("td", { text: c.test_rule ? tx("yes", "ano") : tx("no", "ne") }),
       h("td", { text: c.cv_delta_mean !== undefined ? `${signed(c.cv_delta_mean, 3)} · ${num(c.cv_share_better * 100)}%` : "–" }),
       h("td", { text: c.cv_rule === undefined ? "–" : c.cv_rule ? tx("yes", "ano") : tx("no", "ne") }),
       h("td", { text: c.calibration_ok ? tx("yes", "ano") : tx("no", "ne") }),
       h("td", { class: c.qualifies ? "best" : "", text: c.qualifies ? tx("replaces", "nahrazuje") : tx("no", "ne") })));
+    const head = [tx("Candidate", "Kandidát"), tx("ΔAUROC on test (95% CI)", "ΔAUROC na testu (95% IS)")]
+      .concat(holm ? [tx("p", "p"), tx("p, Holm", "p, Holm")] : [])
+      .concat([holm ? tx("Test rule met", "Pravidlo testu") : tx("CI above 0", "IS nad 0"), tx("Nested CV: ΔAUROC · folds better", "Vnořená CV: ΔAUROC · lepší foldy"), tx("CV rule met", "Pravidlo CV"), tx("Calibration not worse", "Kalibrace nehorší"), tx("Verdict", "Výsledek")]);
     card.appendChild(h("div", { class: "table-scroll" }, h("table", { class: "data compact" },
-      h("thead", null, h("tr", null, [tx("Candidate", "Kandidát"), tx("ΔAUROC on test (95% CI)", "ΔAUROC na testu (95% IS)"), tx("CI above 0", "IS nad 0"),
-        tx("Nested CV: ΔAUROC · folds better", "Vnořená CV: ΔAUROC · lepší foldy"), tx("CV rule met", "Pravidlo CV"), tx("Calibration not worse", "Kalibrace nehorší"), tx("Verdict", "Výsledek")].map((x) => h("th", { scope: "col", text: x })))),
+      h("thead", null, h("tr", null, head.map((x) => h("th", { scope: "col", text: x })))),
       h("tbody", null, rows))));
     if (!sel.nested_cv) card.appendChild(h("p", { class: "note", text: tx("Nested cross-validation was run for the admission stage and mRS 0–2; here the rule uses the temporal test, and calibration is compared on the test years.",
       "Vnořená křížová validace proběhla pro fázi přijetí a mRS 0–2; zde pravidlo vychází z časového testu a kalibrace se srovnává na testovacích letech.") }));
+    if (holm) card.appendChild(h("p", { class: "note", text: tx(
+      "Why Holm: with more candidates, the chance that one of them beats the reference on the test years by luck alone grows. Holm's correction keeps that chance at 5% for the whole set; it can only make a replacement harder. Learners validated for comparison only are never candidates.",
+      "Proč Holm: s více kandidáty roste šance, že některý z nich na testovacích letech porazí referenci jen náhodou. Holmova korekce drží tuto šanci na 5 % pro celou skupinu; náhradu může jen ztížit. Modely validované jen pro srovnání nikdy kandidáty nejsou.") }));
     return card;
   }
 
@@ -1529,42 +1716,54 @@
     return card;
   }
 
-  // Updating: recalibrated on the first test year, evaluated on the later years (2026 analysis's table)
-  function updatingCard(vt, learners, yrs) {
-    const rows = learners.filter((k) => vt.updating && vt.updating[k]);
-    if (!rows.length) return null;
-    const u0 = vt.updating[rows[0]];
+  // Updating: recalibrated on the first test year, evaluated on the later years (2026 analysis's table),
+  // for every learner and every published or bedside score
+  function updatingCard(vt, cands, comps, scores, yrs) {
+    const U = vt.updating || {};
+    const groups = [[tx("Candidates for the calculator", "Kandidáti pro kalkulačku"), cands], [tx("Comparison only", "Jen pro srovnání"), comps],
+      [tx("Published and bedside scores", "Publikovaná a bedside skóre"), scores]].map(([l, ks]) => [l, ks.filter((k) => U[k])]).filter(([, ks]) => ks.length);
+    if (!groups.length) return null;
+    const u0 = U[groups[0][1][0]];
     const card = h("div", { class: "card card-pad" });
     card.appendChild(h("div", { class: "chart-head" }, h("div", null,
       h("div", { class: "chart-title", text: tx("Recalibration on newer patients", "Přepočet kalibrace na novějších pacientech") }),
-      h("div", { class: "chart-sub", text: tx(`Recalibrated on ${u0.recal_year} (n ${num(u0.n_recal)}), evaluated on the later test years (n ${num(u0.n_eval)}). AUROC does not change; calibration does.`,
-        `Přepočteno na roce ${u0.recal_year} (n ${num(u0.n_recal)}), hodnoceno na pozdějších testovacích letech (n ${num(u0.n_eval)}). AUROC se nemění, mění se kalibrace.`) }))));
-    const V3 = [["original", tx("Original", "Původní")], ["intercept", tx("Intercept updated", "Upravený intercept")], ["logistic", tx("Intercept and slope", "Intercept a sklon")]];
+      h("div", { class: "chart-sub", text: tx(`Recalibrated on ${u0.recal_year} (n ${num(u0.n_recal)}), evaluated on the later test years (n ${num(u0.n_eval)}): original → intercept updated → intercept and slope updated. AUROC does not change; calibration does.`,
+        `Přepočteno na roce ${u0.recal_year} (n ${num(u0.n_recal)}), hodnoceno na pozdějších testovacích letech (n ${num(u0.n_eval)}): původní → upravený intercept → upravený intercept i sklon. AUROC se nemění, mění se kalibrace.`) }))));
+    const arrow = (vals) => vals.join(" → ");
+    const head = [t().model, t().brier, t().citl, t().slope];
     const body = [];
-    for (const k of rows) for (const [v, lbl] of V3) {
-      const r = vt.updating[k][v];
-      body.push(h("tr", null, h("th", { scope: "row" }, v === "original" ? mname(k) : ""), h("td", { text: lbl }), h("td", { text: num(r.brier, 3) }), h("td", { text: signed(r.citl) }), h("td", { text: num(r.slope, 2) })));
+    for (const [lbl, ks] of groups) {
+      body.push(h("tr", { class: "sep" }, h("th", { colspan: head.length, text: lbl })));
+      for (const k of ks) {
+        const u = U[k];
+        body.push(h("tr", { class: cands.includes(k) ? "" : isComp(k) ? "comp" : "score" }, h("th", { scope: "row" }, dotOf(k), mname(k)),
+          h("td", { text: arrow([num(u.original.brier, 3), num(u.intercept.brier, 3), num(u.logistic.brier, 3)]) }),
+          h("td", { text: arrow([signed(u.original.citl), signed(u.intercept.citl), signed(u.logistic.citl)]) }),
+          h("td", { text: arrow([u.original.slope, u.intercept.slope, u.logistic.slope].map((v) => (Math.abs(v) > 5 ? "n/e" : num(v, 2)))) })));
+      }
     }
-    card.appendChild(h("div", { class: "table-scroll" }, h("table", { class: "data compact" },
-      h("thead", null, h("tr", null, [t().model, tx("Variant", "Varianta"), t().brier, t().citl, t().slope].map((x) => h("th", { scope: "col", text: x })))),
+    card.appendChild(h("div", { class: "table-scroll" }, h("table", { class: "data compact updating" },
+      h("thead", null, h("tr", null, head.map((x) => h("th", { scope: "col", text: x })))),
       h("tbody", null, body))));
     card.appendChild(h("p", { class: "note", text: tx(
-      "Outcome rates swing from year to year, so a single year over- or under-corrects. The published calculator re-estimates its intercept on the pooled last three years instead.",
-      "Podíl dobrých výsledků mezi roky kolísá, takže jediný rok koriguje příliš nebo málo. Zveřejněná kalkulačka proto odhaduje intercept ze sloučených posledních tří let.") }));
+      "Outcome rates swing from year to year, so a single year over- or under-corrects. The published calculator re-estimates its intercept on the pooled last three years instead; the bedside and published scores shown next to its estimate are recalibrated the same way. Comparison-only learners appear with All models.",
+      "Podíl dobrých výsledků mezi roky kolísá, takže jediný rok koriguje příliš nebo málo. Zveřejněná kalkulačka proto odhaduje intercept ze sloučených posledních tří let; stejně jsou přepočtena i bedside a publikovaná skóre zobrazená u jejího odhadu. Modely jen pro srovnání se zobrazí volbou Všechny modely.") }));
     return card;
   }
 
-  function dcaCard(vt, learners, scores, chosen, yrs) {
+  function dcaCard(vt, learnersShown, scores, chosen, yrs, cands) {
     const dcCard = h("div", { class: "card card-pad" });
     const all = vt.curves.dca_all;
-    const keys = learners.concat(scores);
+    const keys = learnersShown.concat(scores);
     const dm = vt.curves.dca;
-    const modelSeries = keys.map((k) => ({ label: mname(k), color: mcolor(k), width: k === chosen ? 2.6 : LEARNERS.includes(k) ? 1.6 : 1.0, points: dm[k].map((r) => ({ x: r.t, y: r.nb })) }));
+    const modelSeries = keys.map((k) => ({ label: mname(k), color: mcolor(k), dash: isComp(k),
+      width: k === chosen ? 2.6 : cands.includes(k) ? 1.6 : isComp(k) ? 1.3 : 1.0, points: dm[k].map((r) => ({ x: r.t, y: r.nb })) }));
     const dSeries = modelSeries.slice().reverse().concat([{ label: t().treatAll, color: "var(--ink-2)", width: 1.5, dash: true, points: all.map((r) => ({ x: r.t, y: r.nb })) }]);
     const lo = Math.min(-0.05, ...all.map((r) => Math.max(r.nb, -0.1)));
     const hi = Math.max(...keys.flatMap((k) => dm[k].map((r) => r.nb)), ...all.map((r) => r.nb)) + 0.03;
-    const dLegend = modelSeries.filter((s2) => learners.map(mname).includes(s2.label)).map((s2) => ({ label: s2.label, color: s2.color, type: "line" }));
-    if (scores.length) dLegend.push({ label: tx("Scores (grey)", "Skóre (šedě)"), color: "var(--faint)", type: "line" });
+    const dLegend = cands.filter((k) => keys.includes(k)).map((k) => ({ label: mname(k), color: mcolor(k), type: "line" }));
+    if (learnersShown.some(isComp)) dLegend.push({ label: tx("Comparison only (grey, dashed)", "Jen pro srovnání (šedě, čárkovaně)"), type: "line dash-grey" });
+    if (scores.length) dLegend.push({ label: tx("Scores (grey)", "Skóre (šedě)"), color: GREY, type: "line" });
     dLegend.push({ label: t().treatAll, color: "var(--ink-2)", type: "line" }, { label: t().treatNone, color: "var(--line-2)", type: "line" });
     const fd = C.figure(dcCard, { title: t().dcaTitle, sub: `${t().dcaSub} · ${yrs}`, legend: dLegend,
       table: { columns: [t().threshold].concat(keys.map(mname), [t().treatAll, t().treatNone]),
@@ -1617,8 +1816,9 @@
     if (a >= 1) return num(v, a >= 10 ? 0 : 1);
     return num(v, Math.min(6, Math.max(0, 1 - Math.floor(Math.log10(a)))));
   };
-  function tuningBlock(st, yrs) {
+  function tuningBlock(st, yrs, comp) {
     if (!st) return null;
+    comp = comp || {};
     const trials = (st.LightGBM && st.LightGBM.trials) || 50;
     const SPACE = {
       LightGBM: tx("learning rate 0.01–0.08, 3–15 leaves, depth 2–5, 20–80 patients per leaf, column and row sampling, L2 penalty; monotone constraints; trees by early stopping",
@@ -1629,6 +1829,15 @@
         "1–3 vrstvy po 8–128 neuronech, ReLU nebo tanh, útlum vah, rychlost učení, velikost dávky; nejlepší nastavení zprůměrované přes 5 náhodných startů"),
       "Logistic regression": tx("penalty strength, 50 values", "síla penalizace, 50 hodnot"),
       "Logistic regression (splines)": tx("3, 4 or 5 knots × penalty strength (50 values each)", "3, 4 nebo 5 uzlů × síla penalizace (po 50 hodnotách)"),
+      EBM: tx("not tuned: interpret's defaults with at least 20 patients per leaf, 10 pair terms on 32 bins", "neladěno: výchozí nastavení interpret s alespoň 20 pacienty v listu, 10 párových členů na 32 binech"),
+      "LR + interactions": tx("as the reference (knots × penalty), plus age × NIHSS and onset-to-puncture × age", "jako reference (uzly × penalizace) plus věk × NIHSS a čas do punkce × věk"),
+      "LR + multiple imputation": tx("the reference's knots and penalty; 10 chained-equation imputations", "uzly a penalizace reference; 10 imputací řetězenými rovnicemi"),
+      Stacking: tx("the reference's and XGBoost's tuned settings and an EBM (4 bags); logistic meta-model on out-of-fold log-odds", "laděná nastavení reference a XGBoost a EBM (4 sáčky); logistický metamodel na log-odds mimo fold"),
+      "EBM (defaults)": tx("not tuned: interpret's defaults (at least 4 patients per leaf)", "neladěno: výchozí nastavení interpret (alespoň 4 pacienti v listu)"),
+      CatBoost: tx("not tuned: CatBoost's defaults", "neladěno: výchozí nastavení CatBoost"),
+      "Probability averaging": tx("not tuned: the mean of the stacking's three base models", "neladěno: průměr tří základních modelů stackingu"),
+      "FT-Transformer": tx("not tuned: rtdl defaults; epochs by early stopping on a fifth of the development patients", "neladěno: výchozí nastavení rtdl; počet epoch časným zastavením na pětině vývojových pacientů"),
+      "FT-Transformer, tuned": tx("12 Optuna trials: depth, width, dropout, learning rate, weight decay", "12 pokusů Optuna: hloubka, šířka, dropout, rychlost učení, útlum vah"),
     };
     const chosen = (k, s) => {
       if (!s) return "–";
@@ -1640,35 +1849,116 @@
       if (k === "MLP") return [`${tx("layers", "vrstvy")} ${s.hidden_layers.join("→")}`, s.activation, `${tx("weight decay", "útlum vah")} ${sig2(s.alpha)}`,
         `${tx("rate", "rychlost")} ${sig2(s.learning_rate)}`, `${tx("batch", "dávka")} ${s.batch_size}`, `${s.ensemble} ${tx("starts", "startů")}`].join(" · ");
       if (k === "Logistic regression (splines)") return `${s.knots} ${tx("knots", "uzly")} · C ${sig2(s.C)}`;
-      return `C ${sig2(s.C)}`;
+      if (k === "EBM" || k === "EBM (defaults)") return `${s.terms} ${tx("terms", "členů")} (${s.pairs} ${tx("pairs", "párů")}) · ≥${s.min_samples_leaf} ${tx("per leaf", "v listu")} · ${s.outer_bags} ${tx("bags", "sáčků")}`;
+      if (k === "LR + interactions") return `${s.knots} ${tx("knots", "uzly")} · C ${sig2(s.C)} · ${tx("2 interactions", "2 interakce")}`;
+      if (k === "LR + multiple imputation") return `${s.knots} ${tx("knots", "uzly")} · C ${sig2(s.C)} · ${s.imputations} ${tx("imputations", "imputací")}`;
+      if (k === "Stacking" && s.meta) return `${tx("weights", "váhy")} ${s.meta.coef.map((c) => sig2(c)).join(" / ")} (${tx("reference / XGBoost / EBM", "reference / XGBoost / EBM")})`;
+      if (k === "CatBoost") return `${s.trees} ${tx("trees", "stromů")}`;
+      if (k === "Probability averaging") return (s.base || []).map(mname).join(" · ");
+      if (k.startsWith("FT-Transformer")) return [`${s.n_blocks} ${tx("blocks", "bloky")} × ${s.d_block}`, `${tx("rate", "rychlost")} ${sig2(s.lr)}`, `${s.epochs} ${tx("epochs", "epoch")}`].join(" · ");
+      if (s.C !== undefined) return `C ${sig2(s.C)}`;
+      return "–";
     };
-    const keys = LEARNERS.filter((k) => st[k]);
+    const keys = LEARNERS.filter((k) => st[k] || comp[k]);
+    const sv = (k) => st[k] || comp[k];
     const box = h("details", { class: "tuning" });
     box.appendChild(h("summary", null, h("span", { text: tx("How each model was tuned", "Jak byly modely laděny") }),
-      h("span", { class: "muted", text: tx(`${trials} candidate settings each, same folds`, `po ${trials} kandidátních nastaveních, stejné foldy`) })));
+      h("span", { class: "muted", text: tx(`${trials} candidate settings for each tuned learner, same folds`, `po ${trials} kandidátních nastaveních u laděných modelů, stejné foldy`) })));
     box.appendChild(h("p", { class: "note", text: tx(
-      `Every learner had the same budget: ${trials} candidate settings (Bayesian search for the tree models and the network, a grid of penalty strengths for the regressions), each scored by 5-fold cross-validated log-loss on the development patients, with the same folds for every model. The ${yrs} patients were never used to choose anything. Every learner gets the same inputs; missing values are filled with the development median plus a missing-value indicator for the regressions and the network, and follow the trees' learned default branch in LightGBM and XGBoost.`,
-      `Každý model měl stejný rozpočet: ${trials} kandidátních nastavení (bayesovské hledání u stromových modelů a sítě, mřížka sil penalizace u regresí), každé hodnocené 5násobnou křížovou validací log-loss na vývojových pacientech se stejnými foldy pro všechny modely. Pacienti ${yrs} nebyli k žádné volbě použiti. Všechny modely mají stejné vstupy; chybějící hodnoty jsou u regresí a sítě doplněny mediánem z vývoje s indikátorem chybění a ve stromech LightGBM a XGBoost jdou naučenou výchozí větví.`) }));
+      `The five learners of the original plan had the same budget: ${trials} candidate settings (Bayesian search for the tree models and the network, a grid of penalty strengths for the regressions), each scored by 5-fold cross-validated log-loss on the development patients, with the same folds for every model. The amendment-1 learners reuse those settings or are not tuned, as the amendment specifies; the comparison-only learners keep their default settings, except the tuned FT-Transformer. The ${yrs} patients were never used to choose anything. Every learner gets the same inputs; missing values are filled with the development median plus a missing-value indicator for the regressions and the networks (chained-equation imputation for regression + multiple imputation), and follow the trees' learned default branch in the tree models.`,
+      `Pět modelů původního plánu mělo stejný rozpočet: ${trials} kandidátních nastavení (bayesovské hledání u stromových modelů a sítě, mřížka sil penalizace u regresí), každé hodnocené 5násobnou křížovou validací log-loss na vývojových pacientech se stejnými foldy pro všechny modely. Modely dodatku 1 tato nastavení přebírají nebo se neladí, jak dodatek stanoví; modely jen pro srovnání mají výchozí nastavení, kromě laděného FT-Transformeru. Pacienti ${yrs} nebyli k žádné volbě použiti. Všechny modely mají stejné vstupy; chybějící hodnoty jsou u regresí a sítí doplněny mediánem z vývoje s indikátorem chybění (u regrese s vícenásobnou imputací imputací řetězenými rovnicemi) a ve stromových modelech jdou naučenou výchozí větví.`) }));
     const tbl = h("table", { class: "data compact tuning-table" },
       h("thead", null, h("tr", null, [t().model, tx("Searched", "Prohledáno"), tx("Chosen for this stage and outcome", "Zvoleno pro tuto fázi a výsledek"), tx("CV log-loss", "CV log-loss")].map((x) => h("th", { scope: "col", text: x })))),
-      h("tbody", null, keys.map((k) => h("tr", null, h("th", { scope: "row", text: mname(k) }),
+      h("tbody", null, keys.map((k) => h("tr", { class: isComp(k) ? "comp" : "" }, h("th", { scope: "row", text: mname(k) }),
         h("td", { class: "txt", "data-l": tx("Searched", "Prohledáno"), text: SPACE[k] || "" }),
-        h("td", { class: "txt", "data-l": tx("Chosen", "Zvoleno"), text: chosen(k, st[k]) }),
-        h("td", { "data-l": "CV log-loss", text: num(st[k].cv_logloss, 3) })))));
+        h("td", { class: "txt", "data-l": tx("Chosen", "Zvoleno"), text: chosen(k, sv(k)) }),
+        h("td", { "data-l": "CV log-loss", text: num(sv(k).cv_logloss, 3) })))));
     box.appendChild(h("div", { class: "table-scroll" }, tbl));
     return box;
   }
 
+  // SHAP of every validated model on the same test patients (artifacts/public/shap.json)
+  const SHAP = DATA.shap || null;
+  const shapOf = (st, tg) => {
+    const sp2 = SHAP && SHAP.splits && (SHAP.splits.primary || Object.values(SHAP.splits)[0]);
+    const r = sp2 && sp2.stages && sp2.stages[st] && sp2.stages[st][tg];
+    return r ? { res: r, years: sp2.test_years } : null;
+  };
+  const methodText = (m) => ({
+    exact_linear: tx("exact (the regression's terms)", "přesné (členy regrese)"),
+    exact_tree: tx("exact (TreeSHAP)", "přesné (TreeSHAP)"),
+    exact_ebm: tx("exact (the EBM's additive terms)", "přesné (aditivní členy EBM)"),
+    exact_stack: tx("exact (weighted sum of the base models' values)", "přesné (vážený součet hodnot základních modelů)"),
+    sampled: tx(`sampled (${(SHAP || {}).n_permutations || 10} permutations × ${(SHAP || {}).n_background || 40} background patients)`, `vzorkované (${(SHAP || {}).n_permutations || 10} permutací × ${(SHAP || {}).n_background || 40} pacientů pozadí)`),
+    gradient: tx(`expected gradients (${(SHAP || {}).n_gradient_paths || 64} random paths from ${(SHAP || {}).n_background || 40} background patients)`, `očekávané gradienty (${(SHAP || {}).n_gradient_paths || 64} náhodných cest od ${(SHAP || {}).n_background || 40} pacientů pozadí)`),
+  })[m] || m;
+  const featLabel = (f) => (FEAT[f] ? L(FEAT[f].label) : f);
+
   function importanceCard(st, tg, k) {
+    const sh = shapOf(st, tg);
+    const r = sh && sh.res[k];
+    const card = h("div", { class: "card card-pad" });
+    if (r) {
+      const imp = Object.entries(r.importance).slice(0, 14);
+      const yrsTxt = sh.years ? `${sh.years[0]}–${sh.years[1]}` : yearsOf();
+      const fi = C.figure(card, { title: t().impTitle(mname(k)), sub: tx(`Mean |SHAP| (log-odds) over the ${num(r.n)} test patients ${yrsTxt} · ${L(STAGE[st].title)}`, `Průměrné |SHAP| (log-odds) přes ${num(r.n)} testovacích pacientů ${yrsTxt} · ${L(STAGE[st].title)}`),
+        table: { columns: [t().variable, tx("mean |SHAP|", "průměrné |SHAP|"), tx("share", "podíl")], rows: imp.map(([f, v]) => [featLabel(f), num(v, 3), pct100(r.share[f], 1)]) },
+        labels: { table: t().showTable, chart: t().showChart } });
+      C.hbars(fi.body, { rows: imp.map(([f, v]) => ({ label: featLabel(f), value: v, display: num(v, 2) })), color: mcolor(k), valueLabel: tx("mean |SHAP|", "průměrné |SHAP|"), aria: t().impTitle(mname(k)) });
+      card.appendChild(h("p", { class: "note", text: tx(
+        `Method: ${methodText(r.method)}. The development model (fitted on ${devYears()}) explained on the test patients, the same patients for every model, so the bars can be compared across models (table below). A predictor's value adds up its one-hot categories, spline terms and missing-value indicator.`,
+        `Metoda: ${methodText(r.method)}. Vývojový model (natrénovaný na letech ${devYears()}) vysvětlený na testovacích pacientech, stejných pro všechny modely, takže sloupce lze mezi modely srovnávat (tabulka níže). Hodnota prediktoru sčítá jeho kategorie, členy splajnů a indikátor chybění.`) }));
+      return card;
+    }
     const dep = (((V.deployed || {})[st] || {})[tg] || {}).learners || {};
     const ex = dep[k] && dep[k].explain;
-    if (!ex) return null;
-    const card = h("div", { class: "card card-pad" });
+    if (!ex) {
+      if (LEARNERS.includes(k) || !models0(st, tg)[k]) return null;
+      card.appendChild(h("div", { class: "chart-title", text: t().impTitle(mname(k)) }));
+      card.appendChild(h("p", { class: "note", text: tx("A points score has no SHAP values: its items and their points are the explanation.", "Bodové skóre nemá hodnoty SHAP: vysvětlením jsou jeho položky a jejich body.") }));
+      return card;
+    }
     const imp = Object.entries(ex.importance).slice(0, 14);
     const fi = C.figure(card, { title: t().impTitle(mname(k)), sub: `${t().impSub} · ${L(STAGE[st].title)}`,
-      table: { columns: [t().variable, tx("mean |contribution|", "průměrný |příspěvek|")], rows: imp.map(([f, v]) => [FEAT[f] ? L(FEAT[f].label) : f, num(v, 3)]) },
+      table: { columns: [t().variable, tx("mean |contribution|", "průměrný |příspěvek|")], rows: imp.map(([f, v]) => [featLabel(f), num(v, 3)]) },
       labels: { table: t().showTable, chart: t().showChart } });
-    C.hbars(fi.body, { rows: imp.map(([f, v]) => ({ label: FEAT[f] ? L(FEAT[f].label) : f, value: v, display: num(v, 2) })), color: mcolor(k), valueLabel: tx("mean |contribution|", "průměrný |příspěvek|"), aria: t().impTitle(mname(k)) });
+    C.hbars(fi.body, { rows: imp.map(([f, v]) => ({ label: featLabel(f), value: v, display: num(v, 2) })), color: mcolor(k), valueLabel: tx("mean |contribution|", "průměrný |příspěvek|"), aria: t().impTitle(mname(k)) });
+    return card;
+  }
+  const models0 = (st, tg) => valRes(st, tg).models;
+
+  // Every learner side by side: each model's share of its total mean |SHAP| per predictor
+  function shapCompareCard(st, tg, learners) {
+    const sh = shapOf(st, tg);
+    if (!sh) return null;
+    const keys = learners.filter((k) => sh.res[k]);
+    if (keys.length < 2) return null;
+    const feats = Array.from(new Set(keys.flatMap((k) => Object.keys(sh.res[k].share))));
+    const mean = (f) => keys.reduce((a, k) => a + (sh.res[k].share[f] || 0), 0) / keys.length;
+    feats.sort((a, b) => mean(b) - mean(a));
+    const top = feats.slice(0, 14);
+    const max = Math.max(...keys.flatMap((k) => top.map((f) => sh.res[k].share[f] || 0)), 1);
+    const cell = (v) => {
+      const a = Math.round(6 + 54 * Math.min(1, v / max));       // ink stays readable on the darkest step
+      return h("td", { class: `heat${a > 40 ? " on" : ""}`, style: `background: color-mix(in srgb, var(--blue) ${a}%, transparent)`, text: num(v, 0) });
+    };
+    const rank = (k, f) => Object.keys(sh.res[k].share).indexOf(f) + 1;
+    const card = h("div", { class: "card card-pad block" });
+    card.appendChild(h("div", { class: "chart-head" }, h("div", null,
+      h("div", { class: "chart-title", text: tx("What each model relies on", "Na čem stojí jednotlivé modely") }),
+      h("div", { class: "chart-sub", text: tx(`Share of each model's total mean |SHAP| (%), the same ${num(sh.res[keys[0]].n)} test patients · ${L(STAGE[st].title)}, ${tg === "good_outcome" ? "mRS 0–2" : "death"}`,
+        `Podíl na celkovém průměrném |SHAP| modelu (%), stejných ${num(sh.res[keys[0]].n)} testovacích pacientů · ${L(STAGE[st].title)}, ${tg === "good_outcome" ? "mRS 0–2" : "úmrtí"}`) }))));
+    const head = h("tr", null, h("th", { scope: "col", text: t().variable }), keys.map((k) => h("th", { scope: "col", class: isComp(k) ? "mh comp" : "mh" }, dotOf(k), h("span", { text: mname(k) }))));
+    const body = top.map((f) => h("tr", null, h("th", { scope: "row", text: featLabel(f) }),
+      keys.map((k) => { const c = cell(sh.res[k].share[f] || 0); c.title = `${mname(k)} · ${featLabel(f)}: ${pct100(sh.res[k].share[f] || 0, 1)} · ${tx("rank", "pořadí")} ${rank(k, f)}`; return c; })));
+    const rest = h("tr", { class: "rest" }, h("th", { scope: "row", text: tx(`The other ${feats.length - top.length} predictors`, `Ostatních ${feats.length - top.length} prediktorů`) }),
+      keys.map((k) => h("td", { text: num(Object.entries(sh.res[k].share).filter(([f]) => !top.includes(f)).reduce((a, [, v]) => a + v, 0), 0) })));
+    const meth = h("tr", { class: "rest" }, h("th", { scope: "row", text: tx("Method", "Metoda") }),
+      keys.map((k) => h("td", { class: "meth", text: sh.res[k].method === "sampled" ? tx("sampled", "vzork.") : sh.res[k].method === "gradient" ? tx("gradients", "gradienty") : tx("exact", "přesné") })));
+    card.appendChild(h("div", { class: "table-scroll" }, h("table", { class: "data compact shapgrid" }, h("thead", null, head), h("tbody", null, body, rest, meth))));
+    card.appendChild(h("p", { class: "note", text: tx(
+      "Each column adds up to 100% over all predictors. Similar columns mean the models use the registry in the same way; a predictor that only one kind of model leans on is worth a closer look. Exact values where the model allows it; sampled Shapley values (the predictor's columns switched together against a fixed sample of development patients) for the MLP and the averaged probabilities; expected gradients, the SHAP method for differentiable models, for the FT-Transformers.",
+      "Každý sloupec dává přes všechny prediktory 100 %. Podobné sloupce znamenají, že modely využívají registr stejně; prediktor, o který se opírá jen jeden druh modelu, si zaslouží bližší pohled. Přesné hodnoty tam, kde to model umožňuje; vzorkované Shapleyho hodnoty (sloupce prediktoru přepínané společně proti pevnému vzorku vývojových pacientů) u MLP a průměru pravděpodobností; očekávané gradienty, metoda SHAP pro diferencovatelné modely, u FT-Transformerů.") }));
     return card;
   }
 
@@ -1704,9 +1994,13 @@
     C.lineChart(f.body, { height: 230, x: { type: "lin", domain: [0, 1], fmt: (v) => pct(v), title: tx("Estimate", "Odhad") }, y: { domain: [0, 1], fmt: (v) => pct(v), title: tx("Range across refits", "Rozpětí přes přetrénování") }, diagonal: true,
       series: [{ label: tx("95% range", "95% rozpětí"), color: "var(--c1)", dots: true, noLine: true, points: bins.map((b) => ({ x: b.p, y: b.p, lo: b.p_lo, hi: b.p_hi, n: b.n })) }],
       tipFmt: (v, p) => `${pct(p.lo)}–${pct(p.hi)} · n ${p.n}`, tipHead: (xv) => `${tx("Estimate", "Odhad")} ${pct(xv)}`, aria: "stability" });
+    const flip = stab.share_flip_05 !== undefined && stab.share_flip_05 !== null
+      ? tx(` For ${num(stab.share_flip_05 * 100)}% of patients the estimate lands on the other side of 50% in more than a fifth of the refits${stab.share_near_05 !== undefined ? ` (${num(stab.share_near_05 * 100)}% have a published estimate within 5 points of 50%)` : ""}: near the middle, the model cannot say which way a patient will go.`,
+        ` U ${num(stab.share_flip_05 * 100)} % pacientů padne odhad na druhou stranu od 50 % ve více než pětině přetrénování${stab.share_near_05 !== undefined ? ` (${num(stab.share_near_05 * 100)} % má zveřejněný odhad do 5 bodů od 50 %)` : ""}: blízko středu model neumí říct, kam se pacient vydá.`)
+      : "";
     card.appendChild(h("p", { class: "note", text: tx(
-      `Mean absolute difference between a refitted and the published estimate: ${num(stab.mape * 100, 1)} percentage points; ${num((stab.share_wide || 0) * 100)}% of patients have a 95% range wider than 20 points (Riley & Collins 2023). The calculator shows this range under the headline.`,
-      `Průměrný absolutní rozdíl mezi odhadem přetrénovaného a publikovaného modelu: ${num(stab.mape * 100, 1)} procentního bodu; ${num((stab.share_wide || 0) * 100)} % pacientů má 95% rozpětí širší než 20 bodů (Riley & Collins 2023). Kalkulačka toto rozpětí ukazuje pod hlavním odhadem.`) }));
+      `Mean absolute difference between a refitted and the published estimate: ${num(stab.mape * 100, 1)} percentage points; ${num((stab.share_wide || 0) * 100)}% of patients have a 95% range wider than 20 points (Riley & Collins 2023).${flip} The calculator shows this range under the headline.`,
+      `Průměrný absolutní rozdíl mezi odhadem přetrénovaného a publikovaného modelu: ${num(stab.mape * 100, 1)} procentního bodu; ${num((stab.share_wide || 0) * 100)} % pacientů má 95% rozpětí širší než 20 bodů (Riley & Collins 2023).${flip} Kalkulačka toto rozpětí ukazuje pod hlavním odhadem.`) }));
     return card;
   }
 
@@ -1753,20 +2047,24 @@
         h("div", { class: "chart-title", text: tx("Nested cross-validation on all years", "Vnořená křížová validace na všech letech") }),
         h("div", { class: "chart-sub", text: tx(`${stageLabel(st)}, ${tg === "good_outcome" ? "mRS 0–2" : "death"} · ${N.folds} outer folds × ${N.repeats} · every learner re-tuned inside each fold with ${N.trials} candidate settings · n ${num(r.n)}`,
           `${stageLabel(st)}, ${tg === "good_outcome" ? "mRS 0–2" : "úmrtí"} · ${N.folds} vnějších foldů × ${N.repeats} · každý model znovu laděn v každém foldu s ${N.trials} kandidátními nastaveními · n ${num(r.n)}`) }))));
-      const rows = LEARNERS.filter((k) => r.models[k]).map((k) => {
+      const rowOf = (k) => {
         const m = r.models[k];
-        return h("tr", { class: k === REF ? "chosen" : "" }, h("th", { scope: "row" }, h("span", { class: "dot", style: `background:${mcolor(k)}` }), mname(k)),
+        return h("tr", { class: k === REF ? "chosen" : isComp(k) ? "comp" : "" }, h("th", { scope: "row" }, dotOf(k), mname(k)),
           h("td", { text: `${num(m.auroc.mean, 3)} ± ${num(m.auroc.sd, 3)}` }), h("td", { text: k === REF ? tx("reference", "reference") : `${signed(m.delta_mean, 3)} (${signed(m.delta_lo, 3)} to ${signed(m.delta_hi, 3)})` }),
           h("td", { text: m.folds_better === null ? "–" : `${m.folds_better} / ${m.auroc ? r.models[k].fold_auroc.length : "–"}` }),
           h("td", { text: num(m.abs_citl_mean, 2) }), h("td", { text: num(m.slope.mean, 2) }), h("td", { text: num(m.brier.mean, 3) }));
-      });
+      };
+      const head = [t().model, tx("AUROC mean ± SD", "AUROC průměr ± SD"), tx("ΔAUROC vs reference (2.5–97.5th pct)", "ΔAUROC vs reference (2,5.–97,5. pct)"), tx("Folds better", "Lepší foldy"), "|CITL|", t().slope, t().brier];
+      const sepN = (text) => h("tr", { class: "sep" }, h("th", { colspan: head.length, text }));
+      const cK = CANDIDATES.filter((k) => r.models[k]), oK = COMPARISON.filter((k) => r.models[k]);
       out.appendChild(h("div", { class: "table-scroll" }, h("table", { class: "data compact" },
-        h("thead", null, h("tr", null, [t().model, tx("AUROC mean ± SD", "AUROC průměr ± SD"), tx("ΔAUROC vs reference (2.5–97.5th pct)", "ΔAUROC vs reference (2,5.–97,5. pct)"), tx("Folds better", "Lepší foldy"), "|CITL|", t().slope, t().brier].map((x) => h("th", { scope: "col", text: x })))),
-        h("tbody", null, rows))));
+        h("thead", null, h("tr", null, head.map((x) => h("th", { scope: "col", text: x })))),
+        h("tbody", null, oK.length ? sepN(tx("Candidates for the calculator", "Kandidáti pro kalkulačku")) : null, cK.map(rowOf),
+          oK.length ? sepN(tx("Validated for comparison only", "Validováno jen pro srovnání")) : null, oK.map(rowOf)))));
     }
     out.appendChild(h("p", { class: "note", text: tx(
-      "Every year contributes to training and testing, so these numbers describe the modelling procedure rather than the published model; the temporal test above is the main evidence. The ranges across folds are spreads, not confidence intervals.",
-      "Do tréninku i testu přispívají všechny roky, proto tato čísla popisují postup modelování spíše než zveřejněný model; hlavním důkazem je časový test výše. Rozpětí přes foldy jsou rozptyly, nikoli intervaly spolehlivosti.") }));
+      "Every year contributes to training and testing, so these numbers describe the modelling procedure rather than the published model; the temporal test above is the main evidence. The ranges across folds are spreads, not confidence intervals. The amendment-1 and comparison-only learners use the reference's and XGBoost's settings re-tuned inside each fold (the tuned FT-Transformer is left out for its computing time).",
+      "Do tréninku i testu přispívají všechny roky, proto tato čísla popisují postup modelování spíše než zveřejněný model; hlavním důkazem je časový test výše. Rozpětí přes foldy jsou rozptyly, nikoli intervaly spolehlivosti. Modely dodatku 1 a modely jen pro srovnání používají nastavení reference a XGBoost znovu laděná uvnitř každého foldu (laděný FT-Transformer je kvůli výpočetnímu času vynechán).") }));
     return out;
   }
 
@@ -1778,6 +2076,34 @@
     dCard.appendChild(h("div", { class: "chart-title", text: t().driftTitle(yrs), style: "margin-bottom:8px" }));
     dCard.appendChild(h("p", { class: "callout", text: t().driftText(mname(chosen), signed(r.citl), pct(vt.prevalence_dev), dyrs, pct(vt.prevalence_test), yrs, signed(shift), RECENT) }));
     return dCard;
+  }
+
+  // Test-year patients without a 90-day outcome (analyses.json): how the validation would change
+  function missingOutcomeCard() {
+    const mo = (DATA.analyses || {}).missing_outcome;
+    if (!mo || !mo.rows) return null;
+    const ms = mo.models || [];
+    const card = h("div", { class: "card card-pad block" });
+    card.appendChild(h("div", { class: "chart-head" }, h("div", null,
+      h("div", { class: "chart-title", text: tx("Patients without a 90-day outcome", "Pacienti bez výsledku za 90 dní") }),
+      h("div", { class: "chart-sub", text: tx(`${num(mo.n_missing)} of ${num(mo.n_all)} patients treated in ${mo.years[0]}–${mo.years[1]} (${pct(mo.n_missing / mo.n_all)}) have no recorded 90-day mRS · admission stage, mRS 0–2`,
+        `${num(mo.n_missing)} z ${num(mo.n_all)} pacientů léčených v letech ${mo.years[0]}–${mo.years[1]} (${pct(mo.n_missing / mo.n_all)}) nemá zaznamenané mRS za 90 dní · fáze přijetí, mRS 0–2`) }))));
+    const SC = { complete_case: tx("Known outcomes only (the validation above)", "Jen známé výsledky (validace výše)"),
+      missing_poor: tx("All missing had mRS 3–6", "Všichni chybějící měli mRS 3–6"), missing_good: tx("All missing had mRS 0–2", "Všichni chybějící měli mRS 0–2"),
+      imputed: tx("Missing outcomes imputed (20 times)", "Chybějící výsledky imputovány (20×)") };
+    const rng = (r, key, d) => (r[`${key}::min`] === undefined ? ""
+      : key.startsWith("citl") ? ` (${signed(r[`${key}::min`], d)} ${tx("to", "až")} ${signed(r[`${key}::max`], d)})` : ` (${num(r[`${key}::min`], d)}–${num(r[`${key}::max`], d)})`);
+    const head = [tx("Scenario", "Scénář"), "n", tx("mRS 0–2", "mRS 0–2")].concat(ms.flatMap((m2) => [`AUROC · ${mname(m2)}`, `${t().citl} · ${mname(m2)}`]));
+    const body = mo.rows.map((r) => h("tr", { class: r.scenario === "complete_case" ? "chosen" : "" }, h("th", { scope: "row", text: SC[r.scenario] || r.scenario }),
+      h("td", { text: num(r.n) }), h("td", { text: `${pct(r.good, 1)}${r["good::min"] !== undefined ? ` (${pct(r["good::min"], 1)}–${pct(r["good::max"], 1)})` : ""}` }),
+      ...ms.flatMap((m2) => [h("td", { text: `${num(r[`auroc::${m2}`], 3)}${rng(r, `auroc::${m2}`, 3)}` }), h("td", { text: `${signed(r[`citl::${m2}`])}${rng(r, `citl::${m2}`, 2)}` })])));
+    card.appendChild(h("div", { class: "table-scroll" }, h("table", { class: "data compact" },
+      h("thead", null, h("tr", null, head.map((x) => h("th", { scope: "col", text: x })))), h("tbody", null, body))));
+    const imp = mo.rows.find((r) => r.scenario === "imputed");
+    card.appendChild(h("p", { class: "note", text: tx(
+      `The two extremes bound what the missing outcomes could do; neither is plausible. Imputation fills each missing outcome from what is known about the patient, including the 24-hour and day-7 course${imp ? `: discrimination stays close to the known-outcome result (AUROC ${num(imp[`auroc::${ms[0]}`], 3)} for ${mname(ms[0])}) and the model still expects more good outcomes than happen` : ""}. Ranges in brackets: lowest and highest over the 20 imputations. Imputation model: ${mo.imputation_model}.`,
+      `Oba krajní scénáře ohraničují, co by chybějící výsledky mohly způsobit; žádný není pravděpodobný. Imputace doplní každý chybějící výsledek podle toho, co je o pacientovi známo, včetně vývoje za 24 hodin a 7. den${imp ? `: diskriminace zůstává blízko výsledku na známých výsledcích (AUROC ${num(imp[`auroc::${ms[0]}`], 3)} pro ${mname(ms[0])}) a model stále čeká více dobrých výsledků, než nastává` : ""}. Rozpětí v závorkách: nejnižší a nejvyšší hodnota přes 20 imputací. Imputační model: logistická regrese mRS 0–2 na vstupech fáze přijetí, mTICI, NIHSS za 24 h a 7. den, sICH, edému, dekompresi a roku.`) }));
+    return card;
   }
 
   // ================================================================== about
@@ -1804,8 +2130,8 @@
         : `Modely vycházejí z registru trombektomií Fakultní nemocnice Ostrava (FNO). Z ${num(flowSteps[0].n)} záznamů registru bylo analyzováno ${num(nAll)} dospělých se známým mRS za 90 dní (${E.period[0]}–${E.period[1]}), bez ohledu na to, jaký výkon nakonec proběhl: ${num(kept.diagnostic_only || 0)} mělo jen diagnostickou angiografii, protože před výkonem to nikdo neví. Nemožné časy (IV trombolýza po punkci, rekanalizace před punkcí) byly nastaveny jako chybějící a ${num(kept.impossible_time || 0)} pacientů ponecháno. NIHSS 43 je chápáno jako úmrtí a 99 jako „nehodnotitelné“; tyto kódy se nikdy nepoužívají jako skóre. Všechny kroky čištění a kontroly jsou v části Registr → Data a předzpracování.`),
       h("h3", { text: en ? "Models" : "Modely" }),
       P(en
-        ? `Before the procedure the models use the 33 pre-procedural predictors of the 2026 FNO analysis; the end of the procedure adds reperfusion and procedure details (any procedure type, including stenting, angioplasty and intra-arterial lysis), 24 hours the NIHSS course and haemorrhage, and day 7 the day-7 NIHSS, oedema and decompression. Five learners were tuned with the same budget on the same folds: logistic regression with restricted cubic splines (the reference), linear logistic regression, LightGBM with monotone constraints, XGBoost and a multilayer perceptron. A rule fixed before testing picks the model for each stage and outcome; the calculator currently uses ${chosenNames.join(" and ")}. Published scores (THRIVE, SPAN-100, HIAT2, PRE, NIHSS alone), refitted predictor sets (THRIVE-c, MR PREDICTS@24H) and the 7-item FNO bedside score are benchmarks.`
-        : `Před výkonem modely používají 33 předprocedurálních prediktorů z analýzy FNO z roku 2026; konec výkonu přidává reperfuzi a detaily výkonu (jakýkoli typ výkonu včetně stentu, angioplastiky a intraarteriální lýzy), 24 hodin vývoj NIHSS a krvácení a 7. den NIHSS 7. dne, edém a dekompresi. Pět modelů bylo laděno se stejným rozpočtem na stejných foldech: logistická regrese s restrikovanými kubickými splajny (reference), lineární logistická regrese, LightGBM s monotónními omezeními, XGBoost a vícevrstvý perceptron. Pravidlo stanovené před testováním vybírá model pro každou fázi a výsledek; kalkulačka nyní používá ${chosenNames.join(" a ")}. Srovnáním jsou publikovaná skóre (THRIVE, SPAN-100, HIAT2, PRE, samotné NIHSS), přepočtené sady prediktorů (THRIVE-c, MR PREDICTS@24H) a 7položkové bedside skóre FNO.`),
+        ? `Before the procedure the models use the 33 pre-procedural predictors of the 2026 FNO analysis; the end of the procedure adds reperfusion and procedure details (any procedure type, including stenting, angioplasty and intra-arterial lysis), 24 hours the NIHSS course and haemorrhage, and day 7 the day-7 NIHSS, oedema and decompression. Five learners were tuned with the same budget on the same folds: logistic regression with restricted cubic splines (the reference), linear logistic regression, LightGBM with monotone constraints, XGBoost and a multilayer perceptron. Amendment 1 to the analysis plan (October 2026, written before the runs) added four candidates that can be published with exact explanations (an explainable boosting machine with at least 20 patients per leaf, the regression with two interactions, the regression fitted on multiple imputations, and stacking) and made the choice stricter (Holm's correction); CatBoost, the default EBM, averaged probabilities, FT-Transformers and the multilayer perceptron are validated for comparison only. A rule fixed before testing picks the model for each stage and outcome; the calculator currently uses ${chosenNames.join(" and ")}. Published scores (THRIVE, THRIVE-EVT, SPAN-100, HIAT2, PRE, CLEAR, BET, NIHSS alone), refitted predictor sets (THRIVE-c, MR PREDICTS, MR PREDICTS@24H) and the 7-item FNO bedside score are benchmarks, each tested at the stage where the calculator shows it.`
+        : `Před výkonem modely používají 33 předprocedurálních prediktorů z analýzy FNO z roku 2026; konec výkonu přidává reperfuzi a detaily výkonu (jakýkoli typ výkonu včetně stentu, angioplastiky a intraarteriální lýzy), 24 hodin vývoj NIHSS a krvácení a 7. den NIHSS 7. dne, edém a dekompresi. Pět modelů bylo laděno se stejným rozpočtem na stejných foldech: logistická regrese s restrikovanými kubickými splajny (reference), lineární logistická regrese, LightGBM s monotónními omezeními, XGBoost a vícevrstvý perceptron. Dodatek 1 k plánu analýzy (říjen 2026, sepsaný před výpočty) přidal čtyři kandidáty, které lze zveřejnit s přesným vysvětlením (explainable boosting machine s alespoň 20 pacienty v listu, regresi se dvěma interakcemi, regresi na vícenásobných imputacích a stacking), a výběr zpřísnil (Holmova korekce); CatBoost, EBM s výchozím nastavením, průměr pravděpodobností, FT-Transformery a vícevrstvý perceptron jsou validovány jen pro srovnání. Pravidlo stanovené před testováním vybírá model pro každou fázi a výsledek; kalkulačka nyní používá ${chosenNames.join(" a ")}. Srovnáním jsou publikovaná skóre (THRIVE, THRIVE-EVT, SPAN-100, HIAT2, PRE, CLEAR, BET, samotné NIHSS), přepočtené sady prediktorů (THRIVE-c, MR PREDICTS, MR PREDICTS@24H) a 7položkové bedside skóre FNO, každé otestované ve fázi, kde ho kalkulačka ukazuje.`),
       h("h3", { text: en ? "Validation" : "Validace" }),
       P(en
         ? `Temporal validation on patients treated in ${yearsOf()} (models developed on ${devYears()}) gave an AUROC for mRS 0–2 of ${auc("admission")} before the procedure, ${auc("procedure")} at its end, ${auc("h24")} at 24 hours and ${auc("d7")} on day 7; a sensitivity analysis tests on ${yearsOf("sensitivity")}. Outcomes in recent years were worse than the development data predicted, so the published models are refitted on all years and their intercepts re-estimated on the pooled years ${RECENT}.`
@@ -1816,13 +2142,13 @@
         "The temporal test has fewer than 100 good outcomes; its intervals are wide. The sensitivity test years double the events.",
         "ASPECTS was recorded from 2016 and anaesthesia type from about 2012; earlier patients contribute through missing-value handling.",
         "Since 2021 about half of patients lack a 24-hour NIHSS and many lack day-7 data, so the 24-h and day-7 validation rests on a selected subset.",
-        "Collateral status, core volume and number of passes are not in the registry and cannot be used.",
+        "Collateral status and CT perfusion volumes are only now being recorded, for new patients, and the number of passes is not recorded; each enters a model only after it has been tested on at least 100 patients with mRS 0–2 and 100 with mRS 3–6.",
       ] : [
         "Jedno centrum; výkon jinde není znám, dokud nebude externě validován.",
         "Časový test má méně než 100 dobrých výsledků; jeho intervaly jsou široké. Citlivostní testovací roky počet událostí zdvojnásobují.",
         "ASPECTS je evidováno od roku 2016 a typ anestezie přibližně od roku 2012; starší pacienti přispívají přes zpracování chybějících hodnot.",
         "Od roku 2021 asi polovině pacientů chybí NIHSS za 24 h a mnohým údaje ze 7. dne, takže validace fází 24 h a 7. den stojí na vybrané podskupině.",
-        "Kolaterální oběh, objem jádra infarktu a počet průchodů registr neobsahuje.",
+        "Kolaterální oběh a objemy z CT perfuze se evidují teprve nyní, u nových pacientů, a počet průchodů se neeviduje; každý vstoupí do modelu až po otestování alespoň na 100 pacientech s mRS 0–2 a 100 s mRS 3–6.",
       ]).map((x) => h("li", { text: x }))),
       h("h3", { text: en ? "Privacy" : "Ochrana údajů" }),
       P(en

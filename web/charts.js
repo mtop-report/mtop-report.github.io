@@ -148,7 +148,8 @@
    * lineChart(body, {
    *   height, x:{type:'cat', cats:[labels]} | {type:'lin', domain:[a,b], fmt, ticks},
    *   y:{domain:[a,b], fmt, title, ticks}, series:[{label, color, points:[{x,y,lo,hi,n}], dots, width, dash}],
-   *   diagonal:bool, marker:{x,label}, endLabels:bool, tipFmt:(v)=>str, tipHead:(x)=>str })
+   *   diagonal:bool, refY:number (a horizontal reference line), marker:{x,label}, endLabels:bool,
+   *   tipFmt:(v)=>str, tipHead:(x)=>str })
    */
   function lineChart(body, o) {
     responsive(body, (W) => {
@@ -193,6 +194,7 @@
         t.setAttribute("dy", "0");
       }
       if (o.diagonal) s("line", { class: "ref", x1: xs(o.x.domain[0]), y1: ys(o.y.domain[0]), x2: xs(o.x.domain[1]), y2: ys(o.y.domain[1]) }, g);
+      if (o.refY !== undefined && o.refY !== null) s("line", { class: "ref", x1: m.l, x2: m.l + iw, y1: ys(o.refY), y2: ys(o.refY) }, g);
       if (o.zeroLine && o.y.domain[0] < 0) s("line", { class: "axis", x1: m.l, x2: m.l + iw, y1: ys(0), y2: ys(0) }, g);
       if (o.marker) {
         const mx = xs(o.marker.x);

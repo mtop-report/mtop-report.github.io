@@ -41,14 +41,22 @@ def _cohort(n=400, seed=0):
         "tici": rng.choice([0.0, 1.0, 2.0, 2.5, 3.0, 4.0], n), "nihss_24h": rng.integers(0, 42, n).astype(float),
         "sich": rng.integers(0, 2, n).astype(float), "nihss_7d": rng.integers(0, 42, n).astype(float),
         "onset_to_puncture": rng.integers(40, 900, n).astype(float), "stroke_prior": rng.integers(0, 2, n).astype(float),
+        "smoking": rng.integers(0, 2, n).astype(float), "anesthesia": rng.choice(["general", "sedation", "local"], n),
+        "procedure_min": rng.integers(10, 150, n).astype(float), "sbp": rng.integers(90, 220, n).astype(float),
+        "ivt": rng.integers(0, 2, n).astype(float),
     })
-    # exact band edges of the bedside score
+    # exact band edges of the bedside, CLEAR and BET scores
     d.loc[:5, "glucose"] = [7.8, 11.0, 11.1, 7.79, 11.09, 3.0]
     d.loc[:5, "onset_to_puncture"] = [179, 180, 299, 300, 60, 1440]
     d.loc[:5, "age"] = [59, 60, 79, 80, 18, 100]
+    d.loc[6:11, "age"] = [50, 51, 75, 76, 50.5, 75.5]
+    d.loc[6:11, "nihss_adm"] = [5, 6, 12, 13, 18, 19]
+    d.loc[6:11, "procedure_min"] = [44, 45, 46, 44.9, 45.0, 10]
+    d.loc[6:11, "nihss_24h"] = [9, 10, 11, 9.5, 0, 42]
     for col, frac in [("aspects", 0.2), ("glucose", 0.15), ("htn", 0.05), ("occlusion", 0.05), ("nihss_24h", 0.1),
-                      ("onset_to_puncture", 0.1), ("stroke_prior", 0.05), ("mrs_pre", 0.05)]:
-        d.loc[rng.random(n) < frac, col] = np.nan if col != "occlusion" else None
+                      ("onset_to_puncture", 0.1), ("stroke_prior", 0.05), ("mrs_pre", 0.05), ("smoking", 0.1),
+                      ("anesthesia", 0.1), ("procedure_min", 0.1), ("tici", 0.05), ("sbp", 0.05), ("ivt", 0.05)]:
+        d.loc[rng.random(n) < frac, col] = np.nan if col not in ("occlusion", "anesthesia") else None
     z = 1.5 - 0.04 * (d["age"] - 70) - 0.1 * d["nihss_adm"] + 0.15 * d["aspects"].fillna(7)
     y = (rng.random(n) < 1 / (1 + np.exp(-z))).astype(float)
     return d, y
@@ -98,6 +106,32 @@ def test_points_scores_and_terms_match_python(tmp_path):
     js_terms = np.array([[np.nan if v is None else v for v in r] for r in out["terms"]], float)
     assert np.array_equal(np.isnan(py_terms), np.isnan(js_terms))
     assert np.allclose(py_terms[~np.isnan(py_terms)], js_terms[~np.isnan(js_terms)])
+
+
+def test_every_refitted_predictor_set_matches_python(tmp_path):
+    d, _ = _cohort(200, 4)
+    recs = _records(d)
+    for name, terms in REFIT_TERMS.items():
+        out = _node({"terms": {"spec": [list(t) for t in terms], "rows": recs}}, tmp_path)
+        py = design(d, terms).to_numpy(float)
+        js = np.array([[np.nan if v is None else v for v in r] for r in out["terms"]], float)
+        assert np.array_equal(np.isnan(py), np.isnan(js)), name
+        assert np.allclose(py[~np.isnan(py)], js[~np.isnan(js)]), name
+
+
+def test_published_score_bands():
+    from mtop.scores import bet_score, clear_score, thrive_evt
+
+    d = pd.DataFrame({"age": [50, 51, 75, 76], "nihss_adm": [5, 6, 18, 19], "aspects": [6, 5, 10, np.nan],
+                      "htn": [0, 1, 1, 1], "dm": [0, 0, 1, 1], "arrhythmia": [0, 0, 0, 1],
+                      "smoking": [1, 0, np.nan, 0], "anesthesia": ["general", "local", None, "sedation"],
+                      "procedure_min": [45, 44, np.nan, 90], "tici": [3.0, 4.0, 4.0, np.nan], "nihss_24h": [10, 9, 0, 12]})
+    assert clear_score(d).tolist()[:3] == [2 + 1 + 5, 1 + 0 + 3, 1 + 1 + 1] and np.isnan(clear_score(d).iloc[3])
+    assert bet_score(d).tolist()[:3] == [1 + 0 + 1 + 1 + 1 + 2, 0 + 0 + 0 + 0 + 0 + 0, 0 + 1 + 0 + 0 + 0 + 0]
+    assert np.isnan(bet_score(d).iloc[3])
+    lp = thrive_evt(d).to_numpy()
+    assert np.isclose(lp[0], 2.864 - 0.025 * 50 - 0.106 * 5 + 0.753)
+    assert np.isclose(lp[3], 2.864 - 0.025 * 76 - 0.106 * 19 + 0.753 - 1.665)
 
 
 def test_ordinal_layer_matches_python(tmp_path):

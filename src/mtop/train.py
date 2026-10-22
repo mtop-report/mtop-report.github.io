@@ -332,12 +332,14 @@ def select_models(primary: dict, nested: dict | None) -> dict:
 
 # ------------------------------------------------------------------------------- deployment
 def deploy(base: pd.DataFrame, primary: dict, selection: dict, out_private, seed: int, min_cell: int,
-           min_leaf: int) -> dict:
+           min_leaf: int, names=None, stages=None, previous: dict | None = None) -> dict:
     """Refit every publishable learner on all years with its development settings (from the primary
-    split) and recalibrate it to the recent era."""
+    split) and recalibrate it to the recent era. `names` / `stages`: refit only these and keep the
+    other learners from the saved models and `previous` (deployment.json), e.g. to add the
+    amendment-1 learners without refitting the rest."""
     recent_from = int(settings()["split"]["recent_era_from_year"])
     out = {}
-    for stage in stage_ids():
+    for stage in stages or stage_ids():
         d = stage_cohort(base, stage)
         X_all = design_matrix(d, stage)
         recent = (d["year"] >= recent_from).to_numpy()
@@ -348,8 +350,19 @@ def deploy(base: pd.DataFrame, primary: dict, selection: dict, out_private, seed
             mono = monotone_vector(stage, target)
             chosen = selection[stage][target]["chosen"]
             models, info = {}, {}
-            for name in Lr.DEPLOYABLE:
-                dev_settings = primary[stage]["targets"][target]["settings"][name]
+            if names:
+                old = load_deployed(out_private, stage, target)
+                if old["columns"] != list(X_all.columns):
+                    raise ValueError(f"saved models for {stage}/{target} have other columns")
+                models = {k: v for k, v in old["models"].items() if k in Lr.DEPLOYABLE and k not in names}
+                info = {k: v for k, v in (((previous or {}).get(stage) or {}).get(target) or {}).get("learners", {}).items()
+                        if k in models}
+                if chosen in models and "reality_bins" not in info.get(chosen, {}):
+                    raise ValueError(f"{stage}/{target}: the chosen model {chosen} must be refitted too")
+            have = primary[stage]["targets"][target]["settings"]
+            # the amendment-1 learners have settings only after `python -m mtop compare --merge`
+            for name in [n for n in (names or Lr.DEPLOYABLE) if n in have]:
+                dev_settings = have[name]
                 f = Lr.refit(name, dev_settings, X_all, y_all, seed, mono, min_leaf=min_leaf, cv_trees=True)
                 oof_p = Lr.oof(name, f.settings, X_all, y_all, seed + 1, mono, min_leaf=min_leaf)
                 shift = citl(y_all[recent], oof_p[recent])
@@ -408,19 +421,26 @@ def run(base: pd.DataFrame, out_private, quick: bool = False, only: str | None =
     return results
 
 
-def choose_and_deploy(base: pd.DataFrame, out_private) -> dict:
+def choose_and_deploy(base: pd.DataFrame, out_private, names=None, stages=None) -> dict:
     """Model choice by the pre-specified rule (primary split + nested CV if available), then
-    deployment of every publishable learner. Writes deployment.json and the deployed models."""
+    deployment of every publishable learner (or only `names` / `stages`, keeping the rest).
+    Writes deployment.json and the deployed models."""
     cfg = settings()
     seed = int(cfg["seed"])
     primary = json.loads((out_private / "train_primary.json").read_text())
     nested_path = out_private / "nested_cv.json"
     nested = json.loads(nested_path.read_text()) if nested_path.exists() else None
     selection = select_models(primary["stages"], nested)
+    dep_path = out_private / "deployment.json"
+    previous = json.loads(dep_path.read_text())["deployed"] if dep_path.exists() and (names or stages) else {}
+    for st, tg in selection.items():          # a newly chosen model is always refitted
+        for t, s in tg.items():
+            if names and s["chosen"] not in names and s["chosen"] != (previous.get(st, {}).get(t, {}) or {}).get("chosen"):
+                names = list(names) + [s["chosen"]]
     deployed = deploy(base, primary["stages"], selection, out_private, seed, int(cfg["privacy"]["min_cell"]),
-                      int(cfg["privacy"]["min_leaf"]))
-    out = {"selection": selection, "deployed": deployed, "nested_cv_used": bool(nested)}
-    (out_private / "deployment.json").write_text(json.dumps(out, indent=1))
+                      int(cfg["privacy"]["min_leaf"]), names=names, stages=stages, previous=previous)
+    out = {"selection": selection, "deployed": {**previous, **deployed}, "nested_cv_used": bool(nested)}
+    dep_path.write_text(json.dumps(out, indent=1))
     return out
 
 

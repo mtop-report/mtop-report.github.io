@@ -61,12 +61,20 @@ apply (onset to IVT without IVT) stay missing, as in the registry.
 - Learners per stage and outcome: logistic regression with restricted cubic splines (reference;
   3–5 knots), linear logistic regression, LightGBM (monotone constraints), XGBoost and an MLP,
   each with 50 candidate settings on the same 5 cross-validation folds of the development years.
-- Every tree leaf summarises at least 20 patients. The MLP is validated but not published.
-- Model choice, fixed before testing (from the 2026 analysis): the reference stays unless a
-  candidate's paired 95 % CI of the AUROC difference on the temporal test lies above zero, or in
-  nested cross-validation it gains ≥ 0.01 AUROC on average and is better in ≥ 80 % of folds, in
-  both cases with calibration-in-the-large at most 0.05 worse. Chosen: regression with splines for
-  every stage and outcome.
+- [Amendment 1](amendment_1.md) (19 October 2026, committed before the runs) adds four candidates
+  that can be published with exact explanations: an EBM with at least 20 patients per leaf (10 pair
+  terms on 32 bins), the reference with age × NIHSS and onset-to-puncture × age, the reference fitted
+  on 10 chained-equation imputations, and stacking (logistic meta-model on the out-of-fold log-odds of
+  the reference, XGBoost and an EBM). Validated for comparison only, never published: the MLP,
+  CatBoost, the default EBM, averaged probabilities and FT-Transformers (default; tuned on the
+  admission stage only). TabPFN v2 and TabICL v2 are listed but not yet run (local weights only).
+- Every tree leaf and EBM bin summarises at least 20 patients; comparison-only learners lack that
+  guarantee or an exact explanation.
+- Model choice, fixed before testing (2026 analysis; amendment 1): the reference stays unless a
+  candidate's AUROC on the temporal test is higher with a Holm-adjusted paired-bootstrap p below
+  0.05 (over the seven alternatives), or in nested cross-validation it gains ≥ 0.01 AUROC on average
+  and is better in ≥ 80 % of folds, in both cases with calibration-in-the-large at most 0.05 worse.
+  CHOSEN_LINE
 - Sample size: with 33 pre-procedural predictors (92 regression parameters) the development data
   fall short of the Riley criteria (Standards tab); estimation is penalised (L2) and the expected
   shrinkage is reported.
@@ -76,25 +84,33 @@ apply (onset to IVT without IVT) stay missing, as in the registry.
 - Primary temporal split: development 2005–2022 (1,225), test 2023–2025 (226; 60 good outcomes,
   40 deaths). Sensitivity split: test 2021–2025 (379; 110 and 77).
 - Nested cross-validation on all years (5 folds × 3 repeats, admission stage, mRS 0–2).
-- Measures: AUROC, Brier, calibration intercept and slope, O/E, ICI, decision curves, thresholds,
-  subgroups (with bootstrap CIs), recalibration on newer patients; 2,000 bootstrap resamples.
+- Measures: AUROC (paired-bootstrap difference and DeLong's test against the reference), Brier,
+  calibration intercept and slope, O/E, ICI, decision curves, thresholds, subgroups (with bootstrap
+  CIs), recalibration on newer patients for every model and score, SHAP for every model on the same
+  test patients; 2,000 bootstrap resamples. Every published or bedside score the calculator shows is
+  tested at that stage (including MR PREDICTS refitted without collaterals, THRIVE-EVT, CLEAR, BET).
+- Sensitivity of the test result to the 62 test-year patients without a 90-day outcome (extremes and
+  20 imputations): Validation tab.
 - Results: README and the Validation tab. Before thrombectomy, mRS 0–2: regression with splines
   AUROC 0.809 (0.743–0.867); development model calibration intercept −0.41, slope 1.47.
 
 ## 7. Deployed models
 
-Every publishable learner (regression with splines, linear regression, LightGBM, XGBoost) is
-refitted on all 1,451 patients with its development settings; its intercept is re-estimated on the
-pooled years 2023–2025 from cross-validated predictions (temporal recalibration). The calculator uses
-the chosen model by default; the others can be selected. The model bundle carries a SHA-256
-fingerprint shown on the About tab.
+Every publishable learner (regression with splines, linear regression, LightGBM, XGBoost, EBM,
+regression with interactions, regression with multiple imputation, stacking) is refitted on all
+1,451 patients with its development settings; its intercept is re-estimated on the pooled years
+2023–2025 from cross-validated predictions (temporal recalibration). The calculator uses the chosen
+model by default; the others can be selected, each with exact attributions computed in the browser.
+The model bundle carries a SHA-256 fingerprint shown on the About tab.
 
 ## 8. Limitations
 
 - Single centre; applicability elsewhere is unknown until externally validated (Multicentre tab).
 - Small temporal test set; wide intervals, especially for death at day 7 (6 events).
 - Recent follow-up gaps (24-h NIHSS, 90-day mRS) make the later stages rest on selected subsets.
-- ASPECTS from 2016, anaesthesia from about 2012; collaterals, core volume and passes not recorded.
+- ASPECTS from 2016, anaesthesia from about 2012; collaterals and CT perfusion volumes recorded
+  only for new patients (optional template columns, `config/future.yaml`; tested once ≥ 100 + 100
+  patients have them), number of passes not recorded.
 - Outcomes shifted over time; the published intercepts need yearly checking (Adaptive tab).
 
 ## 9. Privacy

@@ -28,7 +28,9 @@ POOL_FILE = PUBLIC / "validation_pool.json"
 FORMAT = "mtop-validation/2"
 METRIC_KEYS = {"n", "events", "auroc", "auroc_ci", "se_logit", "brier", "citl", "slope", "calibration", "insufficient"}
 TOP_KEYS = {"format", "model_version", "model_fingerprint", "site", "generated", "rows", "columns_found", "stages", "demo",
-            "period", "development_period", "rows_after_development", "rows_with_year"}
+            "period", "development_period", "rows_after_development", "rows_with_year", "future"}
+# patients with a known outcome who have a group of predictors collected for future versions recorded
+FUTURE_KEYS = {"n", "good", "poor", "died", "survived"}
 
 
 def load_pool() -> dict:
@@ -68,6 +70,19 @@ def check_result(j: dict, fingerprint: str | None = None, min_cell: int | None =
         if isinstance(v, int) and 0 < v < min_cell:
             out[k] = None
             notes.append(f"{k}: fewer than {min_cell}, not published")
+    fut = out.get("future")
+    if fut is not None:
+        if not isinstance(fut, dict) or any(not isinstance(g, str) or not re.fullmatch(r"[a-z_]{1,30}", g)
+                                            or not isinstance(c, dict) or set(c) - FUTURE_KEYS for g, c in fut.items()):
+            errors.append("future: only counts per predictor group are accepted")
+        else:
+            for g, c in fut.items():
+                for k, v in c.items():
+                    if v is not None and (not isinstance(v, int) or isinstance(v, bool) or v < 0):
+                        errors.append(f"future/{g}/{k}: not a count")
+                    elif isinstance(v, int) and 0 < v < min_cell:
+                        c[k] = None
+                        notes.append(f"future/{g}/{k}: fewer than {min_cell}, not published")
     for st, tgs in out["stages"].items():
         for tg, r in tgs.items():
             models = r.get("models", {})

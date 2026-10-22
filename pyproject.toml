@@ -23,10 +23,13 @@ dependencies = [
   "optuna>=3.6",
   "statsmodels>=0.14",
   "matplotlib>=3.8",
+  "interpret-core>=0.7.8,<0.8",   # EBM (amendment 1); the browser export reads its bins and term scores
 ]
 
 [project.optional-dependencies]
 federated = ["cryptography>=41"]
+# comparison-only learners of amendment 1 (python -m mtop compare): CatBoost and the FT-Transformer
+compare = ["catboost>=1.2", "torch>=2.2", "rtdl_revisiting_models>=0.0.2"]
 studio = ["streamlit>=1.40"]
 dev = ["pytest>=8", "cryptography>=41"]
 

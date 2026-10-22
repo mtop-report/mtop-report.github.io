@@ -72,6 +72,29 @@
       return (a <= 59 ? 0 : a <= 79 ? 2 : 4) + (n <= 10 ? 0 : n <= 20 ? 1 : 2) + (g >= GLU_150 ? 1 : 0) + (s <= 7 ? 3 : 0);
     },
     "PRE": (x) => num(x.age) + 2 * num(x.nihss_adm) - 10 * num(x.aspects),
+    // published THRIVE-EVT log-odds of mRS 0-2 with thrombectomy (higher = better)
+    "THRIVE-EVT": (x) => {
+      const n = num(x.nihss_adm), a = num(x.age);
+      if (Number.isNaN(n) || Number.isNaN(a)) return NaN;
+      const z = (k) => (miss(x[k]) ? 0 : Number(x[k]));
+      const k = Math.max(0, Math.min(3, z("htn") + z("dm") + z("arrhythmia")));
+      return 2.864 - 0.025 * a - 0.106 * n + 0.753 + [0, -0.419, -0.502, -1.665][k];
+    },
+    // CLEAR points (higher = better)
+    "CLEAR": (x) => {
+      const a = num(x.age), n = num(x.nihss_adm), s = num(x.aspects);
+      if ([a, n, s].some(Number.isNaN)) return NaN;
+      return (a < 51 ? 2 : a <= 75 ? 1 : 0) + (s > 5 ? 1 : 0) + (n < 6 ? 5 : n <= 12 ? 3 : n <= 18 ? 1 : 0);
+    },
+    // BET points (0-7, higher = worse); NIHSS after the procedure = NIHSS at 24 h; unrecorded items score 0
+    "BET": (x) => {
+      const t = num(x.tici), n24 = num(x.nihss_24h);
+      if (Number.isNaN(t) || Number.isNaN(n24)) return NaN;
+      const is1 = (k) => !miss(x[k]) && Number(x[k]) === 1;
+      const pm = num(x.procedure_min);
+      return (is1("smoking") ? 1 : 0) + (is1("dm") ? 1 : 0) + (x.anesthesia === "general" ? 1 : 0)
+        + (!Number.isNaN(pm) && pm >= 45 ? 1 : 0) + (t < 4 ? 1 : 0) + (n24 >= 10 ? 2 : 0);
+    },
     // FNO 7-item bedside score (0-20, higher = worse); an item that is not recorded scores 0
     "Bedside score": (x) => {
       const a = num(x.age), n = num(x.nihss_adm);

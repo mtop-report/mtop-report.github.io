@@ -41,6 +41,12 @@ def features() -> tuple[Feature, ...]:
     return tuple(Feature(r["key"], r["stage"], r["type"], int(r.get("monotone", 0)), r) for r in raw)
 
 
+def future_columns() -> dict:
+    """Predictors collected for future model versions (config/future.yaml); never model inputs."""
+    with open(CONFIG / "future.yaml", encoding="utf-8") as f:
+        return yaml.safe_load(f)
+
+
 def stage_ids() -> list[str]:
     return [s["id"] for s in sorted(settings()["stages"], key=lambda s: s["order"])]
 

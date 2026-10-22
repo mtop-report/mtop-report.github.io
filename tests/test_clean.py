@@ -158,3 +158,36 @@ def test_raw_columns_complete():
         assert "Anesthesia" in str(e)
     else:
         raise AssertionError("missing column not detected")
+
+
+def test_future_predictors_are_parsed_and_checked():
+    """CT perfusion, collaterals and GFAP (config/future.yaml): read under the registry's column names,
+    range-checked, and the perfusion values must add up; none of them is a model input."""
+    from mtop.clean import IssueLog, future_values
+    from mtop.config import features
+
+    raw = pd.DataFrame({
+        "rCBF <30/ml": [10, 0, 50, "x", 700],
+        "Tmax >6s/ml": [100, 40, 40, 80, 900],
+        "mismatch volume/ml": [90, 40, 10, 80, 200],
+        "mismatch ratio": [10, None, 0.8, None, 1.3],
+        "Relative mismatch/%": [90, 100, 50, 100, 22],
+        "Collateral score": [3, 4, 1, None, 2],
+        "GFAP": [150.5, None, 80, 1e7, 30],
+    })
+    ids = pd.Series([f"P{i}" for i in range(len(raw))])
+    c = pd.DataFrame(index=raw.index)
+    log = IssueLog()
+    found = future_values(raw, c, ids, log)
+    assert {"ctp_core_ml", "ctp_tmax6_ml", "ctp_mismatch_ml", "ctp_mismatch_ratio", "ctp_mismatch_rel",
+            "collaterals_tan", "gfap_pg_ml", "ctp_done"} <= set(found)
+    assert c["ctp_done"].tolist() == [1.0, 1.0, 1.0, 1.0, 1.0]
+    assert pd.isna(c.at[3, "ctp_core_ml"]) and pd.isna(c.at[4, "ctp_core_ml"])    # text; above 500 mL
+    assert pd.isna(c.at[1, "collaterals_tan"]) and pd.isna(c.at[3, "gfap_pg_ml"])   # outside 0-3; above range
+    flagged = log.frame()
+    flagged = flagged[flagged["action"].str.startswith("flag only: CT perfusion")]
+    rows = {(r.patient_id, r.column) for r in flagged.itertuples()}
+    # P2: core 50 > Tmax 40; mismatch 10 is not 40 - 50; relative 50% is not 100 x 10 / 40
+    assert {("P2", "ctp_core_ml"), ("P2", "ctp_mismatch_ml"), ("P2", "ctp_mismatch_rel")} <= rows
+    assert not {("P0", "ctp_mismatch_ml"), ("P0", "ctp_mismatch_ratio"), ("P0", "ctp_mismatch_rel")} & rows
+    assert not any(f.key in found for f in features())                              # never a model input

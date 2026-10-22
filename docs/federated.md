@@ -201,7 +201,12 @@ audit log with its time, round, size and SHA-256.
    optional and enables the update jobs above). The *Multicentre* tab (*Validate on your data*)
    checks the mapping in the browser without uploading anything, or run
    `python -m mtop.fed check registry.csv`. English and Czech spellings are recognised; anything
-   unrecognised becomes missing and is counted.
+   unrecognised becomes missing and is counted. The template also has optional columns for
+   predictors collected for future versions (CT perfusion volumes, the CTA collateral score, serum
+   GFAP with sampling time and assay; `docs/data_dictionary.md`). Leave them out or empty if you do
+   not record them: nothing else changes. When present they are range-checked and only counted, as
+   patients with a known outcome who have them, toward the rule that a new predictor is tested once
+   100 patients with mRS 0–2 and 100 with mRS 3–6 have it.
 3. **Install the node** on a computer inside the hospital that can make outgoing HTTPS connections:
 
    ```bash
@@ -231,7 +236,7 @@ curve. The trained model is written in the same format the web app uses.
 | File | Role |
 |---|---|
 | `config/federated.yaml` | Shared settings: minimum sizes, value bands, model recipes, knots |
-| `src/mtop/fed/schema.py` | Reads a registry export in the MTOP template (optional `year` column) |
+| `src/mtop/fed/schema.py` | Reads a registry export in the MTOP template (optional `year` column and the optional columns for future predictors) |
 | `src/mtop/fed/bins.py` | Fixed value bands |
 | `src/mtop/fed/secagg.py` | Identities, key agreement, masks, aggregation |
 | `src/mtop/fed/gbdt.py` | Boosted trees from network histograms (monotone constraints, missing values) |

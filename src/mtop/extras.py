@@ -244,11 +244,16 @@ def build_extras(clean: pd.DataFrame, n_boot: int = N_BOOT) -> dict:
             hi_off = np.percentile(L, 97.5, axis=0) - l0
             out["uncertainty"][stage][t] = _bins(p0, lo_off, hi_off, min_cell)
             pb = M.expit(L)
+            # classification instability at 0.5 (Riley & Collins 2023): the share of bootstrap models that
+            # put a patient on the other side of the threshold than the published model
+            flip = ((pb >= 0.5) != (p0 >= 0.5)[None, :]).mean(axis=0)
             out["stability"][stage][t] = {
                 "model": chosen[t],
                 "mape": float(np.mean(np.abs(pb - p0[None, :]))),
                 "width_median": float(np.median(np.percentile(pb, 97.5, axis=0) - np.percentile(pb, 2.5, axis=0))),
                 "share_wide": float(np.mean((np.percentile(pb, 97.5, axis=0) - np.percentile(pb, 2.5, axis=0)) > 0.2)),
+                "share_flip_05": float(np.mean(flip > 0.2)),
+                "share_near_05": float(np.mean(np.abs(p0 - 0.5) < 0.05)),
                 "n_boot": n_boot,
             }
         ov = out["ordinal_validation"][stage]

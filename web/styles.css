@@ -43,6 +43,7 @@
   --mrs4-ink: #0f1a2f; --mrs5-ink: #ffffff; --mrs6-ink: #ffffff;
   /* chart series, fixed order (validated for colour-vision deficiency) */
   --c1: #1565d7; --c2: #eb6834; --c3: #1baf7a; --c4: #eda100; --c5: #e87ba4; --c6: #008300;
+  --c7: #6250d6; --c8: #e34948;   /* categorical order: validated light (white) and dark (#0f192b), adjacent CVD ΔE ≥ 8.4 */
   /* status */
   --good-ink: #17643a; --good-wash: #e7f5ec;
   --warn-ink: #7a4a00; --warn-bg: #fff4dd; --warn-line: #f2d9a6;
@@ -115,7 +116,7 @@
     --mrs3: #d8a24e; --mrs4: #e57a35; --mrs5: #b8432a; --mrs6: #c9d2df;
     --mrs0-ink: #0b1220; --mrs1-ink: #0b1220; --mrs2-ink: #ffffff; --mrs3-ink: #0b1220;
     --mrs4-ink: #0b1220; --mrs5-ink: #ffffff; --mrs6-ink: #0b1220;
-    --c1: #4d8ef7; --c2: #f07a45; --c3: #2bc591; --c4: #f2b31a; --c5: #ef8fb3; --c6: #47a447;
+    --c1: #3987e5; --c2: #d95926; --c3: #199e70; --c4: #c98500; --c5: #d55181; --c6: #008300; --c7: #9085e9; --c8: #e66767;
     --good-ink: #5fd38d; --good-wash: #0f2a1d;
     --warn-ink: #f3c46b; --warn-bg: #221a0b; --warn-line: #574116;
     --crit-ink: #ff8a7a; --crit-wash: #2d1414;
@@ -1180,6 +1181,39 @@ table.comp tr.score th { font-weight: 450; color: var(--ink-2); }
 table.data tr.sep th { text-align: left; font-size: 11.5px; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
   padding-top: 16px; background: transparent !important; border-bottom-color: var(--line-2); }
 table.data tbody tr.sep:first-child th { padding-top: 6px; }
+/* key numbers under a chart: label left, value right, hairline between rows */
+dl.facts { display: grid; margin: 12px 0 4px; font-size: 13px; }
+dl.facts > div { display: flex; justify-content: space-between; align-items: baseline; gap: 14px; padding: 6px 0; border-top: 1px solid var(--line); }
+dl.facts dt { color: var(--ink-2); flex: 1 1 auto; }
+dl.facts dd { margin: 0; font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; flex: 0 1 auto; }
+.facts-pair dl.facts dd { white-space: nowrap; }
+.facts-pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 330px), 1fr)); gap: 4px 36px; margin-top: 14px; }
+.facts-pair dl.facts { margin-top: 6px; }
+.facts-title { font-size: 12.5px; font-weight: 650; color: var(--ink); }
+/* learners validated for comparison only: a grey ring and dashed lines (never a series colour) */
+.dot.comp { background: transparent; box-shadow: inset 0 0 0 1.5px var(--faint); }
+table.comp tr.comp th { font-weight: 450; color: var(--ink-2); }
+.key i.line.dash-grey { background: repeating-linear-gradient(90deg, var(--faint) 0 5px, transparent 5px 8px) !important; }
+table.data.updating td { white-space: nowrap; font-variant-numeric: tabular-nums; }
+/* every model side by side: share of mean |SHAP| per predictor */
+table.shapgrid { width: auto; min-width: 100%; }
+table.shapgrid th.mh { vertical-align: bottom; text-align: center; font-weight: 600; font-size: 11.5px; line-height: 1.25; min-width: 58px; max-width: 86px; white-space: normal; padding: 4px 4px 6px; }
+table.shapgrid th.mh .dot { display: block; margin: 0 auto 4px; }
+table.shapgrid th.mh.comp { color: var(--muted); }
+table.shapgrid td { text-align: center; font-variant-numeric: tabular-nums; padding: 5px 4px; }
+table.shapgrid td.heat { color: var(--ink); border-bottom: 2px solid var(--surface); }
+table.shapgrid td.heat.on { font-weight: 650; }
+table.shapgrid tr.rest th, table.shapgrid tr.rest td { color: var(--muted); font-size: 12px; }
+table.shapgrid td.meth { font-size: 11px; }
+/* the predictor (or model) column stays in view while a wide table scrolls sideways on a phone */
+table.shapgrid tbody th[scope="row"], table.shapgrid thead th:first-child,
+table.data.updating tbody th[scope="row"], table.data.updating thead th:first-child {
+  position: sticky; left: 0; z-index: 1; background: var(--surface); }
+table.shapgrid tbody th[scope="row"] { box-shadow: 1px 0 0 var(--line); }
+table.shapgrid tbody tr:hover td.heat { outline: 1px solid var(--line-3); outline-offset: -1px; }
+details.template table.data td, details.template table.data th { text-align: left; }
+table.data th.group-row { text-align: left; font-weight: 500; font-size: 12.5px; line-height: 1.5; color: var(--ink-2); white-space: normal;
+  padding-top: 16px; background: transparent !important; border-bottom-color: var(--line-2); }
 .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 8px; vertical-align: 1px; }
 .tag { display: inline-block; margin-left: 8px; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 650; color: var(--blue-ink);
   background: var(--surface); box-shadow: inset 0 0 0 1px var(--blue-wash-2); vertical-align: 1px; }

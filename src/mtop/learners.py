@@ -21,13 +21,16 @@ import pandas as pd
 from . import lgbm as LG
 from .lr import export_logreg, fit_logreg, fit_logreg_fixed
 from .splines import SplineLogReg, expand, export_spline_logreg, fit_spline_logreg, fit_spline_logreg_fixed
-from .tuning import fit_mlp_fixed, fit_xgb_fixed, jsonable, lgbm_settings, tune_mlp, tune_xgb
+from .tuning import fit_mlp_fixed, fit_xgb_fixed, jsonable, lgbm_settings, shared_folds, threads, tune_mlp, tune_xgb
 
 REFERENCE = "Logistic regression (splines)"
 ORDER = ["Logistic regression (splines)", "Logistic regression", "LightGBM", "XGBoost", "MLP"]
-DEPLOYABLE = ("Logistic regression (splines)", "Logistic regression", "LightGBM", "XGBoost")
+# amendment 1 (docs/amendment_1.md): four more publishable candidates (extra_learners.py)
+NEW = ["EBM", "LR + interactions", "LR + multiple imputation", "Stacking"]
+DEPLOYABLE = ("Logistic regression (splines)", "Logistic regression", "LightGBM", "XGBoost") + tuple(NEW)
 KIND = {"Logistic regression (splines)": "spline", "Logistic regression": "lr", "LightGBM": "lgbm",
-        "XGBoost": "xgb", "MLP": "mlp"}
+        "XGBoost": "xgb", "MLP": "mlp", "EBM": "ebm", "LR + interactions": "spline_int",
+        "LR + multiple imputation": "spline_mi", "Stacking": "stack"}
 
 
 class Fitted:
@@ -44,14 +47,81 @@ class Fitted:
     def logit(self, X: pd.DataFrame) -> np.ndarray:
         if self.kind == "lgbm":
             return self.model.predict(X[self.columns], raw_score=True)
+        if self.kind == "ebm":
+            return self.model.decision_function(X[self.columns])
+        if self.kind == "stack":
+            return self.model.logit(X[self.columns])
         p = np.clip(self.proba(X), 1e-9, 1 - 1e-9)
         return np.log(p / (1 - p))
 
 
+def _new_tune(name: str, X: pd.DataFrame, y, seed: int, trials: int, mono, min_leaf: int,
+              base_settings: dict | None) -> Fitted:
+    """The amendment-1 learners. `base_settings`: tuned settings of the reference and XGBoost on these
+    patients (from train.py), reused instead of tuning them again."""
+    from . import extra_learners as XL
+    from .splines import fit_spline_logreg
+
+    cols = list(X.columns)
+    base_settings = base_settings or {}
+
+    def ref_settings():
+        return base_settings.get(REFERENCE) or fit_spline_logreg(X, y, seed).settings
+
+    if name == "EBM":
+        m = XL.fit_ebm(X, y, seed, threads=threads())
+        return Fitted(name, m, m.settings, cols)
+    if name == "LR + interactions":
+        m = XL.fit_interaction_spline(X, y, seed)
+        return Fitted(name, m, m.settings, cols)
+    if name == "LR + multiple imputation":
+        s = ref_settings()
+        m = XL.fit_mi_spline(X, y, seed, int(s["knots"]), float(s["C"]))
+        return Fitted(name, m, m.settings, cols)
+    if name == "Stacking":
+        s_ref = ref_settings()
+        s_xgb = base_settings.get("XGBoost") or tune_xgb(X, y, seed, trials).settings
+        settings = {"reference": dict(s_ref), "xgboost": dict(s_xgb),
+                    "ebm": {"min_samples_leaf": XL.EBM_MIN_LEAF, "outer_bags": XL.STACK_EBM_BAGS}}
+        return _fit_stack(X, y, seed, settings, mono, min_leaf, cv_trees=False)
+    raise KeyError(name)
+
+
+def _stack_bases(X: pd.DataFrame, y, seed: int, settings: dict, mono, min_leaf: int, cv_trees: bool) -> list:
+    from . import extra_learners as XL
+
+    spl = refit(REFERENCE, settings["reference"], X, y, seed, mono, min_leaf)
+    xgb = refit("XGBoost", settings["xgboost"], X, y, seed, mono, min_leaf, cv_trees=cv_trees)
+    e = XL.fit_ebm(X, y, seed, outer_bags=int(settings["ebm"]["outer_bags"]), threads=threads())
+    return [spl, xgb, Fitted("EBM", e, e.settings, list(X.columns))]
+
+
+def _fit_stack(X: pd.DataFrame, y, seed: int, settings: dict, mono, min_leaf: int, cv_trees: bool) -> Fitted:
+    """Meta-model on the out-of-fold log-odds of the three base models (the shared folds), then the
+    base models refitted on all of X."""
+    from sklearn.linear_model import LogisticRegression
+
+    from . import extra_learners as XL
+
+    y = np.asarray(y, float)
+    oof = np.zeros((len(y), 3))
+    for tr, va in shared_folds(y, seed):
+        bases = _stack_bases(X.iloc[tr], y[tr], seed, settings, mono, min_leaf, cv_trees=False)
+        oof[va] = np.column_stack([b.logit(X.iloc[va]) for b in bases])
+    meta = LogisticRegression(C=1.0, max_iter=1000).fit(oof, y)
+    bases = _stack_bases(X, y, seed, settings, mono, min_leaf, cv_trees)
+    settings = {**settings, "xgboost": dict(bases[1].settings),
+                "meta": {"coef": [round(float(c), 6) for c in np.ravel(meta.coef_)],
+                         "intercept": round(float(np.ravel(meta.intercept_)[0]), 6)}}
+    return Fitted("Stacking", XL.Stack(bases, meta, [REFERENCE, "XGBoost", "EBM"]), settings, list(X.columns))
+
+
 def tune(name: str, X: pd.DataFrame, y, seed: int, trials: int, mono: list[int], min_leaf: int = 20,
-         max_rounds: int = 3000, es: int = 100) -> Fitted:
+         max_rounds: int = 3000, es: int = 100, base_settings: dict | None = None) -> Fitted:
     y = np.asarray(y, float)
     cols = list(X.columns)
+    if name in NEW:
+        return _new_tune(name, X, y, seed, trials, mono, min_leaf, base_settings)
     if name == "LightGBM":
         best, rounds, cv_ll = LG.tune(X, y, mono, seed, trials, max_rounds, es, min_leaf)
         model = LG.fit(X, y, LG.params(best, mono, seed, min_leaf), rounds)
@@ -95,6 +165,20 @@ def refit(name: str, settings: dict, X: pd.DataFrame, y, seed: int, mono: list[i
         m = fit_spline_logreg_fixed(X, y, int(s["knots"]), float(s["C"]))
         m.settings = s
         return Fitted(name, m, s, cols)
+    if name in NEW:
+        from . import extra_learners as XL
+
+        if name == "EBM":
+            m = XL.fit_ebm(X, y, seed, outer_bags=int(s.get("outer_bags", 14)), threads=threads())
+            return Fitted(name, m, {**s, **m.settings}, cols)
+        if name == "LR + interactions":
+            m = XL.fit_interaction_spline(X, y, seed, k=int(s["knots"]), C=float(s["C"]))
+            return Fitted(name, m, {**s, **m.settings}, cols)
+        if name == "LR + multiple imputation":
+            m = XL.fit_mi_spline(X, y, seed, int(s["knots"]), float(s["C"]), int(s.get("imputations", XL.MI_IMPUTATIONS)))
+            return Fitted(name, m, {**s, **m.settings}, cols)
+        if name == "Stacking":
+            return _fit_stack(X, y, seed, {k: s[k] for k in ("reference", "xgboost", "ebm")}, mono, min_leaf, cv_trees)
     raise KeyError(name)
 
 
@@ -144,17 +228,43 @@ def contributions(f: Fitted, X: pd.DataFrame):
         for j, o in enumerate(owner):
             out[:, o] += parts[:, j]
         return pd.DataFrame(out, columns=f.columns, index=X.index), b0
-    if f.kind == "spline":
-        m: SplineLogReg = f.model
-        Xe = expand(X, m.knots)
-        parts, owner, b0 = _linear_parts(m.model, Xe)
-        base_of = {c: (c.split("__rcs")[0] if "__rcs" in c else c) for c in Xe.columns}
-        pos = {c: i for i, c in enumerate(f.columns)}
-        out = np.zeros((len(X), len(f.columns)))
-        for j, o in enumerate(owner):
-            out[:, pos[base_of[Xe.columns[o]]]] += parts[:, j]
-        return pd.DataFrame(out, columns=f.columns, index=X.index), b0
+    if f.kind in ("spline", "spline_int"):
+        return _spline_contributions(f.model, X, f.columns)
+    if f.kind == "spline_mi":
+        # averaged over the imputations of the patients' missing values
+        parts = [_spline_contributions(f.model.inner, Z, f.columns) for Z in f.model._imputed(X)]
+        return sum(p[0] for p in parts) / len(parts), parts[0][1]
+    if f.kind == "ebm":
+        from .extra_learners import ebm_contributions
+
+        return ebm_contributions(f.model, X, f.columns)
+    if f.kind == "stack":
+        st = f.model
+        w = np.ravel(st.meta.coef_)
+        total, base = None, float(np.ravel(st.meta.intercept_)[0])
+        for wk, b in zip(w, st.bases):
+            c, b0 = contributions(b, X)
+            total = c * wk if total is None else total + c * wk
+            base += wk * b0
+        return total, base
     return None
+
+
+def _spline_contributions(m: SplineLogReg, X: pd.DataFrame, columns: list[str]):
+    """Spline terms belong to their variable; a product of two centred inputs is split half and half."""
+    Xe = m.expanded(X) if hasattr(m, "expanded") else expand(X[m.columns], m.knots)
+    parts, owner, b0 = _linear_parts(m.model, Xe)
+    pos = {c: i for i, c in enumerate(columns)}
+    out = np.zeros((len(X), len(columns)))
+    for j, o in enumerate(owner):
+        name = Xe.columns[o]
+        if "__x__" in name:
+            a, b = name.split("__x__")
+            out[:, pos[a]] += parts[:, j] / 2
+            out[:, pos[b]] += parts[:, j] / 2
+        else:
+            out[:, pos[name.split("__rcs")[0] if "__rcs" in name else name]] += parts[:, j]
+    return pd.DataFrame(out, columns=columns, index=X.index), b0
 
 
 # ------------------------------------------------------------------------------------- export
@@ -184,4 +294,21 @@ def export(f: Fitted, shift: float, X_train: pd.DataFrame, min_leaf: int = 20) -
     if f.kind == "spline":
         spec = export_spline_logreg(f.model, 0.0)
         return {"kind": "spline", "spec": spec, "intercept_recent": round(float(shift), 6)}
+    if f.kind == "spline_int":
+        from .extra_learners import export_interaction_spline
+
+        return {"kind": "spline", "spec": export_interaction_spline(f.model, 0.0), "intercept_recent": round(float(shift), 6)}
+    if f.kind == "spline_mi":
+        return {"kind": "spline", "spec": export_spline_logreg(f.model.inner, 0.0), "intercept_recent": round(float(shift), 6)}
+    if f.kind == "ebm":
+        from .extra_learners import export_ebm
+
+        if int(f.model.m.min_samples_leaf) < min_leaf:
+            raise ValueError(f"EBM: leaves may summarise fewer than {min_leaf} patients")
+        return {"kind": "ebm", "spec": export_ebm(f.model, f.columns, 0.0), "intercept_recent": round(float(shift), 6)}
+    if f.kind == "stack":
+        st = f.model
+        return {"kind": "stack", "bases": [export(b, 0.0, X_train, min_leaf) for b in st.bases], "base_names": st.names,
+                "meta": {"coef": [float(c) for c in np.ravel(st.meta.coef_)], "intercept": float(np.ravel(st.meta.intercept_)[0])},
+                "intercept_recent": round(float(shift), 6)}
     raise ValueError(f"{f.name} is not published")

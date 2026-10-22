@@ -25,8 +25,8 @@ browser: no server, no patient data, nothing typed in is sent anywhere.
 > **Research tool, not a medical device.** Do not use it on its own to decide treatment.
 
 **Live app:** https://viktorgajdosik.github.io/mt/ (published by GitHub Actions on every push to `main`).
-It can be installed on a phone or laptop and works offline. The page is a single light-themed file
-with its typeface bundled, so opening it contacts no third-party server.
+It can be installed on a phone or laptop and works offline. The page is a single file, light or
+dark, with its typeface bundled, so opening it contacts no third-party server.
 
 ## What the app contains
 
@@ -42,7 +42,8 @@ with its typeface bundled, so opening it contacts no third-party server.
   until one is chosen with the switch in the header).
 - **Registry.** *Outcomes and trends:* 90-day mRS distributions (Grotta bars) by 21 subgroups,
   outcome by age and NIHSS, factors associated with the outcome (unadjusted and adjusted odds
-  ratios, multiple imputation), outcome by time to puncture and two decades of trends.
+  ratios, multiple imputation), outcome by time to puncture (and what each hour costs, adjusted),
+  why outcomes were worse in 2023–2025, and two decades of trends.
   *Data and preprocessing:* the full data report in the style of the earlier MTOP pipeline:
   CONSORT-style patient flow and flow table, stage cohorts with exclusion reasons, every cleaning
   rule with the patients it touched (by variable), how undocumented registry codes were read, all
@@ -50,12 +51,16 @@ with its typeface bundled, so opening it contacts no third-party server.
   with missing data overall, by split, by era, by sex and age and by outcome, 90-day mRS
   availability and who lacks it, distributions, why cholesterol is not used, and Table 1 by split
   and by outcome with standardised mean differences. Aggregates only; groups under 10 are hidden.
-- **Validation.** Both temporal splits, every stage and outcome: the five learners and the
-  published and bedside scores with AUROC, ΔAUROC against the reference, Brier, calibration
-  intercept, slope and O/E (bootstrap CIs), nested cross-validation, the pre-specified model choice,
-  how each learner was tuned, ROC, and for any one model: calibration, recalibration on newer
-  patients, decision curves, sensitivity/specificity/PPV/NPV at thresholds, subgroups with CIs and
-  what the model relies on.
+- **Validation.** Both temporal splits, every stage and outcome, in three groups: the eight
+  candidates for the calculator, the learners validated for comparison only, and every published
+  or bedside score the calculator shows at that stage. AUROC, ΔAUROC against the reference with its
+  paired-bootstrap CI and DeLong's p, Brier, calibration intercept, slope and O/E (bootstrap CIs),
+  nested cross-validation, the pre-specified model choice (Holm-adjusted, amendment 1), how each
+  learner was tuned, ROC and decision curves, recalibration on newer patients for every model and
+  score, SHAP for every model on the same test patients side by side, and for any one model:
+  calibration, sensitivity/specificity/PPV/NPV at thresholds, subgroups with CIs and what the model
+  relies on. Also how the results would change if the test-year patients without a 90-day outcome
+  were counted.
 - **Adaptive.** How the models are kept up to date: six update strategies compared year by year
   2018–2025 for every publishable learner, a drift monitor with control limits, leave-one-era-out
   validation, data availability by year, a draft update policy and the version history.
@@ -140,21 +145,36 @@ years gave −0.03 and 0.769. Every learner is compared on the Adaptive tab.
 2. **Cohort.** 1,577 registry records → 1,572 adults → 1,451 with a known 90-day mRS, whatever the
    procedure (88 diagnostic angiographies only). The end-of-procedure stage needs the final mTICI,
    the 24-h stage a 24-h NIHSS score and the day-7 stage a day-7 NIHSS score.
-3. **Models** (`src/mtop/learners.py`, `train.py`). Five learners per stage and outcome, each tuned
-   with the same budget (50 candidate settings on the same cross-validation folds of the
-   development years): logistic regression with restricted cubic splines (the reference), linear
-   logistic regression, LightGBM with **monotone constraints**, XGBoost and an MLP. Tree leaves
-   summarise at least 20 patients. The MLP is validated but not published (no such guarantee for
-   its weights).
+3. **Models** (`src/mtop/learners.py`, `train.py`, `extra_learners.py`, `compare.py`). Five learners
+   per stage and outcome, each tuned with the same budget (50 candidate settings on the same
+   cross-validation folds of the development years): logistic regression with restricted cubic
+   splines (the reference), linear logistic regression, LightGBM with **monotone constraints**,
+   XGBoost and an MLP. [Amendment 1](docs/amendment_1.md), committed before the runs, adds four
+   candidates that can be published with exact explanations: an explainable boosting machine (EBM)
+   with at least 20 patients per leaf, the reference with two interactions, the reference fitted on
+   10 multiple imputations, and stacking of the reference, XGBoost and EBM. CatBoost, the default
+   EBM, averaged probabilities and FT-Transformers (default and tuned) are validated for comparison
+   only, like the MLP: nothing guarantees 20 patients behind their parts, or they have no exact
+   explanation. TabPFN v2 and TabICL v2 are listed too and run only from local weight files.
 4. **Validation.** Temporal splits (primary: test 2023–2025; sensitivity: test 2021–2025), nested
    cross-validation on all years, bootstrap 95% CIs (2,000 resamples) for AUROC, Brier,
    calibration intercept and slope and the AUROC difference against the reference, decision
    curves, thresholds and subgroups.
-5. **Deployment.** Every publishable learner (regression with splines, linear regression,
-   LightGBM, XGBoost) is refitted on all years with its development settings, and its intercept is
+5. **Model choice.** The reference stays unless a candidate beats it on the temporal test with a
+   Holm-adjusted paired-bootstrap p below 0.05 (over the seven alternatives), or in nested
+   cross-validation gains ≥ 0.01 AUROC on average and is better in ≥ 80% of folds, without worse
+   calibration-in-the-large.
+6. **Deployment.** Every publishable learner (regression with splines, linear regression,
+   LightGBM, XGBoost, EBM, regression with interactions, regression with multiple imputation,
+   stacking) is refitted on all years with its development settings, and its intercept is
    re-estimated on the pooled years 2023–2025 from cross-validated predictions.
-6. **Browser** (`web/`). `web/model.js` reproduces every published model and its explanations
-   exactly; `tests/test_parity.py` checks predictions and contributions against Python to 1e-6.
+7. **Explanations** (`src/mtop/shap_all.py`). In the calculator, exact attributions for every
+   published learner, computed in the browser. On the Validation tab, SHAP values of every
+   validated model on the same test patients: exact where the model allows it, sampled
+   (interventional, antithetic permutations) for the MLP and the averaged probabilities, expected
+   gradients for the FT-Transformers.
+8. **Browser** (`web/`). `web/model.js` reproduces every published model and its explanations
+   exactly; `tests/test_parity.py` checks predictions and contributions against Python.
 
 ## Federated network
 
@@ -214,13 +234,26 @@ open site/index.html          # the app; works offline from the file
 python -m mtop all --input data/synthetic/registry_synthetic.xlsx --quick
 ```
 
-Individual steps: `python -m mtop clean | nested | train [--split primary|sensitivity] | deploy | export | extras | adaptive | fed-demo | explorer | preprocessing | reporting | associations | report | site | synth | studio`.
+Individual steps: `python -m mtop clean | nested | train [--split primary|sensitivity] | deploy | export | extras | adaptive | fed-demo | explorer | preprocessing | reporting | associations | analyses | shap | report | site | synth | studio`.
+
+The amendment-1 learners run separately, in chunks that can go in parallel, after `train`
+(`pip install -e ".[compare]"` adds CatBoost and the FT-Transformer):
+
+```bash
+python -m mtop compare --split primary --tag a        # every new learner, every stage (also --stage, --learner)
+python -m mtop compare --split sensitivity --tag b
+python -m mtop compare --nested 0-4 --tag c           # nested CV folds 1-5 (… 5-9, 10-14)
+python -m mtop compare --merge                        # into the training results
+python -m mtop deploy --learner EBM --learner "LR + interactions" --learner "LR + multiple imputation" --learner Stacking
+python -m mtop shap && python -m mtop export && python -m mtop site
+```
 
 ## Updating with new patients
 
 1. Add rows to the master Excel file and put it in `data/raw/`.
 2. `python -m mtop studio` to review the findings and record corrections (or read
-   `reports/data_quality.xlsx`), then `python -m mtop all`.
+   `reports/data_quality.xlsx`), then `python -m mtop all`, and the amendment-1 runs above (chunks
+   computed on earlier training results are not merged).
 3. Check `reports/validation_report.md`, then commit `artifacts/public/` and push. GitHub Actions
    re-runs the tests and redeploys the app.
 

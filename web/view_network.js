@@ -55,6 +55,10 @@
     anesthesia: { general: "general", ga: "general", sedation: "sedation", cs: "sedation", consciousseda: "sedation", local: "local", la: "local" },
   };
   const TICI = { "0": 0, "1": 1, "2a": 2, "2": 2.5, "2b": 3, "2c": 4, "3": 4 };
+  // optional columns collected for future versions (config/future.yaml: CT perfusion, collaterals,
+  // GFAP): read and range-checked when present, counted toward the 100 + 100 rule, never model inputs
+  const FUT = (B.future && B.future.columns) || [];
+  const FGROUPS = (B.future && B.future.groups) || {};
 
   function parseValue(key, raw, issues) {
     if (raw === null || raw === undefined) return null;
@@ -80,6 +84,31 @@
     if (f.type === "ordinal") return f.options.some((o) => o.value === v) ? v : bad();
     if ((f.min !== undefined && v < f.min) || (f.max !== undefined && v > f.max)) return bad();
     return v;
+  }
+
+  function parseFuture(c, raw, issues) {
+    if (raw === null || raw === undefined) return null;
+    const s = String(raw).trim();
+    if (s === "" || /^(na|nan|null|unknown|-)$/i.test(s)) return null;
+    const bad = () => { issues[c.key] = (issues[c.key] || 0) + 1; return null; };
+    if (c.type === "text") return s.slice(0, 80);
+    if (c.type === "binary") { const k = norm(s); return k in BIN ? BIN[k] : bad(); }
+    const v = Number(s.replace(",", "."));
+    if (Number.isNaN(v)) return bad();
+    if ((c.min !== undefined && v < c.min) || (c.max !== undefined && v > c.max) || (c.type === "ordinal" && !Number.isInteger(v))) return bad();
+    return v;
+  }
+
+  // patients with a known 90-day mRS who have each group of future predictors recorded, by outcome
+  function futureCounts(records, fut) {
+    const out = {};
+    for (const [g, keys] of Object.entries(FGROUPS)) {
+      if (!keys.every((k) => NS.map && NS.map[k] !== undefined)) continue;
+      const has = records.map((x, i) => x.mrs90 !== null && keys.every((k) => fut[i][k] !== null && fut[i][k] !== undefined));
+      const cnt = (f) => records.filter((x, i) => has[i] && f(x.mrs90)).length;
+      out[g] = { n: cnt(() => true), good: cnt((m) => m <= 2), poor: cnt((m) => m > 2), died: cnt((m) => m === 6), survived: cnt((m) => m < 6) };
+    }
+    return out;
   }
 
   // ------------------------------------------------------------------ file reading
@@ -133,19 +162,24 @@
       const hit = (SYN[k] || []).find((sn) => byNorm[sn] !== undefined);
       if (hit) map[k] = byNorm[hit];
     }
+    for (const c of FUT) if (byNorm[norm(c.key)] !== undefined) map[c.key] = byNorm[norm(c.key)];
     return map;
   }
 
   function toRecords(table) {
     const map = mapColumns(table.header);
     const issues = {};
+    const fut = [];
     const records = table.rows.map((r) => {
       const x = {};
       for (const k of KEYS) x[k] = map[k] === undefined ? null : parseValue(k, r[map[k]], issues);
       if (POSTERIOR.has(x.occlusion)) x.side_left = 0;
+      const fx = {};
+      for (const c of FUT) if (map[c.key] !== undefined) fx[c.key] = parseFuture(c, r[map[c.key]], issues);
+      fut.push(fx);
       return x;
     });
-    return { records, map, issues };
+    return { records, map, issues, fut };
   }
 
   // ------------------------------------------------------------------ validation run
@@ -220,6 +254,9 @@
       // patients treated after the development years are a prospective test of this model version
       period: yrs.length ? [yrs.reduce((a, b) => Math.min(a, b)), yrs.reduce((a, b) => Math.max(a, b))] : null,
       development_period: dev, rows_with_year: yrs.length, rows_after_development: dev ? yrs.filter((v) => v > dev[1]).length : null,
+      // patients with a known outcome who have the predictors collected for future versions (counts of 1-9 as null)
+      future: Object.fromEntries(Object.entries(NS.future || {}).map(([g, c]) => [g,
+        Object.fromEntries(Object.entries(c).map(([k, v]) => [k, v > 0 && v < 10 ? null : v]))])),
       stages: {},
     };
     const pick = (r) => (r.insufficient ? { n: r.n, insufficient: true }
@@ -355,8 +392,9 @@
   }
 
   function ingest(table, root) {
-    const { records, map, issues } = toRecords(table);
+    const { records, map, issues, fut } = toRecords(table);
     NS.records = records; NS.map = map; NS.issues = issues; NS.results = null; NS.preds = null;
+    NS.future = futureCounts(records, fut);
     if (!map.mrs90) NS.error = tx("No 90-day mRS column (mrs90) was found, so performance cannot be measured.", "Nebyl nalezen sloupec mRS za 90 dní (mrs90), výkon proto nelze změřit.");
     render(root);
   }
@@ -364,7 +402,7 @@
   function templateDetails() {
     const det = h("details", { class: "template" });
     det.appendChild(h("summary", { text: tx("Data format and template", "Formát dat a šablona") }));
-    const header = KEYS.join(",");
+    const header = KEYS.concat(FUT.map((c) => c.key)).join(",");
     const copyBtn = h("button", { class: "btn", type: "button" }, tx("Copy column header", "Kopírovat záhlaví"));
     copyBtn.addEventListener("click", () => copyText(header, copyBtn));
     det.appendChild(h("div", { class: "tool-actions" }, copyBtn, downloadLink(`${header}\n`, "mtop_template.csv", "text/csv")));
@@ -381,9 +419,18 @@
       else vals = `${f.min}–${f.max}${f.unit ? ` ${A.L(f.unit)}` : ""}`;
       return [k, A.L(f.label), vals, `${A.L(STAGE[f.stage].label)}${f.optional ? tx(" · may be empty", " · může chybět") : ""}`];
     });
+    const fRows = FUT.map((c) => [c.key, A.L(c.label),
+      c.values ? A.L(c.values) : c.type === "text" ? tx("text", "text") : `${num(c.min)}–${num(c.max)}`,
+      tx("optional", "nepovinné") + (c.note ? ` · ${A.L(c.note)}` : "")]);
+    const tr = (r) => h("tr", null, h("th", { scope: "row", class: "mono", text: r[0] }), h("td", { text: r[1] }), h("td", { text: r[2] }), h("td", { text: r[3] }));
     det.appendChild(h("div", { class: "table-scroll" }, h("table", { class: "data compact" },
       h("thead", null, h("tr", null, [tx("Column", "Sloupec"), tx("Meaning", "Význam"), tx("Values", "Hodnoty"), tx("Stage", "Fáze")].map((x) => h("th", { scope: "col", text: x })))),
-      h("tbody", null, rows.map((r) => h("tr", null, h("th", { scope: "row", class: "mono", text: r[0] }), h("td", { text: r[1] }), h("td", { text: r[2] }), h("td", { text: r[3] })))))));
+      h("tbody", null, rows.map(tr)),
+      fRows.length ? h("tbody", { class: "future-rows" },
+        h("tr", null, h("th", { colspan: "4", scope: "rowgroup", class: "group-row",
+          text: tx(`Optional: collected for future versions, not used by the models yet. Each enters a model only after its added value is tested on at least ${(B.future || {}).min_per_outcome || 100} patients with mRS 0–2 and as many with mRS 3–6.`,
+            `Nepovinné: sbírá se pro budoucí verze, modely je zatím nepoužívají. Do modelu vstoupí až po ověření přínosu alespoň na ${(B.future || {}).min_per_outcome || 100} pacientech s mRS 0–2 a stejném počtu s mRS 3–6.`) })),
+        fRows.map(tr)) : null)));
     det.appendChild(h("p", { class: "note", text: tx("Empty cells are treated as unknown. Common English and Czech spellings (ano/ne, M/F, M1/M2, ADAPT …) are recognised.", "Prázdné buňky se berou jako neznámé. Rozpoznávají se běžné anglické i české zápisy (ano/ne, M/Ž, M1/M2, ADAPT …).") }));
     return det;
   }
@@ -391,11 +438,19 @@
   function mappingSummary() {
     const found = KEYS.filter((k) => NS.map[k] !== undefined);
     const missing = KEYS.filter((k) => NS.map[k] === undefined);
+    const futFound = FUT.filter((c) => NS.map[c.key] !== undefined);
     const box = h("div", { class: "mapping" });
     box.appendChild(h("p", null, h("b", { text: `${num(NS.records.length)} ${tx("rows", "řádků")}` }),
       ` · ${tx("recognised columns", "rozpoznané sloupce")}: ${found.length}/${KEYS.length}` +
       ` · ${tx("with 90-day mRS", "se mRS za 90 dní")}: ${num(NS.records.filter((x) => x.mrs90 !== null).length)}`));
     if (missing.length) box.appendChild(h("p", { class: "note", text: `${tx("Not found (treated as unknown)", "Nenalezeno (bráno jako neznámé)")}: ${missing.join(", ")}` }));
+    if (futFound.length) {
+      const G = { perfusion: tx("CT perfusion", "CT perfuze"), collaterals: tx("collaterals", "kolaterály"), gfap: "GFAP" };
+      const per = Object.entries(NS.future || {}).map(([g, c]) => `${G[g] || g} ${num(c.n)} (${tx("mRS 0–2", "mRS 0–2")} ${num(c.good)}, ${tx("mRS 3–6", "mRS 3–6")} ${num(c.poor)})`);
+      box.appendChild(h("p", { class: "note", text: `${tx("Optional columns for future versions", "Nepovinné sloupce pro budoucí verze")}: ${futFound.map((c) => c.key).join(", ")}`
+        + (per.length ? ` · ${tx("recorded with a known 90-day mRS", "evidováno se známým mRS za 90 dní")}: ${per.join("; ")}` : "")
+        + ` · ${tx("not used by the models", "modely je nepoužívají")}` }));
+    }
     const bad = Object.entries(NS.issues || {});
     if (bad.length) box.appendChild(h("p", { class: "note", text: `${tx("Unrecognised or out-of-range values set to unknown", "Nerozpoznané nebo neplatné hodnoty nastavené jako neznámé")}: ${bad.map(([k, n]) => `${k} ${n}`).join(", ")}` }));
     return box;

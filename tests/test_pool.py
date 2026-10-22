@@ -42,6 +42,17 @@ def test_small_cells_are_removed_before_publication():
     assert any("earlier model" in n for n in P.check_result(_result(), "b" * 64, 10)[2])
 
 
+def test_future_predictor_counts_are_checked():
+    """Counts of patients with CT perfusion, collaterals or GFAP recorded: counts only, small ones suppressed."""
+    ok = {"perfusion": {"n": 120, "good": 70, "poor": 50, "died": 7, "survived": 113}, "gfap": {"n": 0, "good": 0, "poor": 0}}
+    clean, errors, notes = P.check_result(_result(future=ok), FP, 10)
+    assert not errors and clean["future"]["perfusion"]["died"] is None and clean["future"]["perfusion"]["good"] == 70
+    assert any("future/perfusion/died" in n for n in notes)
+    for bad in ({"perfusion": {"values": [12.5, 30]}}, {"perfusion": [1, 2]}, {"Perfusion X": {"n": 12}},
+                {"gfap": {"n": 12.5}}, {"gfap": {"n": "12"}}):
+        assert any(e.startswith("future") for e in P.check_result(_result(future=bad), FP, 10)[1]), bad
+
+
 def test_add_replaces_the_same_site_and_version(tmp_path, monkeypatch):
     monkeypatch.setattr(P, "POOL_FILE", tmp_path / "validation_pool.json")
     monkeypatch.setattr(P, "current_fingerprint", lambda: FP)

@@ -124,6 +124,63 @@ def test_js_matches_regressions(tmp_path, name):
     assert np.max(np.abs(phi_py.to_numpy().sum(1) + base_py - lg)) < 1e-8
 
 
+def test_js_matches_interaction_and_imputation_regressions(tmp_path):
+    X, y = _synthetic(seed=5)
+    f = Lr.tune("LR + interactions", X, y, 1, trials=1, mono=[0] * X.shape[1])
+    spec = Lr.export(f, 0.0, X)
+    assert len(spec["spec"]["products"]) == 2
+    Xe = _eval_rows(X)
+    js = _node_eval(spec, Xe, tmp_path)
+    De = pd.DataFrame(Xe, columns=X.columns)
+    phi_py, base_py = Lr.contributions(f, De)
+    assert np.max(np.abs(np.array([r["raw"] for r in js]) - f.logit(De))) < 1e-8
+    assert np.max(np.abs(np.array([r["phi"] for r in js]) - phi_py.to_numpy())) < 1e-8
+    assert np.max(np.abs(phi_py.to_numpy().sum(1) + base_py - f.logit(De))) < 1e-8
+    # LR + multiple imputation: one spline regression on stacked imputations; complete rows are exact
+    g = Lr.tune("LR + multiple imputation", X, y, 1, trials=1, mono=[0] * X.shape[1])
+    spec = Lr.export(g, 0.0, X)
+    full = X.dropna().sample(120, random_state=2)
+    js = _node_eval(spec, full.to_numpy(float), tmp_path)
+    assert np.max(np.abs(np.array([r["raw"] for r in js]) - g.logit(full))) < 1e-8
+
+
+def test_js_matches_ebm_and_stacking(tmp_path):
+    from mtop.extra_learners import ebm_spec_logit, ebm_spec_terms
+
+    X, y = _synthetic(seed=6)
+    f = Lr.tune("EBM", X, y, 1, trials=1, mono=[0] * X.shape[1])
+    spec = Lr.export(f, 0.0, X)
+    assert spec["spec"]["min_samples_leaf"] >= 20
+    Xe = _eval_rows(X)
+    # values exactly on a published cut point go to the upper interval, as in interpret
+    cut_rows = []
+    for t in spec["spec"]["terms"]:
+        if len(t["f"]) == 1 and t["cuts"][0]:
+            r = Xe[0].copy()
+            r[t["f"][0]] = t["cuts"][0][0]
+            cut_rows.append(r)
+    Xe = np.vstack([Xe] + cut_rows[:10])
+    js = _node_eval(spec, Xe, tmp_path)
+    raw_js = np.array([r["raw"] for r in js])
+    assert np.max(np.abs(raw_js - ebm_spec_logit(spec["spec"], Xe))) < 1e-10
+    assert np.max(np.abs(raw_js - f.logit(pd.DataFrame(Xe, columns=X.columns)))) < 1e-5   # 7-digit scores
+    phi_ref = np.zeros((len(Xe), X.shape[1]))
+    for i, row in enumerate(Xe):
+        sc, owners = ebm_spec_terms(spec["spec"], row)
+        for v, o in zip(sc, owners):
+            for j in o:
+                phi_ref[i, j] += v / len(o)
+    assert np.max(np.abs(np.array([r["phi"] for r in js]) - phi_ref)) < 1e-10
+    s = Lr.tune("Stacking", X, y, 1, trials=2, mono=[0] * X.shape[1])
+    spec = Lr.export(s, 0.0, X)
+    js = _node_eval(spec, Xe, tmp_path)
+    De = pd.DataFrame(Xe, columns=X.columns)
+    raw_js = np.array([r["raw"] for r in js])
+    assert np.max(np.abs(raw_js - s.logit(De))) < 1e-4
+    phi_js, base_js = np.array([r["phi"] for r in js]), np.array([r["base"] for r in js])
+    assert np.max(np.abs(base_js + phi_js.sum(1) - raw_js)) < 1e-8
+
+
 def test_exported_bundle_matches_deployed_models(tmp_path):
     """If the real pipeline has been run, check every published learner against the saved models."""
     bundle_file = ROOT / "artifacts" / "public" / "model_bundle.json"
@@ -137,6 +194,8 @@ def test_exported_bundle_matches_deployed_models(tmp_path):
             pk = pickle.loads((private / f"deployed_{stage}_{target}.pkl").read_bytes())
             k = len(entry["columns"])
             for name, spec in entry["learners"].items():
+                if spec["kind"] == "stack":      # bases published once (export.share_stack_bases)
+                    spec = {**spec, "bases": [entry["learners"][b["same_as"]] if "same_as" in b else b for b in spec["bases"]]}
                 f = pk["models"][name]["fitted"]
                 Xe = rng.normal(0, 1, (40, k))
                 if spec["kind"] in ("lgbm", "xgb"):
@@ -151,5 +210,5 @@ def test_exported_bundle_matches_deployed_models(tmp_path):
                 Xe[rng.random(Xe.shape) < 0.15] = np.nan
                 js = _node_eval(spec, Xe, tmp_path)
                 lg = f.logit(pd.DataFrame(Xe, columns=entry["columns"]))
-                tol = 1e-4 if spec["kind"] == "xgb" else 1e-6
+                tol = 1e-4 if spec["kind"] in ("xgb", "stack") else 1e-5 if spec["kind"] == "ebm" else 1e-6
                 assert np.max(np.abs(np.array([r["raw"] for r in js]) - lg)) < tol, (stage, target, name)
