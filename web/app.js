@@ -1905,9 +1905,14 @@
         table: { columns: [t().variable, tx("mean |SHAP|", "průměrné |SHAP|"), tx("share", "podíl")], rows: imp.map(([f, v]) => [featLabel(f), num(v, 3), pct100(r.share[f], 1)]) },
         labels: { table: t().showTable, chart: t().showChart } });
       C.hbars(fi.body, { rows: imp.map(([f, v]) => ({ label: featLabel(f), value: v, display: num(v, 2) })), color: mcolor(k), valueLabel: tx("mean |SHAP|", "průměrné |SHAP|"), aria: t().impTitle(mname(k)) });
+      const ck = r.check || {};
+      const refit = ck.max_abs_dp !== undefined && ck.max_abs_dp > 0.01
+        ? tx(` The explained model is the validated one refitted from its saved settings; their estimates differ by up to ${num(ck.max_abs_dp * 100, 1)} percentage points for a patient (AUROC ${num(ck.auroc, 3)} vs ${num(ck.auroc_saved, 3)}).`,
+          ` Vysvětlovaný model je validovaný model přetrénovaný z uložených nastavení; jejich odhady se u pacienta liší nejvýše o ${num(ck.max_abs_dp * 100, 1)} procentního bodu (AUROC ${num(ck.auroc, 3)} vs ${num(ck.auroc_saved, 3)}).`)
+        : "";
       card.appendChild(h("p", { class: "note", text: tx(
-        `Method: ${methodText(r.method)}. The development model (fitted on ${devYears()}) explained on the test patients, the same patients for every model, so the bars can be compared across models (table below). A predictor's value adds up its one-hot categories, spline terms and missing-value indicator.`,
-        `Metoda: ${methodText(r.method)}. Vývojový model (natrénovaný na letech ${devYears()}) vysvětlený na testovacích pacientech, stejných pro všechny modely, takže sloupce lze mezi modely srovnávat (tabulka níže). Hodnota prediktoru sčítá jeho kategorie, členy splajnů a indikátor chybění.`) }));
+        `Method: ${methodText(r.method)}. The development model (fitted on ${devYears()}) explained on the test patients, the same patients for every model, so the bars can be compared across models (table below). A predictor's value adds up its one-hot categories, spline terms and missing-value indicator.${refit}`,
+        `Metoda: ${methodText(r.method)}. Vývojový model (natrénovaný na letech ${devYears()}) vysvětlený na testovacích pacientech, stejných pro všechny modely, takže sloupce lze mezi modely srovnávat (tabulka níže). Hodnota prediktoru sčítá jeho kategorie, členy splajnů a indikátor chybění.${refit}`) }));
       return card;
     }
     const dep = (((V.deployed || {})[st] || {})[tg] || {}).learners || {};

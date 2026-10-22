@@ -212,7 +212,10 @@ def fit_ft(X_tr: pd.DataFrame, y_tr, X_te: pd.DataFrame, seed: int, tuned: bool 
     model, _, _ = _ft_train(A_all, y_tr, cfg, seed, epochs=max(1, int(epochs)))
     info = {**{k: v for k, v in cfg["arch"].items() if v is not None}, "lr": cfg["lr"], "weight_decay": cfg["weight_decay"],
             "epochs": int(epochs), "val_logloss": float(val_loss), "trials": trials if tuned else 0}
-    return _ft_predict(model, A_te), jsonable(info)
+    # full precision (not jsonable's 6 decimals), so the model can be rebuilt exactly (shap_all.FTModel)
+    exact = {k: (float(v) if isinstance(v, (float, np.floating)) else int(v) if isinstance(v, (np.integer,)) else v)
+             for k, v in info.items()}
+    return _ft_predict(model, A_te), exact
 
 
 def fit_tabpfn(X_tr, y_tr, X_te, seed: int):

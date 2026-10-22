@@ -42,7 +42,7 @@ from .export import clean_json
 from .features import column_to_feature, design_matrix, monotone_vector
 from .paths import PUBLIC
 
-N_BACKGROUND, N_PERM, N_GRAD = 40, 10, 64
+N_BACKGROUND, N_PERM, N_GRAD = 40, 10, 128
 METHOD = {"exact_linear": "exact: the regression's terms", "exact_tree": "exact: TreeSHAP",
           "exact_ebm": "exact: the EBM's additive terms", "exact_stack": "exact: weighted sum of the base models' values",
           "sampled": f"sampled: {N_PERM} antithetic permutations x {N_BACKGROUND} background patients",
@@ -81,6 +81,12 @@ class FTModel:
         arch.update({k: info[k] for k in arch if k in info})
         if "ffn_d_hidden" not in info:
             arch["ffn_d_hidden"] = None
+        # the hidden width is int(d_block x multiplier): a multiplier saved as 1.333333 instead of 4/3
+        # would give 255 units instead of 256, so snap it back to the value the run used
+        mult = arch.get("ffn_d_hidden_multiplier")
+        for exact in (2 / 3, 4 / 3, 2.0):
+            if mult is not None and abs(mult - exact) < 1e-5:
+                arch["ffn_d_hidden_multiplier"] = exact
         cfg = {"arch": arch, "lr": float(info["lr"]), "weight_decay": float(info["weight_decay"])}
         self.model, _, _ = C._ft_train(self.prep(X_dev), np.asarray(y_dev, float), cfg, seed, epochs=max(1, int(info["epochs"])))
 
