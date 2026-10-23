@@ -28,6 +28,11 @@ ORDER = ["Logistic regression (splines)", "Logistic regression", "LightGBM", "XG
 # amendment 1 (docs/amendment_1.md): four more publishable candidates (extra_learners.py)
 NEW = ["EBM", "LR + interactions", "LR + multiple imputation", "Stacking"]
 DEPLOYABLE = ("Logistic regression (splines)", "Logistic regression", "LightGBM", "XGBoost") + tuple(NEW)
+# learners the browser reproduces exactly for every patient. The regression on multiple imputations
+# imputes a patient's missing inputs by chained equations with random draws, which the browser cannot
+# repeat (its spline regression alone matches only complete rows), so it is validated but not offered
+# in the calculator (docs/amendment_1.md, notes on carrying it out)
+PUBLISHED = tuple(n for n in DEPLOYABLE if n != "LR + multiple imputation")
 KIND = {"Logistic regression (splines)": "spline", "Logistic regression": "lr", "LightGBM": "lgbm",
         "XGBoost": "xgb", "MLP": "mlp", "EBM": "ebm", "LR + interactions": "spline_int",
         "LR + multiple imputation": "spline_mi", "Stacking": "stack"}

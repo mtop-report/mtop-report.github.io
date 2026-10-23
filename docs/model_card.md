@@ -99,11 +99,13 @@ apply (onset to IVT without IVT) stay missing, as in the registry.
 ## 7. Deployed models
 
 Every publishable learner (regression with splines, linear regression, LightGBM, XGBoost, EBM,
-regression with interactions, regression with multiple imputation, stacking) is refitted on all
-1,451 patients with its development settings; its intercept is re-estimated on the pooled years
-2023–2025 from cross-validated predictions (temporal recalibration). The calculator uses the chosen
-model by default; the others can be selected, each with exact attributions computed in the browser.
-The model bundle carries a SHA-256 fingerprint shown on the About tab.
+regression with interactions, stacking) is refitted on all 1,451 patients with its development
+settings, and its intercept is re-estimated on the pooled years 2023–2025 from cross-validated
+predictions (temporal recalibration). Regression with multiple imputation is validated but not
+offered in the calculator, because the browser cannot repeat its random imputation of a patient's
+missing inputs. The calculator uses the chosen model by default; the others can be selected, each
+with exact attributions computed in the browser. The model bundle carries a SHA-256 fingerprint
+shown on the About tab.
 
 ## 8. Limitations
 

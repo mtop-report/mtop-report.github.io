@@ -165,9 +165,10 @@ years gave −0.03 and 0.769. Every learner is compared on the Adaptive tab.
    cross-validation gains ≥ 0.01 AUROC on average and is better in ≥ 80% of folds, without worse
    calibration-in-the-large.
 6. **Deployment.** Every publishable learner (regression with splines, linear regression,
-   LightGBM, XGBoost, EBM, regression with interactions, regression with multiple imputation,
-   stacking) is refitted on all years with its development settings, and its intercept is
-   re-estimated on the pooled years 2023–2025 from cross-validated predictions.
+   LightGBM, XGBoost, EBM, regression with interactions, stacking) is refitted on all years with its
+   development settings, and its intercept is re-estimated on the pooled years 2023–2025 from
+   cross-validated predictions. Regression with multiple imputation is validated but not offered in
+   the calculator: the browser cannot repeat its random imputation of a patient's missing inputs.
 7. **Explanations** (`src/mtop/shap_all.py`). In the calculator, exact attributions for every
    published learner, computed in the browser. On the Validation tab, SHAP values of every
    validated model on the same test patients: exact where the model allows it, sampled

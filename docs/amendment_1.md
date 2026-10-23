@@ -110,6 +110,19 @@ compared on the test patients.
 - **Nested cross-validation** of the amendment-1 and comparison-only learners re-tunes the reference
   and XGBoost inside each of the 15 outer folds (20 trials, the nested budget) and passes their
   settings to the stacking and the multiple imputation, as `src/mtop/compare.py` documents.
+- **Regression + multiple imputation is not offered in the calculator.** It is a candidate and was
+  validated under the rule (it was not chosen), but its prediction for a patient with a missing input
+  averages chained-equation imputations with random draws, which the browser cannot repeat. Its
+  regression alone matches the validated model only when every input is recorded; in the registry,
+  70 % of patients have at least one missing input, and the browser version would have differed from
+  the validated model by up to 32 percentage points. Item 1's condition that a published model be
+  evaluated exactly in the browser therefore keeps it out of the calculator; the other seven
+  candidates are published.
+- **SHAP refits.** The SHAP values describe refits of the validated models from their saved settings.
+  Most reproduce the saved test predictions exactly or within 0.003; XGBoost and LightGBM within 0.03.
+  The MLP (up to 0.14) and the tuned FT-Transformer had settings saved rounded to six decimals; the
+  tuned FT-Transformer was therefore run again with its settings saved in full, and the app shows,
+  next to each model's SHAP chart, how far its refit differs from the validated model.
 - **Chunks.** The runs were split by split, stage and fold and merged afterwards
   (`python -m mtop compare --merge`). All were run against the same saved training results of
   18 October 2026; chunks written from 22 October also carry a fingerprint of the reference's saved

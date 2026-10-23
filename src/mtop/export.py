@@ -182,7 +182,10 @@ def export_all() -> None:
             pk = load_deployed(PRIVATE, stage, target)
             if pk["columns"] != cols:
                 raise ValueError(f"deployed columns differ for {stage}/{target}")
-            learners = share_stack_bases({name: Lr.export(m["fitted"], m["shift"], X_all, min_leaf) for name, m in pk["models"].items()})
+            if pk["chosen"] not in Lr.PUBLISHED:
+                raise ValueError(f"{stage}/{target}: the chosen model {pk['chosen']} cannot be reproduced in the browser")
+            learners = share_stack_bases({name: Lr.export(m["fitted"], m["shift"], X_all, min_leaf)
+                                          for name, m in pk["models"].items() if name in Lr.PUBLISHED})
             bundle["models"][stage][target] = {
                 "chosen": pk["chosen"], "columns": cols, "column_feature": [c2f[c] for c in cols],
                 "n_train": int(len(d)), "learners": learners,
