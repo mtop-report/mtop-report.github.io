@@ -119,10 +119,13 @@ compared on the test patients.
   evaluated exactly in the browser therefore keeps it out of the calculator; the other seven
   candidates are published.
 - **SHAP refits.** The SHAP values describe refits of the validated models from their saved settings.
-  Most reproduce the saved test predictions exactly or within 0.003; XGBoost and LightGBM within 0.03.
-  The MLP (up to 0.14) and the tuned FT-Transformer had settings saved rounded to six decimals; the
-  tuned FT-Transformer was therefore run again with its settings saved in full, and the app shows,
-  next to each model's SHAP chart, how far its refit differs from the validated model.
+  Most reproduce the saved test predictions exactly or within 0.003. The tuning results of 18 October
+  saved settings rounded to six decimals, so the refits of XGBoost and LightGBM differ by up to 0.03
+  and the MLP's by up to 0.14 (its weight decay and learning rate lost precision); repeating the MLP's
+  tuning was not worth its computing time for a comparison-only learner. The tuned FT-Transformer was
+  run again with its settings saved in full (same seed, same results) and now matches exactly.
+  Settings are saved in full from now on, and the app shows next to each model's SHAP chart how far
+  its refit differs from the validated model.
 - **Chunks.** The runs were split by split, stage and fold and merged afterwards
   (`python -m mtop compare --merge`). All were run against the same saved training results of
   18 October 2026; chunks written from 22 October also carry a fingerprint of the reference's saved

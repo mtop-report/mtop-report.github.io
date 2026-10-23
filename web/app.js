@@ -836,7 +836,7 @@
     if (name === "PRE") return `${v > 0 ? "+" : ""}${num(v)}`;
     if (name === "THRIVE-EVT") return tx(`published formula ${pct(XE.sig(v))}`, `publikovaný vzorec ${pct(XE.sig(v))}`);
     if (name.startsWith("NIHSS")) return `NIHSS ${num(v)}`;
-    return tx(`${num(v)} points`, `${num(v)} b.`);
+    return tx(`${num(v)} ${Math.abs(v) === 1 ? "point" : "points"}`, `${num(v)} b.`);
   }
 
   // ------------------------------------------------------------------ FNO bedside score (7 items)

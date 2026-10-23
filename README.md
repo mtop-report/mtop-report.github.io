@@ -81,35 +81,38 @@ dark, with its typeface bundled, so opening it contacts no third-party server.
 
 Temporal validation, primary split as in the 2026 FNO analysis: models developed on 1,225 patients
 treated 2005–2022 and tested on 226 treated 2023–2025. AUROC (95% CI); **bold**: the model the
-pre-specified rule chose for the calculator.
+pre-specified rule chose for the calculator. Every model's full results (CIs, DeLong p, calibration,
+decision curves, SHAP) are on the Validation tab.
 
 **mRS 0–2 at 90 days**
 
-| Stage | n (events) | Regression + splines | Linear regression | LightGBM | XGBoost | MLP | Best published score |
-|---|---|---|---|---|---|---|---|
-| 1 · Before thrombectomy | 226 (60) | **0.809 (0.74–0.87)** | 0.803 (0.74–0.86) | 0.800 (0.73–0.86) | 0.797 (0.72–0.86) | 0.786 (0.72–0.85) | bedside items as a regression 0.794 |
-| 2 · End of procedure | 221 (59) | **0.842 (0.79–0.90)** | 0.838 (0.78–0.89) | 0.829 (0.77–0.88) | 0.815 (0.75–0.87) | 0.816 (0.75–0.88) | FNO bedside score 0.776 |
-| 3 · 24 hours | 120 (36) | **0.883 (0.82–0.94)** | 0.882 (0.82–0.94) | 0.890 (0.83–0.94) | 0.885 (0.82–0.94) | 0.889 (0.83–0.94) | MR PREDICTS@24H 0.904 |
-| 4 · Day 7 | 139 (52) | **0.884 (0.83–0.93)** | 0.885 (0.83–0.93) | 0.921 (0.88–0.96) | 0.922 (0.88–0.96) | 0.858 (0.80–0.91) | NIHSS day 7 0.924 |
+| Stage | n (events) | Regression + splines (reference) | Best other candidate | Best comparison-only learner | Best published score |
+|---|---|---|---|---|---|
+| 1 · Before thrombectomy | 226 (60) | **0.809 (0.74–0.87)** | stacking 0.809 (0.74–0.87) | averaged probabilities 0.807 (0.74–0.86) | bedside items as a regression 0.794 (0.72–0.86) |
+| 2 · End of procedure | 221 (59) | **0.842 (0.79–0.90)** | regression + interactions 0.841 (0.78–0.89) | averaged probabilities 0.837 (0.78–0.89) | MR PREDICTS (refit) 0.791 (0.72–0.86) |
+| 3 · 24 hours | 120 (36) | **0.883 (0.82–0.94)** | regression + multiple imputation 0.907 (0.85–0.96) | averaged probabilities 0.893 (0.83–0.94) | MR PREDICTS@24H 0.904 (0.84–0.95) |
+| 4 · Day 7 | 139 (52) | **0.884 (0.83–0.93)** | stacking 0.922 (0.88–0.96) | CatBoost 0.924 (0.88–0.96) | NIHSS day 7 0.924 (0.88–0.96) |
 
 **Death within 90 days**
 
-| Stage | n (events) | Regression + splines | Linear regression | LightGBM | XGBoost | MLP | Best published score |
-|---|---|---|---|---|---|---|---|
-| 1 · Before thrombectomy | 226 (40) | **0.734 (0.64–0.82)** | 0.726 (0.63–0.82) | 0.748 (0.66–0.83) | 0.761 (0.67–0.84) | 0.733 (0.64–0.82) | bedside items as a regression 0.760 |
-| 2 · End of procedure | 221 (38) | **0.746 (0.65–0.83)** | 0.737 (0.64–0.83) | 0.777 (0.69–0.86) | 0.778 (0.69–0.86) | 0.742 (0.65–0.83) | FNO bedside score 0.686 |
-| 3 · 24 hours | 120 (13) | **0.859 (0.73–0.95)** | 0.853 (0.71–0.95) | 0.860 (0.70–0.96) | 0.855 (0.70–0.96) | 0.852 (0.71–0.96) | MR PREDICTS@24H 0.849 |
-| 4 · Day 7 | 139 (6) | **0.805 (0.57–0.98)** | 0.817 (0.55–0.98) | 0.837 (0.65–0.98) | 0.852 (0.68–0.97) | 0.812 (0.64–0.96) | NIHSS day 7 0.856 |
+| Stage | n (events) | Regression + splines (reference) | Best other candidate | Best comparison-only learner | Best published score |
+|---|---|---|---|---|---|
+| 1 · Before thrombectomy | 226 (40) | **0.734 (0.64–0.82)** | XGBoost 0.761 (0.67–0.84) | averaged probabilities 0.762 (0.67–0.84) | bedside items as a regression 0.760 (0.67–0.85) |
+| 2 · End of procedure | 221 (38) | **0.746 (0.65–0.83)** | stacking 0.778 (0.69–0.86) | averaged probabilities 0.762 (0.67–0.85) | MR PREDICTS (refit) 0.734 (0.63–0.83) |
+| 3 · 24 hours | 120 (13) | **0.859 (0.73–0.95)** | regression + interactions 0.864 (0.73–0.95) | CatBoost 0.865 (0.73–0.96) | MR PREDICTS@24H 0.849 (0.71–0.95) |
+| 4 · Day 7 | 139 (6) | **0.805 (0.57–0.98)** | XGBoost 0.852 (0.68–0.97) | CatBoost 0.837 (0.65–0.97) | NIHSS day 7 0.856 (0.71–0.98) |
 
-The rule (from the 2026 analysis): regression with splines is the reference, and another model
-replaces it only if its paired 95% CI of the AUROC difference on the temporal test lies above zero,
-or in nested cross-validation (5 folds × 3 repeats on all years, admission stage) it gains ≥ 0.01
-AUROC on average and is better in ≥ 80% of folds, without worse calibration-in-the-large. Nested
-cross-validation, mRS 0–2 before thrombectomy: splines 0.762, linear 0.758, LightGBM 0.756,
-XGBoost 0.756, MLP 0.758. The test years are few (60 good outcomes, 6 deaths by day 7), so the
-sensitivity split (development 2005–2020, test 2021–2025: 379 patients, 110 good outcomes) is also
-reported; there the tree models lead at the later stages (day 7, mRS 0–2: LightGBM 0.917 vs
-splines 0.813), which the Validation tab shows next to the primary split.
+The rule (2026 analysis, [amendment 1](docs/amendment_1.md)): regression with splines is the
+reference, and one of the seven other candidates replaces it only if its AUROC on the temporal test
+is higher with a Holm-adjusted paired-bootstrap p below 0.05, or in nested cross-validation (5 folds
+× 3 repeats on all years, admission stage) it gains ≥ 0.01 AUROC on average and is better in ≥ 80%
+of folds, without worse calibration-in-the-large. No candidate qualified at any stage: the smallest
+Holm-adjusted p was 0.245 (EBM at day 7, mRS 0–2; unadjusted 0.035), and in nested cross-validation
+the closest was regression with multiple imputation (0.767 against 0.762, better in 9 of 15 folds).
+The test years are few (60 good outcomes, 6 deaths by day 7), so the sensitivity split (development
+2005–2020, test 2021–2025: 379 patients, 110 good outcomes) is also reported; there the tree models
+lead at the later stages (day 7, mRS 0–2: LightGBM 0.917 and CatBoost 0.915 against splines 0.813),
+which the Validation tab shows next to the primary split.
 
 Calibration: the development models over-predicted good outcomes in 2023–2025 (regression with
 splines before thrombectomy: calibration intercept −0.41, slope 1.47, O/E 0.78). The published

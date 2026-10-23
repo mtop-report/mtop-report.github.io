@@ -205,10 +205,12 @@ def lgbm_settings(params: dict, trees: int, cv_logloss: float, trials: int) -> d
 
 
 def jsonable(d: dict) -> dict:
+    """Settings as plain JSON values. Floats keep full precision, so a model can be refitted exactly
+    from its saved settings (shap_all.py; the results of 18 October 2026 were saved to 6 decimals)."""
     out = {}
     for k, v in d.items():
         if isinstance(v, (np.floating, float)):
-            out[k] = round(float(v), 6)
+            out[k] = float(v)
         elif isinstance(v, (np.integer,)):
             out[k] = int(v)
         elif isinstance(v, tuple):
