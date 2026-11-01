@@ -94,6 +94,18 @@ def font_css() -> str:
     return "\n".join(out)
 
 
+def institution_logos(site_cfg) -> dict:
+    """Logos of the institutions in settings.yaml site.institutions, inlined as data URIs so the page
+    still makes no request of its own (files in web/assets/logos)."""
+    out = {}
+    for inst in site_cfg.get("institutions", []) or []:
+        f = WEB / "assets" / "logos" / inst["logo"]
+        if f.exists():
+            mime = "image/svg+xml" if f.suffix == ".svg" else "image/png"
+            out[inst["logo"]] = f"data:{mime};base64," + base64.b64encode(f.read_bytes()).decode("ascii")
+    return out
+
+
 def build_site():
     SITE.mkdir(parents=True, exist_ok=True)
     site_cfg = settings().get("site", {})
@@ -111,6 +123,7 @@ def build_site():
         "demo_csv": _load("demo_synthetic.csv", ""),
         "qr_svg": (WEB / "assets" / "qr.svg").read_text(encoding="utf-8") if (WEB / "assets" / "qr.svg").exists() else "",
         "logo_svg": logo.read_text(encoding="utf-8").strip() if logo.exists() else "",
+        "institution_logos": institution_logos(site_cfg),
         "federated": _load("federated.json"),
         "validation_pool": _load("validation_pool.json", {"results": []}),
         "analyses": _load("analyses.json", {}),

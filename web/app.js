@@ -315,7 +315,15 @@
       DATA.logo_svg ? h("span", { "aria-hidden": "true", html: DATA.logo_svg }) : null,
       h("span", { text: `${t().footer} · v${B.version} · ${B.generated}` }));
     const right = SITE.repo_url ? h("a", { href: SITE.repo_url, target: "_blank", rel: "noopener", text: tx("Code on GitHub", "Kód na GitHubu") }) : null;
-    return h("footer", { class: "foot" }, h("div", { class: "wrap" }, left, right));
+    return h("footer", { class: "foot" }, h("div", { class: "wrap" }, left, institutionLogos("foot-inst"), right));
+  }
+
+  // The institutions behind MTOP (config/settings.yaml site.institutions; images inlined by mtop.site).
+  function institutionLogos(cls) {
+    const list = (SITE.institutions || []).filter((i) => (DATA.institution_logos || {})[i.logo]);
+    if (!list.length) return null;
+    return h("div", { class: `inst-logos ${cls}` }, list.map((i) =>
+      h("img", { src: DATA.institution_logos[i.logo], alt: L(i.name), title: L(i.name), class: `inst-${i.logo.replace(/\.\w+$/, "")}`, decoding: "async" })));
   }
 
   function renderView() {
@@ -2174,6 +2182,8 @@
     add(en ? "Reporting" : "Reporting", h("a", { href: "#reporting", onclick: (e) => { e.preventDefault(); goTo("reporting"); }, text: en ? "TRIPOD+AI checklist and other standards" : "Checklist TRIPOD+AI a další standardy" }));
     add(en ? "Intended use" : "Určení", h("span", { text: en ? "Research and teaching. Not a medical device; not for individual treatment decisions." : "Výzkum a výuka. Není zdravotnickým prostředkem; není určeno k rozhodování o léčbě jednotlivce." }));
     const aside = h("aside", { class: "about-side" }, h("div", { class: "card card-pad" }, meta));
+    const inst = institutionLogos("about-inst");
+    if (inst) aside.appendChild(h("div", { class: "card card-pad" }, h("div", { class: "chart-title", text: en ? "Institutions" : "Instituce" }), inst));
     if (DATA.qr_svg && SITE.site_url) {
       const qr = h("div", { class: "qr", html: DATA.qr_svg, role: "img", "aria-label": `QR: ${SITE.site_url}` });
       aside.appendChild(h("div", { class: "card card-pad qr-card" }, qr,

@@ -105,6 +105,13 @@ site:
         - {en: "University Hospital Ostrava", cs: "Fakultní nemocnice Ostrava"}
     - name: "Václav Procházka"
       affiliations: *aff
+  institutions:                    # logos in web/assets/logos, shown in the footer and on About
+    - logo: "fno.png"
+      name: {en: "University Hospital Ostrava", cs: "Fakultní nemocnice Ostrava"}
+    - logo: "lfou.png"
+      name: {en: "Faculty of Medicine, University of Ostrava", cs: "Lékařská fakulta Ostravské univerzity"}
+    - logo: "vsb-it4i.png"
+      name: {en: "IT4Innovations National Supercomputing Center, VSB – Technical University of Ostrava", cs: "IT4Innovations národní superpočítačové centrum, VŠB – Technická univerzita Ostrava"}
   funding:
     en: "Student grant SGS18/LF/2026, Faculty of Medicine, University of Ostrava"
     cs: "Studentská grantová soutěž SGS18/LF/2026, Lékařská fakulta Ostravské univerzity"
