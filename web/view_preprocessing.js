@@ -466,17 +466,19 @@
     const sp = P.flow.splits.primary;
     card.appendChild(head(tx("Table 1. Patient characteristics", "Tabulka 1. Charakteristika pacientů"),
       tx(`Median (IQR) or % of patients with the value recorded; counts under ${MIN} not shown`, `Medián (IQR) nebo % pacientů se zaznamenanou hodnotou; počty pod ${MIN} nejsou uvedeny`)));
-    const cols = ["all", "dev", "test", "smd", "good", "poor", "smd_outcome"];
+    const cols = ["all", "dev", "test", "smd", "good", "poor", "smd_outcome", "missing"];
     const headCols = [tx("Characteristic", "Charakteristika"), `${tx("All", "Všichni")} (n ${num(t1.n.all)})`,
       `${tx("Development", "Vývoj")} ${sp.dev.years[0]}–${sp.dev.years[1]} (n ${num(t1.n.dev)})`, `${tx("Validation", "Validace")} ${sp.test.years[0]}–${sp.test.years[1]} (n ${num(t1.n.test)})`, "SMD",
-      `mRS 0–2 (n ${num(t1.n.good)})`, `mRS 3–6 (n ${num(t1.n.poor)})`, "SMD"];
+      `mRS 0–2 (n ${num(t1.n.good)})`, `mRS 3–6 (n ${num(t1.n.poor)})`, "SMD", tx("Missing", "Chybí")];
     const cell = (r, c) => {
       if (c === "smd" || c === "smd_outcome") return r[c] === null || r[c] === undefined ? "–" : A.signed(r[c], 2);
+      if (c === "missing") return r.all && r.all.missing !== null && r.all.missing !== undefined ? pct(r.all.missing) : "–";
       if ((r.var === "good" || r.var === "death") && (c === "good" || c === "poor")) return "–";
       const v = r[c];
       if (!v) return "–";
       if (r.kind === "median") return v.median === null ? "–" : `${num(v.median)} (${num(v.iqr[0])}–${num(v.iqr[1])})`;
       if (v.small) return `<${MIN}`;
+      if (v.masked) return "·";
       return v.pct === null ? "–" : pct(v.pct);
     };
     const body = [];
@@ -487,8 +489,8 @@
     }
     card.appendChild(table(headCols, body, "t1"));
     card.appendChild(h("p", { class: "note", text: tx(
-      "SMD: standardised mean difference, validation minus development (left) and mRS 0–2 minus mRS 3–6 (right); beyond ±0.1 (bold) marks a relevant difference. The left column shows how case mix and care changed between the development and validation years; the right one which characteristics go with the outcome before any adjustment. Missing values are left out of each percentage; their share is in the model-input table above.",
-      "SMD: standardizovaný rozdíl průměrů, validace minus vývoj (vlevo) a mRS 0–2 minus mRS 3–6 (vpravo); hodnoty za ±0,1 (tučně) značí podstatný rozdíl. Levý sloupec ukazuje, jak se mezi vývojovými a validačními roky změnila skladba pacientů a péče; pravý, které charakteristiky souvisejí s výsledkem před jakoukoli adjustací. Chybějící hodnoty nejsou v procentech zahrnuty; jejich podíl je v tabulce vstupů výše.") }));
+      "SMD: standardised mean difference, validation minus development (left) and mRS 0–2 minus mRS 3–6 (right); beyond ±0.1 (bold) marks a relevant difference. The left column shows how case mix and care changed between the development and validation years; the right one which characteristics go with the outcome before any adjustment. Missing values are left out of each percentage; the last column gives their share in the whole cohort (ASPECTS: anterior circulation; onset to IV thrombolysis: thrombolysed patients). · marks the other half of a split whose small count it would give away by subtraction from All.",
+      "SMD: standardizovaný rozdíl průměrů, validace minus vývoj (vlevo) a mRS 0–2 minus mRS 3–6 (vpravo); hodnoty za ±0,1 (tučně) značí podstatný rozdíl. Levý sloupec ukazuje, jak se mezi vývojovými a validačními roky změnila skladba pacientů a péče; pravý, které charakteristiky souvisejí s výsledkem před jakoukoli adjustací. Chybějící hodnoty nejsou v procentech zahrnuty; poslední sloupec uvádí jejich podíl v celém souboru (ASPECTS: přední povodí; od vzniku do IV trombolýzy: trombolyzovaní). · značí druhou polovinu rozdělení, z níž by odečtením od sloupce Všichni šlo zjistit malý počet.") }));
     return card;
   }
 

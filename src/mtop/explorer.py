@@ -243,92 +243,186 @@ def _smd_prop(a: pd.Series, b: pd.Series):
     return None if sd == 0 else round((q - p) / sd, 2)
 
 
+def _t1_specs() -> list[dict]:
+    """Every non-derived model input (config/features.yaml), by the stage it becomes known, plus the
+    90-day outcomes. Each row: a section header, or a variable whose `fn` returns per patient either the
+    value (kind "median") or 1/0 with NaN where not recorded (kind "pct"). `elig` limits a row to the
+    patients it applies to (ASPECTS: anterior circulation; onset to IVT: thrombolysed)."""
+    S = lambda en, cs: {"section": {"en": en, "cs": cs}}  # noqa: E731
+    C = lambda var, en, cs, fn, elig=None: {"var": var, "label": {"en": en, "cs": cs}, "kind": "median", "fn": fn, "elig": elig}  # noqa: E731
+    P = lambda var, en, cs, fn: {"var": var, "label": {"en": en, "cs": cs}, "kind": "pct", "fn": fn}  # noqa: E731
+    col = lambda c: (lambda g: g[c])  # noqa: E731
+    yn = lambda c: (lambda g: g[c].astype(float))  # noqa: E731
+    eq = lambda c, v: (lambda g: (g[c] == v).astype(float).where(g[c].notna()))  # noqa: E731
+    isin = lambda c, vs: (lambda g: g[c].isin(vs).astype(float).where(g[c].notna()))  # noqa: E731
+    anterior = lambda g: ~g["occlusion"].isin(POSTERIOR_OCCLUSIONS)  # noqa: E731
+    thrombolysed = lambda g: g["ivt"] == 1  # noqa: E731
+    return [
+        S("Before the procedure: patient", "Před výkonem: pacient"),
+        C("age", "Age, years", "Věk, roky", col("age")),
+        P("male", "Men", "Muži", yn("sex_male")),
+        P("mrs_pre0", "Pre-stroke mRS 0", "mRS před CMP 0", eq("mrs_pre", 0)),
+        P("mrs_pre1", "Pre-stroke mRS 1", "mRS před CMP 1", eq("mrs_pre", 1)),
+        P("mrs_pre2", "Pre-stroke mRS 2", "mRS před CMP 2", eq("mrs_pre", 2)),
+        P("mrs_pre3", "Pre-stroke mRS 3–5", "mRS před CMP 3–5", lambda g: (g["mrs_pre"] >= 3).astype(float).where(g["mrs_pre"].notna())),
+        S("Before the procedure: the stroke", "Před výkonem: CMP"),
+        C("nihss", "NIHSS on admission", "NIHSS při přijetí", col("nihss_adm")),
+        C("aspects", "ASPECTS (anterior circulation)", "ASPECTS (přední povodí)", col("aspects"), anterior),
+        P("occ_m1", "Occlusion: MCA M1", "Uzávěr: ACM M1", isin("occlusion_detail", ["M1"])),
+        P("occ_m2", "Occlusion: MCA M2/M3 or ACA", "Uzávěr: ACM M2/M3 nebo ACA", isin("occlusion_detail", ["M2", "M3", "ACA"])),
+        P("ica", "Occlusion: intracranial ICA", "Uzávěr: intrakraniální ACI", isin("occlusion_detail", ["ICA"])),
+        P("tandem", "Occlusion: tandem (cervical ICA/CCA + intracranial)", "Uzávěr: tandemový (krční ACI/ACC + intrakraniální)", isin("occlusion_detail", ["tandem", "tandem_cca"])),
+        P("occ_cervical", "Occlusion: cervical ICA or CCA only", "Uzávěr: jen krční ACI nebo ACC", isin("occlusion_detail", ["cervical_ICA", "CCA"])),
+        P("occ_basilar", "Occlusion: basilar (± vertebral)", "Uzávěr: bazilární (± vertebrální)", isin("occlusion_detail", ["basilar", "basilar_vertebral"])),
+        P("occ_post_other", "Occlusion: vertebral or PCA", "Uzávěr: vertebrální nebo ACP", isin("occlusion_detail", ["vertebral", "PCA"])),
+        P("left", "Left hemisphere", "Levá hemisféra", yn("side_left")),
+        S("Before the procedure: thrombolysis, route and timing", "Před výkonem: trombolýza, cesta a časy"),
+        P("ivt", "IV thrombolysis", "IV trombolýza", yn("ivt")),
+        P("ivt_external", "IV thrombolysis in another hospital", "IV trombolýza v jiné nemocnici", yn("ivt_external")),
+        C("oti", "Onset to IV thrombolysis, min (thrombolysed)", "Od vzniku do IV trombolýzy, min (trombolyzovaní)", col("onset_to_ivt"), thrombolysed),
+        P("transfer", "Transferred from another hospital", "Překlad z jiné nemocnice", yn("transfer")),
+        C("otp", "Onset to groin puncture, min", "Od vzniku do punkce, min", col("onset_to_puncture")),
+        P("night", "Onset at night (22–6 h)", "Vznik v noci (22–6 h)", lambda g: ((g["onset_hour"] >= 22) | (g["onset_hour"] < 6)).astype(float).where(g["onset_hour"].notna())),
+        P("weekend", "Onset at the weekend", "Vznik o víkendu", yn("weekend")),
+        S("Before the procedure: on admission", "Před výkonem: při přijetí"),
+        C("glucose", "Glucose, mmol/L", "Glykémie, mmol/l", col("glucose")),
+        C("sbp", "Systolic BP, mmHg", "Systolický tlak, mmHg", col("sbp")),
+        C("dbp", "Diastolic BP, mmHg", "Diastolický tlak, mmHg", col("dbp")),
+        C("bmi", "Body mass index, kg/m²", "BMI, kg/m²", col("bmi")),
+        S("Before the procedure: history and medication", "Před výkonem: anamnéza a medikace"),
+        P("htn", "Hypertension", "Hypertenze", yn("htn")),
+        P("dm", "Diabetes mellitus", "Diabetes mellitus", yn("dm")),
+        P("hld", "Hyperlipidaemia", "Hyperlipidémie", yn("hld")),
+        P("af", "Atrial fibrillation / arrhythmia", "Fibrilace síní / arytmie", yn("arrhythmia")),
+        P("stroke_prior", "Previous stroke", "Předchozí CMP", yn("stroke_prior")),
+        P("tia_prior", "Previous TIA", "Předchozí TIA", yn("tia_prior")),
+        P("coronary", "Coronary heart disease", "ICHS", eq("heart3", "coronary")),
+        P("heart_other", "Other heart condition", "Jiné onemocnění srdce", eq("heart3", "other")),
+        P("smoking", "Smoker", "Kuřák", yn("smoking")),
+        P("alcohol", "Alcohol abuse", "Abúzus alkoholu", yn("alcohol")),
+        P("antiplatelet", "Antiplatelet before stroke", "Antiagregancia před CMP", eq("antithrombotic", "antiplatelet")),
+        P("anticoag", "Anticoagulant before stroke", "Antikoagulancia před CMP", eq("antithrombotic", "anticoagulant")),
+        P("statin", "Statin before stroke", "Statin před CMP", yn("statin")),
+        S("End of the procedure", "Konec výkonu"),
+        P("mt", "Mechanical thrombectomy (any device)", "Mechanická trombektomie (jakýkoli prostředek)", isin("technique", ["aspiration", "stent_retriever", "solumbra", "combined"])),
+        P("t_asp", "Technique: direct aspiration", "Technika: přímá aspirace", eq("technique", "aspiration")),
+        P("t_sr", "Technique: stent retriever", "Technika: stent retriever", eq("technique", "stent_retriever")),
+        P("t_sol", "Technique: Solumbra (aspiration + stent retriever)", "Technika: Solumbra (aspirace + stent retriever)", eq("technique", "solumbra")),
+        P("t_comb", "Technique: combined procedure", "Technika: kombinovaný výkon", eq("technique", "combined")),
+        P("t_none", "No thrombectomy: stent, angioplasty or IA lysis only", "Bez trombektomie: jen stent, angioplastika nebo IA lýza", eq("technique", "none")),
+        P("diagnostic", "Diagnostic angiography only", "Pouze diagnostická angiografie", eq("technique", "diagnostic")),
+        P("stenting", "Stent placed", "Zaveden stent", yn("stenting")),
+        P("angioplasty", "Angioplasty", "Angioplastika", yn("angioplasty")),
+        P("ia_lysis", "Intra-arterial thrombolysis", "Intraarteriální trombolýza", yn("ia_lysis")),
+        C("proc", "Procedure duration, min", "Délka výkonu, min", col("procedure_min")),
+        C("otr", "Onset to recanalisation, min", "Od vzniku do rekanalizace, min", col("onset_to_recan")),
+        P("ga", "General anaesthesia", "Celková anestezie", eq("anesthesia", "general")),
+        P("sedation", "Conscious sedation", "Analgosedace", eq("anesthesia", "sedation")),
+        P("local", "Local anaesthesia only", "Jen místní anestezie", eq("anesthesia", "local")),
+        P("tici01", "Final mTICI 0–1", "Výsledné mTICI 0–1", isin("tici", [0.0, 1.0])),
+        P("tici2a", "Final mTICI 2a", "Výsledné mTICI 2a", eq("tici", 2.0)),
+        P("tici2", "Final mTICI 2, no subgrade", "Výsledné mTICI 2 bez podstupně", eq("tici", 2.5)),
+        P("tici2b", "Final mTICI 2b", "Výsledné mTICI 2b", eq("tici", 3.0)),
+        P("tici3", "Final mTICI 3", "Výsledné mTICI 3", eq("tici", 4.0)),
+        P("tici", "Final mTICI 2b–3", "Výsledné mTICI 2b–3", yn("reperfusion_2b3")),
+        S("24 hours after treatment", "24 hodin po léčbě"),
+        C("nihss24", "NIHSS at 24 h", "NIHSS za 24 h", col("nihss_24h")),
+        P("sich", "Symptomatic ICH", "Symptomatické ICH", yn("sich")),
+        P("ich_other", "Asymptomatic ICH", "Asymptomatické ICH", yn("ich_other")),
+        S("Day 7", "7. den"),
+        C("nihss7", "NIHSS on day 7", "NIHSS 7. den", col("nihss_7d")),
+        P("edema", "Cerebral oedema", "Mozkový edém", yn("edema")),
+        P("decompression", "Decompressive craniectomy", "Dekompresivní kraniektomie", yn("decompression")),
+        S("Outcome at 90 days", "Výsledek za 90 dní"),
+        P("good", "90-day mRS 0–2", "mRS 0–2 za 90 dní", yn("good_outcome")),
+        P("death", "90-day mortality", "Mortalita za 90 dní", yn("death90")),
+    ]
+
+
+def _t1_values(spec: dict, g: pd.DataFrame) -> pd.Series:
+    v = spec["fn"](g)
+    return v[spec["elig"](g)] if spec.get("elig") else v
+
+
+def _t1_cell(spec: dict, g: pd.DataFrame, min_cell: int) -> dict:
+    """One group's summary. A count under min_cell is reported only as `small`: neither the count nor
+    the percentage it would give away is published."""
+    v = _t1_values(spec, g)
+    missing = _pct(v.isna().mean()) if len(v) else None
+    if spec["kind"] == "median":
+        return {"median": _med(v), "iqr": _iqr(v), "missing": missing}
+    known = v.notna()
+    cnt = int(v[known].sum())
+    small = bool(0 < cnt < min_cell)
+    return {"pct": None if small or not known.sum() else _pct(v[known].mean()),
+            "n": None if small else cnt, "small": small, "missing": missing}
+
+
 def _table1(base: pd.DataFrame, min_cell: int) -> dict:
     """Table 1 with standardised mean differences (SMD): development (2005-2022) vs validation
     (2023-2025) patients, and mRS 0-2 vs 3-6 (the earlier pipeline's baseline-by-outcome table).
-    |SMD| > 0.1 is the usual mark of a relevant difference."""
-    base = base.assign(aspects_anterior=base["aspects"].where(~base["occlusion"].isin(POSTERIOR_OCCLUSIONS)))
+    |SMD| > 0.1 is the usual mark of a relevant difference. Rows: every non-derived model input.
+    Where a split holds a count under min_cell, the SMD of that split and the other half of the split
+    (which would give the small count away by subtraction from All) are not published either."""
     dev, test = split_temporal(base)
     good, poor = base[base["good_outcome"] == 1], base[base["good_outcome"] == 0]
     groups = {"all": base, "dev": dev, "test": test, "good": good, "poor": poor}
-
-    def cont(name, en, cs, col, digits=0):
-        return {"var": name, "label": {"en": en, "cs": cs}, "kind": "median", "smd": _smd_cont(dev[col], test[col]),
-                "smd_outcome": _smd_cont(poor[col], good[col]),
-                **{k: {"median": _med(g[col]), "iqr": _iqr(g[col]), "missing": _pct(g[col].isna().mean())}
-                   for k, g in groups.items()}}
-
-    def prop(name, en, cs, mask_fn):
-        out = {"var": name, "label": {"en": en, "cs": cs}, "kind": "pct", "smd": _smd_prop(mask_fn(dev), mask_fn(test)),
-               "smd_outcome": _smd_prop(mask_fn(poor), mask_fn(good))}
-        for k, g in groups.items():
-            m = mask_fn(g)
-            known = m.notna()
-            cnt = int(m[known].sum())
-            out[k] = {"pct": _pct(m[known].mean()) if known.sum() else None,
-                      "n": cnt if cnt >= min_cell or cnt == 0 else None,
-                      "small": bool(0 < cnt < min_cell)}
-        return out
-
-    yn = lambda col: (lambda g: g[col])  # noqa: E731
-    cat = lambda col, val: (lambda g: (g[col] == val).astype(float).where(g[col].notna()))  # noqa: E731
-    mt = lambda g: g["technique"].isin(["aspiration", "stent_retriever", "solumbra", "combined"]).astype(float).where(g["technique"].notna())  # noqa: E731
-    rows = [
-        {"section": {"en": "Patient", "cs": "Pacient"}},
-        cont("age", "Age, years", "Věk, roky", "age"),
-        prop("male", "Men", "Muži", yn("sex_male")),
-        prop("premrs01", "Pre-stroke mRS 0–1", "mRS před CMP 0–1", lambda g: (g["mrs_pre"] <= 1).astype(float).where(g["mrs_pre"].notna())),
-        {"section": {"en": "The stroke", "cs": "CMP"}},
-        cont("nihss", "NIHSS on admission", "NIHSS při přijetí", "nihss_adm"),
-        cont("aspects", "ASPECTS (anterior circulation)", "ASPECTS (přední povodí)", "aspects_anterior"),
-        prop("posterior", "Posterior circulation", "Zadní povodí", lambda g: g["occlusion_detail"].isin(POSTERIOR_DETAIL).astype(float).where(g["occlusion_detail"].notna())),
-        prop("ica", "Intracranial ICA occlusion", "Uzávěr intrakraniální ACI", cat("occlusion", "ICA")),
-        prop("tandem", "Tandem occlusion", "Tandemový uzávěr", cat("occlusion", "tandem")),
-        {"section": {"en": "History and medication", "cs": "Anamnéza a medikace"}},
-        prop("htn", "Hypertension", "Hypertenze", yn("htn")),
-        prop("dm", "Diabetes mellitus", "Diabetes mellitus", yn("dm")),
-        prop("hld", "Hyperlipidaemia", "Hyperlipidémie", yn("hld")),
-        prop("af", "Atrial fibrillation / arrhythmia", "Fibrilace síní / arytmie", yn("arrhythmia")),
-        prop("stroke_prior", "Previous stroke", "Předchozí CMP", yn("stroke_prior")),
-        prop("tia_prior", "Previous TIA", "Předchozí TIA", yn("tia_prior")),
-        prop("coronary", "Coronary heart disease", "ICHS", cat("heart3", "coronary")),
-        prop("smoking", "Smoker", "Kuřák", yn("smoking")),
-        prop("alcohol", "Alcohol abuse", "Abúzus alkoholu", yn("alcohol")),
-        prop("anticoag", "Anticoagulant before stroke", "Antikoagulancia před CMP", cat("antithrombotic", "anticoagulant")),
-        prop("antiplatelet", "Antiplatelet before stroke", "Antiagregancia před CMP", cat("antithrombotic", "antiplatelet")),
-        prop("statin", "Statin before stroke", "Statin před CMP", yn("statin")),
-        {"section": {"en": "On admission", "cs": "Při přijetí"}},
-        cont("glucose", "Glucose, mmol/L", "Glykémie, mmol/l", "glucose"),
-        cont("sbp", "Systolic BP, mmHg", "Systolický tlak, mmHg", "sbp"),
-        cont("dbp", "Diastolic BP, mmHg", "Diastolický tlak, mmHg", "dbp"),
-        cont("bmi", "Body mass index, kg/m²", "BMI, kg/m²", "bmi"),
-        {"section": {"en": "Pathway", "cs": "Cesta pacienta"}},
-        prop("ivt", "IV thrombolysis", "IV trombolýza", yn("ivt")),
-        prop("ivt_external", "IV thrombolysis in another hospital", "IV trombolýza v jiné nemocnici", yn("ivt_external")),
-        prop("transfer", "Transferred from another hospital", "Překlad z jiné nemocnice", yn("transfer")),
-        cont("otp", "Onset to puncture, min", "Od vzniku do punkce, min", "onset_to_puncture"),
-        prop("night", "Onset at night (22–6 h)", "Vznik v noci (22–6 h)", lambda g: ((g["onset_hour"] >= 22) | (g["onset_hour"] < 6)).astype(float).where(g["onset_hour"].notna())),
-        prop("weekend", "Onset at the weekend", "Vznik o víkendu", yn("weekend")),
-        {"section": {"en": "Procedure", "cs": "Výkon"}},
-        prop("mt", "Mechanical thrombectomy", "Mechanická trombektomie", mt),
-        prop("diagnostic", "Diagnostic angiography only", "Pouze diagnostická angiografie", cat("technique", "diagnostic")),
-        prop("stenting", "Stent placed", "Zaveden stent", yn("stenting")),
-        prop("angioplasty", "Angioplasty", "Angioplastika", yn("angioplasty")),
-        prop("ia_lysis", "Intra-arterial thrombolysis", "Intraarteriální trombolýza", yn("ia_lysis")),
-        cont("proc", "Procedure duration, min", "Délka výkonu, min", "procedure_min"),
-        prop("ga", "General anaesthesia", "Celková anestezie", lambda g: (g["anesthesia"] == "general").astype(float).where(g["anesthesia"].notna())),
-        prop("tici", "mTICI 2b–3", "mTICI 2b–3", yn("reperfusion_2b3")),
-        {"section": {"en": "Course and outcome", "cs": "Průběh a výsledek"}},
-        cont("nihss24", "NIHSS at 24 h", "NIHSS za 24 h", "nihss_24h"),
-        prop("sich", "Symptomatic ICH", "Symptomatické ICH", yn("sich")),
-        prop("ich_other", "Asymptomatic ICH", "Asymptomatické ICH", yn("ich_other")),
-        cont("nihss7", "NIHSS on day 7", "NIHSS 7. den", "nihss_7d"),
-        prop("edema", "Cerebral oedema", "Mozkový edém", yn("edema")),
-        prop("decompression", "Decompressive craniectomy", "Dekompresivní kraniektomie", yn("decompression")),
-        prop("good", "90-day mRS 0–2", "mRS 0–2 za 90 dní", yn("good_outcome")),
-        prop("death", "90-day mortality", "Mortalita za 90 dní", yn("death90")),
-    ]
+    rows = []
+    for spec in _t1_specs():
+        if "section" in spec:
+            rows.append(spec)
+            continue
+        smd = _smd_cont if spec["kind"] == "median" else _smd_prop
+        out = {"var": spec["var"], "label": spec["label"], "kind": spec["kind"],
+               "smd": smd(_t1_values(spec, dev), _t1_values(spec, test)),
+               "smd_outcome": smd(_t1_values(spec, poor), _t1_values(spec, good)),
+               **{k: _t1_cell(spec, g, min_cell) for k, g in groups.items()}}
+        if spec["kind"] == "pct":
+            # the two halves of a split add up to All: when one half is small, its partner is masked
+            # too (All stays), and so is the SMD, which would give the small proportion away
+            for a, b, smd_key in (("dev", "test", "smd"), ("good", "poor", "smd_outcome")):
+                if out[a]["small"] or out[b]["small"]:
+                    out[smd_key] = None
+                    for k in (a, b):
+                        if not out[k]["small"]:
+                            out[k] = {"pct": None, "n": None, "small": False, "masked": True, "missing": out[k]["missing"]}
+        rows.append(out)
     return {"n": {k: int(len(g)) for k, g in groups.items()}, "rows": rows}
+
+
+def _period_table(d: pd.DataFrame, min_cell: int) -> dict:
+    """Every Table 1 row by treatment period (the Era breakdown). A count under min_cell is published
+    only as `small` (no percentage). Because the development periods add up to the development set
+    and all periods to the cohort in Table 1, a lone small cell would follow by subtraction: then the
+    smallest other development-period cell is withheld too (`masked`)."""
+    eras = [(str(e), d[d["era"] == e]) for e in d["era"].cat.categories]
+    eras = [(lab, g) for lab, g in eras if len(g) >= min_cell]
+    test_from = int(settings()["split"]["temporal_test_from_year"])
+    dev_idx = [i for i, (_, g) in enumerate(eras) if g["year"].max() < test_from]
+    rows = []
+    for spec in _t1_specs():
+        if "section" in spec:
+            rows.append(spec)
+            continue
+        cells = [_t1_cell(spec, g, min_cell) for _, g in eras]
+        row = {"var": spec["var"], "label": spec["label"], "kind": spec["kind"]}
+        if spec["kind"] == "median":
+            row["values"] = [c["median"] for c in cells]
+            row["iqr"] = [c["iqr"] for c in cells]
+        else:
+            small = [i for i, c in enumerate(cells) if c["small"]]
+            small_dev = [i for i in small if i in dev_idx]
+            test_small = any(i not in dev_idx for i in small)
+            masked = []
+            if len(small_dev) == 1 or (test_small and not small_dev):
+                pool = [i for i in dev_idx if not cells[i]["small"] and cells[i]["n"]]
+                if pool:
+                    masked = [min(pool, key=lambda i: cells[i]["n"])]
+            row["values"] = [None if (c["small"] or i in masked) else c["pct"] for i, c in enumerate(cells)]
+            row["small"] = [bool(c["small"]) for c in cells]
+            row["masked"] = [i in masked for i in range(len(cells))]
+        rows.append(row)
+    return {"periods": [{"label": lab, "n": int(len(g))} for lab, g in eras], "rows": rows}
 
 
 def build_explorer(clean: pd.DataFrame) -> dict:
@@ -365,6 +459,7 @@ def build_explorer(clean: pd.DataFrame) -> dict:
         "trends": _trend_rows(d, min_cell),
         "registry_years": registry_years,
         "table1": _table1(base, min_cell),
+        "periods": _period_table(d, min_cell),
     }
     PUBLIC.mkdir(parents=True, exist_ok=True)
     with open(PUBLIC / "explorer.json", "w", encoding="utf-8") as fh:

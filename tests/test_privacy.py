@@ -102,6 +102,23 @@ def test_explorer_small_cells_suppressed():
             v = row[col]
             if row["kind"] == "pct" and v.get("n") is not None:
                 assert v["n"] >= k or v["n"] == 0
+            if row["kind"] == "pct" and v.get("small"):
+                assert v["n"] is None and v["pct"] is None   # no count, and no percentage that gives it away
+        if row["kind"] == "pct":
+            # a small half of a split: its partner and the SMD are withheld, so All minus partner reveals nothing
+            for a, b, smd in (("dev", "test", "smd"), ("good", "poor", "smd_outcome")):
+                if row[a]["small"] or row[b]["small"]:
+                    assert row[smd] is None
+                    assert all(row[x]["small"] or row[x].get("masked") for x in (a, b))
+    pr = e["periods"]
+    assert all(p["n"] >= k for p in pr["periods"])
+    for row in pr["rows"]:
+        if "section" in row or row["kind"] != "pct":
+            continue
+        assert len(row["values"]) == len(pr["periods"])
+        for v, sm, mk in zip(row["values"], row["small"], row["masked"]):
+            assert not (sm or mk) or v is None                  # a small or masked cell carries no percentage
+        assert sum(row["small"]) == 0 or sum(row["small"]) + sum(row["masked"]) >= 2   # never a lone small cell
 
 
 def test_validation_bins_and_no_extremes():

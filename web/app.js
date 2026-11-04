@@ -1348,10 +1348,62 @@
     C.lineChart(ftech.body, { height: 150, x: { type: "cat", cats: yrs }, y: { domain: [0, 100], ticks: [0, 50, 100] }, series: techSeries, tipFmt: (v) => pct100(v), aria: t().tTech });
     sm.appendChild(techCard);
     root.appendChild(sm);
+    if (E.periods) root.appendChild(periodCard(E.periods));
 
-    root.appendChild(h("p", { class: "note block", html: tx(
-      "Cohort flow, every data check, the variable map, missing data by era, 90-day outcome availability and Table 1 are under <b>Data and preprocessing</b> above.",
-      "Tok pacientů, všechny kontroly dat, mapa proměnných, chybějící data podle období, dostupnost výsledku za 90 dní a tabulka 1 jsou v části <b>Data a předzpracování</b> výše.") }));
+    const openTable1 = (e) => {
+      e.preventDefault();
+      S.regView = "data"; renderRegistry();
+      requestAnimationFrame(() => { const el = document.getElementById("pp-table1"); if (el) el.scrollIntoView({ block: "start" }); });
+    };
+    root.appendChild(h("p", { class: "note block" },
+      tx("Cohort flow, every data check, the variable map, missing data by era and 90-day outcome availability are under ", "Tok pacientů, všechny kontroly dat, mapa proměnných, chybějící data podle období a dostupnost výsledku za 90 dní jsou v části "),
+      h("b", { text: tx("Data and preprocessing", "Data a předzpracování") }),
+      tx(" above, with the baseline characteristics of every patient group in ", " výše, spolu s výchozí charakteristikou všech skupin pacientů v "),
+      h("a", { href: "#pp-table1", onclick: openTable1, text: tx("Table 1", "tabulce 1") }), "."));
+  }
+
+  // Every row of Table 1 by treatment period (the Era breakdown), with a line per row that shows
+  // the direction across the periods. Counts under the minimum show as "<10", and a cell that would
+  // give such a count away by subtraction from Table 1 as "·".
+  function periodCard(P) {
+    const card = h("div", { class: "card card-pad block", id: "reg-periods" });
+    card.appendChild(h("div", { class: "chart-head" }, h("div", null,
+      h("div", { class: "chart-title", text: tx("Every model input by period", "Všechny vstupy modelů podle období") }),
+      h("div", { class: "chart-sub", text: tx("Median, or % of patients with the value recorded; the line on the right runs from the first period to the last",
+        "Medián, nebo % pacientů se zaznamenanou hodnotou; čára vpravo vede od prvního období k poslednímu") }))));
+    const W = 96, H = 24, pad = 3;
+    // each line is scaled to its own row, but never to less than 20 percentage points (or a quarter of
+    // a median's level), so a stable characteristic stays a flat line instead of a dramatic one
+    const spark = (vals, kind) => {
+      const svg = C.s("svg", { class: "spark", viewBox: `0 0 ${W} ${H}`, "aria-hidden": "true", focusable: "false" });
+      const pts = vals.map((v, i) => [i, v]).filter(([, v]) => v !== null && v !== undefined);
+      if (pts.length < 2) return svg;
+      const vmin = Math.min(...pts.map((p) => p[1])), vmax = Math.max(...pts.map((p) => p[1]));
+      const mean = pts.reduce((a, p) => a + p[1], 0) / pts.length;
+      const span = Math.max(vmax - vmin, kind === "median" ? Math.abs(mean) * 0.25 : 20) || 1;
+      const lo = (vmin + vmax) / 2 - span / 2;
+      const X = (i) => pad + i * (W - 2 * pad) / (vals.length - 1);
+      const Y = (v) => H - pad - (v - lo) / span * (H - 2 * pad);
+      C.s("polyline", { points: pts.map(([i, v]) => `${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join(" "), class: "spark-line" }, svg);
+      const [li, lv] = pts[pts.length - 1];
+      C.s("circle", { cx: X(li).toFixed(1), cy: Y(lv).toFixed(1), r: 2.4, class: "spark-dot" }, svg);
+      return svg;
+    };
+    const fmt = (r, v) => (v === null || v === undefined ? "–" : r.kind === "median" ? num(v) : pct100(v, 1));
+    const cols = [tx("Characteristic", "Charakteristika")].concat(P.periods.map((p) => `${p.label} (n ${num(p.n)})`), [tx("Trend", "Vývoj")]);
+    const body = [];
+    for (const r of P.rows) {
+      if (r.section) { body.push(h("tr", { class: "sep" }, h("th", { colspan: cols.length, text: L(r.section) }))); continue; }
+      const cellTx = (v, i) => (r.small && r.small[i] ? `<${E.min_cell}` : r.masked && r.masked[i] ? "·" : fmt(r, v));
+      body.push(h("tr", null, h("th", { scope: "row", text: L(r.label) }),
+        r.values.map((v, i) => h("td", { class: "num", text: cellTx(v, i) })), h("td", { class: "spark-cell" }, spark(r.values, r.kind))));
+    }
+    card.appendChild(h("div", { class: "table-scroll" }, h("table", { class: "data periods" },
+      h("thead", null, h("tr", null, cols.map((c) => h("th", { scope: "col", text: c })))), h("tbody", null, body))));
+    card.appendChild(h("p", { class: "note", text: tx(
+      `<${E.min_cell}: fewer than ${E.min_cell} patients, shown without a percentage. · : withheld as well, because the periods add up to the groups in Table 1 and the small count would follow by subtraction. The line leaves out withheld periods. ASPECTS has been recorded since 2016.`,
+      `<${E.min_cell}: méně než ${E.min_cell} pacientů, bez procenta. · : rovněž neuvedeno, protože období dohromady dávají skupiny v tabulce 1 a malý počet by šel dopočítat odečtením. Čára neuvedená období vynechává. ASPECTS se zaznamenává od roku 2016.`) }));
+    return card;
   }
 
   // ------------------------------------------------------------------ analyses of the 2026 report

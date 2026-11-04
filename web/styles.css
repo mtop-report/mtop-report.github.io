@@ -1313,3 +1313,10 @@ table.data.txt td.num, table.data.txt th.num { text-align: right; white-space: n
 table.data.codes-t th.mono { width: 30%; min-width: 160px; }
 table.data.codes-t td:nth-child(2) { width: 30%; }
 table.data.checks-t th[scope="row"] { width: 42%; }
+/* registry: every model input by period, with a direction line per row */
+table.data.periods th[scope="row"] { white-space: normal; min-width: 200px; }
+table.data.periods td.spark-cell { width: 104px; padding-top: 4px; padding-bottom: 4px; }
+table.data.periods td.small-row { text-align: left; font-size: 12px; white-space: normal; }
+.spark { display: block; width: 96px; height: 24px; margin-left: auto; overflow: visible; }
+.spark-line { fill: none; stroke: var(--c1); stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; }
+.spark-dot { fill: var(--c1); }
