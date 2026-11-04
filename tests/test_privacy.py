@@ -118,7 +118,10 @@ def test_explorer_small_cells_suppressed():
         assert len(row["values"]) == len(pr["periods"])
         for v, sm, mk in zip(row["values"], row["small"], row["masked"]):
             assert not (sm or mk) or v is None                  # a small or masked cell carries no percentage
-        assert sum(row["small"]) == 0 or sum(row["small"]) + sum(row["masked"]) >= 2   # never a lone small cell
+        # never a lone small cell that subtraction from Table 1 could recover (all other periods 0 is fine:
+        # then the total is that same small count, itself suppressed in Table 1)
+        others_zero = all(v == 0 for v, sm in zip(row["values"], row["small"]) if not sm)
+        assert sum(row["small"]) == 0 or sum(row["small"]) + sum(row["masked"]) >= 2 or others_zero
 
 
 def test_validation_bins_and_no_extremes():

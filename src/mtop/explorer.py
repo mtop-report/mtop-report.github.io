@@ -16,7 +16,8 @@ import pandas as pd
 
 from .clean import POSTERIOR_DETAIL, POSTERIOR_OCCLUSIONS
 from .cohort import flow, split_temporal
-from .config import settings
+from .config import features, settings
+from .features import derived
 from .paths import PUBLIC
 
 PCT = 1
@@ -243,9 +244,30 @@ def _smd_prop(a: pd.Series, b: pd.Series):
     return None if sd == 0 else round((q - p) / sd, 2)
 
 
+# occlusion: the model's categories (config/features.yaml), built from the recorded site; ACA is its own
+# category without a model term (fewer than min_cell patients)
+OCC_GROUPS = {"ICA": ["ICA"], "tandem": ["tandem", "tandem_cca"], "cervical_ICA": ["cervical_ICA", "CCA"], "M1": ["M1"],
+              "M2": ["M2", "M3"], "ACA": ["ACA"], "basilar": ["basilar"], "basilar_vertebral": ["basilar_vertebral"],
+              "other_posterior": ["vertebral", "PCA"]}
+
+
+def _feat(key: str) -> dict:
+    return next(f.spec for f in features() if f.key == key)
+
+
+def _opt(key: str, value) -> dict:
+    """An option's label as the calculator and the data report show it (without its "· …" note)."""
+    lab = next(o["label"] for o in _feat(key)["options"] if o["value"] == value)
+    return {k: v.split(" · ")[0] if key == "occlusion" else v for k, v in lab.items()}
+
+
+def _low(t: str) -> str:
+    return t[0].lower() + t[1:] if len(t) > 1 and t[1].islower() else t
+
+
 def _t1_specs() -> list[dict]:
-    """Every non-derived model input (config/features.yaml), by the stage it becomes known, plus the
-    90-day outcomes. Each row: a section header, or a variable whose `fn` returns per patient either the
+    """Every model input (config/features.yaml), derived ones included, by the stage it becomes known,
+    plus the 90-day outcomes. Categorical inputs keep the model's categories and labels. Each row: a section header, or a variable whose `fn` returns per patient either the
     value (kind "median") or 1/0 with NaN where not recorded (kind "pct"). `elig` limits a row to the
     patients it applies to (ASPECTS: anterior circulation; onset to IVT: thrombolysed)."""
     S = lambda en, cs: {"section": {"en": en, "cs": cs}}  # noqa: E731
@@ -256,38 +278,40 @@ def _t1_specs() -> list[dict]:
     eq = lambda c, v: (lambda g: (g[c] == v).astype(float).where(g[c].notna()))  # noqa: E731
     isin = lambda c, vs: (lambda g: g[c].isin(vs).astype(float).where(g[c].notna()))  # noqa: E731
     anterior = lambda g: ~g["occlusion"].isin(POSTERIOR_OCCLUSIONS)  # noqa: E731
+    anterior_site = lambda g: g["occlusion_detail"].notna() & ~g["occlusion_detail"].isin(POSTERIOR_DETAIL)  # noqa: E731
+    der = lambda key: (lambda g: derived(g, key))  # noqa: E731
+    flab = lambda key: _feat(key)["label"]  # noqa: E731
+    def opt_row(var, key, value, fn):
+        f, o = flab(key), _opt(key, value)
+        return P(var, f"{f['en']}: {_low(o['en'])}", f"{f['cs']}: {_low(o['cs'])}", fn)
     thrombolysed = lambda g: g["ivt"] == 1  # noqa: E731
     return [
         S("Before the procedure: patient", "Před výkonem: pacient"),
         C("age", "Age, years", "Věk, roky", col("age")),
         P("male", "Men", "Muži", yn("sex_male")),
-        P("mrs_pre0", "Pre-stroke mRS 0", "mRS před CMP 0", eq("mrs_pre", 0)),
-        P("mrs_pre1", "Pre-stroke mRS 1", "mRS před CMP 1", eq("mrs_pre", 1)),
-        P("mrs_pre2", "Pre-stroke mRS 2", "mRS před CMP 2", eq("mrs_pre", 2)),
-        P("mrs_pre3", "Pre-stroke mRS 3–5", "mRS před CMP 3–5", lambda g: (g["mrs_pre"] >= 3).astype(float).where(g["mrs_pre"].notna())),
+        *[opt_row(f"mrs_pre{v}", "mrs_pre", v, eq("mrs_pre", v)) for v in (0, 1, 2)],
+        P("mrs_pre3", "Pre-stroke mRS: 3–5 · moderate to severe disability", "mRS před CMP: 3–5 · středně těžké až těžké postižení",
+          lambda g: (g["mrs_pre"] >= 3).astype(float).where(g["mrs_pre"].notna())),
         S("Before the procedure: the stroke", "Před výkonem: CMP"),
         C("nihss", "NIHSS on admission", "NIHSS při přijetí", col("nihss_adm")),
         C("aspects", "ASPECTS (anterior circulation)", "ASPECTS (přední povodí)", col("aspects"), anterior),
-        P("occ_m1", "Occlusion: MCA M1", "Uzávěr: ACM M1", isin("occlusion_detail", ["M1"])),
-        P("occ_m2", "Occlusion: MCA M2/M3 or ACA", "Uzávěr: ACM M2/M3 nebo ACA", isin("occlusion_detail", ["M2", "M3", "ACA"])),
-        P("ica", "Occlusion: intracranial ICA", "Uzávěr: intrakraniální ACI", isin("occlusion_detail", ["ICA"])),
-        P("tandem", "Occlusion: tandem (cervical ICA/CCA + intracranial)", "Uzávěr: tandemový (krční ACI/ACC + intrakraniální)", isin("occlusion_detail", ["tandem", "tandem_cca"])),
-        P("occ_cervical", "Occlusion: cervical ICA or CCA only", "Uzávěr: jen krční ACI nebo ACC", isin("occlusion_detail", ["cervical_ICA", "CCA"])),
-        P("occ_basilar", "Occlusion: basilar (± vertebral)", "Uzávěr: bazilární (± vertebrální)", isin("occlusion_detail", ["basilar", "basilar_vertebral"])),
-        P("occ_post_other", "Occlusion: vertebral or PCA", "Uzávěr: vertebrální nebo ACP", isin("occlusion_detail", ["vertebral", "PCA"])),
-        P("left", "Left hemisphere", "Levá hemisféra", yn("side_left")),
+        *[opt_row(f"occ_{v}", "occlusion", v, isin("occlusion_detail", details)) for v, details in OCC_GROUPS.items()],
+        {**P("left", "Left hemisphere (anterior circulation)", "Levá hemisféra (přední povodí)", yn("side_left")), "elig": anterior_site},
         S("Before the procedure: thrombolysis, route and timing", "Před výkonem: trombolýza, cesta a časy"),
         P("ivt", "IV thrombolysis", "IV trombolýza", yn("ivt")),
         P("ivt_external", "IV thrombolysis in another hospital", "IV trombolýza v jiné nemocnici", yn("ivt_external")),
         C("oti", "Onset to IV thrombolysis, min (thrombolysed)", "Od vzniku do IV trombolýzy, min (trombolyzovaní)", col("onset_to_ivt"), thrombolysed),
         P("transfer", "Transferred from another hospital", "Překlad z jiné nemocnice", yn("transfer")),
         C("otp", "Onset to groin puncture, min", "Od vzniku do punkce, min", col("onset_to_puncture")),
-        P("night", "Onset at night (22–6 h)", "Vznik v noci (22–6 h)", lambda g: ((g["onset_hour"] >= 22) | (g["onset_hour"] < 6)).astype(float).where(g["onset_hour"].notna())),
+        C("itp", "IV thrombolysis to puncture, min (thrombolysed)", "Od IV trombolýzy do punkce, min (trombolyzovaní)", der("ivt_to_puncture"), thrombolysed),
+        P("night", flab("night_onset")["en"], flab("night_onset")["cs"], der("night_onset")),
         P("weekend", "Onset at the weekend", "Vznik o víkendu", yn("weekend")),
         S("Before the procedure: on admission", "Před výkonem: při přijetí"),
         C("glucose", "Glucose, mmol/L", "Glykémie, mmol/l", col("glucose")),
+        P("hyperglycemia", flab("hyperglycemia")["en"], flab("hyperglycemia")["cs"], der("hyperglycemia")),
         C("sbp", "Systolic BP, mmHg", "Systolický tlak, mmHg", col("sbp")),
         C("dbp", "Diastolic BP, mmHg", "Diastolický tlak, mmHg", col("dbp")),
+        C("pulse_pressure", "Pulse pressure, mmHg", "Pulzní tlak, mmHg", der("pulse_pressure")),
         C("bmi", "Body mass index, kg/m²", "BMI, kg/m²", col("bmi")),
         S("Before the procedure: history and medication", "Před výkonem: anamnéza a medikace"),
         P("htn", "Hypertension", "Hypertenze", yn("htn")),
@@ -296,39 +320,33 @@ def _t1_specs() -> list[dict]:
         P("af", "Atrial fibrillation / arrhythmia", "Fibrilace síní / arytmie", yn("arrhythmia")),
         P("stroke_prior", "Previous stroke", "Předchozí CMP", yn("stroke_prior")),
         P("tia_prior", "Previous TIA", "Předchozí TIA", yn("tia_prior")),
-        P("coronary", "Coronary heart disease", "ICHS", eq("heart3", "coronary")),
-        P("heart_other", "Other heart condition", "Jiné onemocnění srdce", eq("heart3", "other")),
+        opt_row("coronary", "heart3", "coronary", eq("heart3", "coronary")),
+        opt_row("heart_other", "heart3", "other", eq("heart3", "other")),
         P("smoking", "Smoker", "Kuřák", yn("smoking")),
         P("alcohol", "Alcohol abuse", "Abúzus alkoholu", yn("alcohol")),
-        P("antiplatelet", "Antiplatelet before stroke", "Antiagregancia před CMP", eq("antithrombotic", "antiplatelet")),
-        P("anticoag", "Anticoagulant before stroke", "Antikoagulancia před CMP", eq("antithrombotic", "anticoagulant")),
+        opt_row("antiplatelet", "antithrombotic", "antiplatelet", eq("antithrombotic", "antiplatelet")),
+        opt_row("anticoag", "antithrombotic", "anticoagulant", eq("antithrombotic", "anticoagulant")),
         P("statin", "Statin before stroke", "Statin před CMP", yn("statin")),
         S("End of the procedure", "Konec výkonu"),
         P("mt", "Mechanical thrombectomy (any device)", "Mechanická trombektomie (jakýkoli prostředek)", isin("technique", ["aspiration", "stent_retriever", "solumbra", "combined"])),
-        P("t_asp", "Technique: direct aspiration", "Technika: přímá aspirace", eq("technique", "aspiration")),
-        P("t_sr", "Technique: stent retriever", "Technika: stent retriever", eq("technique", "stent_retriever")),
-        P("t_sol", "Technique: Solumbra (aspiration + stent retriever)", "Technika: Solumbra (aspirace + stent retriever)", eq("technique", "solumbra")),
-        P("t_comb", "Technique: combined procedure", "Technika: kombinovaný výkon", eq("technique", "combined")),
-        P("t_none", "No thrombectomy: stent, angioplasty or IA lysis only", "Bez trombektomie: jen stent, angioplastika nebo IA lýza", eq("technique", "none")),
-        P("diagnostic", "Diagnostic angiography only", "Pouze diagnostická angiografie", eq("technique", "diagnostic")),
+        *[P(f"t_{v}", _opt("technique", v)["en"], _opt("technique", v)["cs"], eq("technique", v))
+          for v in ("aspiration", "stent_retriever", "solumbra", "combined", "none", "diagnostic")],
         P("stenting", "Stent placed", "Zaveden stent", yn("stenting")),
         P("angioplasty", "Angioplasty", "Angioplastika", yn("angioplasty")),
         P("ia_lysis", "Intra-arterial thrombolysis", "Intraarteriální trombolýza", yn("ia_lysis")),
         C("proc", "Procedure duration, min", "Délka výkonu, min", col("procedure_min")),
         C("otr", "Onset to recanalisation, min", "Od vzniku do rekanalizace, min", col("onset_to_recan")),
-        P("ga", "General anaesthesia", "Celková anestezie", eq("anesthesia", "general")),
-        P("sedation", "Conscious sedation", "Analgosedace", eq("anesthesia", "sedation")),
-        P("local", "Local anaesthesia only", "Jen místní anestezie", eq("anesthesia", "local")),
-        P("tici01", "Final mTICI 0–1", "Výsledné mTICI 0–1", isin("tici", [0.0, 1.0])),
-        P("tici2a", "Final mTICI 2a", "Výsledné mTICI 2a", eq("tici", 2.0)),
-        P("tici2", "Final mTICI 2, no subgrade", "Výsledné mTICI 2 bez podstupně", eq("tici", 2.5)),
-        P("tici2b", "Final mTICI 2b", "Výsledné mTICI 2b", eq("tici", 3.0)),
-        P("tici3", "Final mTICI 3", "Výsledné mTICI 3", eq("tici", 4.0)),
+        *[opt_row(f"an_{v}", "anesthesia", v, eq("anesthesia", v)) for v in ("general", "sedation", "local")],
+        *[opt_row(f"tici_{v}", "tici", v, eq("tici", float(v))) for v in (0, 1, 2)],
+        P("tici_2u", f"{flab('tici')['en']}: 2, no subgrade (registry)", f"{flab('tici')['cs']}: 2 bez podstupně (registr)", eq("tici", 2.5)),
+        *[opt_row(f"tici_{v}", "tici", v, eq("tici", float(v))) for v in (3, 4)],
         P("tici", "Final mTICI 2b–3", "Výsledné mTICI 2b–3", yn("reperfusion_2b3")),
         S("24 hours after treatment", "24 hodin po léčbě"),
         C("nihss24", "NIHSS at 24 h", "NIHSS za 24 h", col("nihss_24h")),
         P("sich", "Symptomatic ICH", "Symptomatické ICH", yn("sich")),
         P("ich_other", "Asymptomatic ICH", "Asymptomatické ICH", yn("ich_other")),
+        C("nihss_change", flab("nihss_change_24h")["en"], flab("nihss_change_24h")["cs"], der("nihss_change_24h")),
+        P("eni", flab("eni_24h")["en"], flab("eni_24h")["cs"], der("eni_24h")),
         S("Day 7", "7. den"),
         C("nihss7", "NIHSS on day 7", "NIHSS 7. den", col("nihss_7d")),
         P("edema", "Cerebral oedema", "Mozkový edém", yn("edema")),
