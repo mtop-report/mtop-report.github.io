@@ -201,7 +201,9 @@ audit log with its time, round, size and SHA-256.
    optional and enables the update jobs above). The *Multicentre* tab (*Validate on your data*)
    checks the mapping in the browser without uploading anything, or run
    `python -m mtop.fed check registry.csv`. English and Czech spellings are recognised; anything
-   unrecognised becomes missing and is counted. The template also has optional columns for
+   unrecognised becomes missing and is counted. When the published model is validated in the
+   browser, a missing value (an empty cell or a column the export lacks) is averaged over FNO
+   registry values, as the calculator does for an unknown input; record as many columns as you can. The template also has optional columns for
    predictors collected for future versions (CT perfusion volumes, the CTA collateral score, serum
    GFAP with sampling time and assay; `docs/data_dictionary.md`). Leave them out or empty if you do
    not record them: nothing else changes. When present they are range-checked and only counted, as

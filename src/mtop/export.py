@@ -70,24 +70,39 @@ IMPUTE_K = 20
 
 
 def imputation_values(base, k: int = IMPUTE_K) -> dict:
-    """Registry values used to average over an input the user marks as unknown.
+    """Registry values used to average over an input whose value is unknown.
+
+    Every model input has them (derived inputs are computed from these). The calculator offers
+    "unknown" only for the optional inputs; "Validate on your data" uses the values for any input a
+    partner's file leaves empty or lacks, instead of the models' missing-value terms. Those terms
+    encode who had missing data at FNO and some rest on a handful of patients, so applied to a whole
+    partner column they shift every estimate (found in the November 2026 dry run on synthetic data).
 
     Numeric: k quantiles at (i + 0.5) / k among patients treated from 2016 (when ASPECTS
-    recording began). Categorical: k category values in proportion to their frequency.
+    recording began). Binary, ordinal and categorical: k values in proportion to their frequency;
+    a category without a model term (e.g. ACA) is left out. Inputs that need IV thrombolysis are taken
+    from thrombolysed patients, since without IVT they do not apply (set by the browser). The optional
+    inputs keep exactly the values they had before, so the calculator's estimates do not change.
     Aggregates only; no minima or maxima.
     """
     recent = base[base["year"] >= 2016]
     out = {}
     for f in features():
-        if not f.spec.get("optional"):
+        if f.type == "derived":
             continue
-        s = recent[f.key].dropna()
+        s = recent[f.key]
+        if f.spec.get("requires_ivt") and not f.spec.get("optional"):
+            s = s[recent["ivt"] == 1]
+        s = s.dropna()
+        if f.type == "categorical":
+            no_term = {str(o["value"]) for o in f.spec.get("options", []) if o.get("model") is False}
+            s = s[~s.astype(str).isin(no_term)]
         if f.type == "numeric":
             q = np.quantile(s.to_numpy(float), (np.arange(k) + 0.5) / k)
             step = float(f.spec.get("step", 1))
             vals = [float(round(round(v / step) * step, 4)) for v in q]
             out[f.key] = {"type": "numeric", "values": vals}
-        elif f.type in ("categorical", "binary"):
+        elif f.type in ("categorical", "binary", "ordinal"):
             freq = s.astype(str if f.type == "categorical" else float).value_counts(normalize=True)
             counts = np.floor(freq.to_numpy() * k).astype(int)
             while counts.sum() < k:

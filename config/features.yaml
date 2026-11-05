@@ -12,7 +12,9 @@
 # monotone  +1 = higher value can only raise P(mRS 0–2); -1 = can only lower it; 0 = free.
 #           Used by LightGBM only; flipped automatically for the mortality model.
 # optional  true = the calculator offers "unknown"; the estimate is then averaged over the
-#           registry's values of that input.
+#           registry's values of that input. Every input has such values in the bundle
+#           (export.imputation_values): "Validate on your data" averages any value a partner's
+#           file lacks instead of using the models' missing-value terms.
 # group     where the calculator shows the input (admission stage).
 # Categorical predictors are one-hot encoded (minus the reference level, if one is given); a
 # missing category sets all its columns to missing.

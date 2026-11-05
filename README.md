@@ -70,7 +70,9 @@ dark, with its typeface bundled, so opening it contacts no third-party server.
   virtual centres made of FNO's own patients by treatment era ([docs/federated.md](docs/federated.md)).
   *Validate on your data:* any centre can validate every published MTOP model on its own registry
   export inside the browser and export aggregate results; results from several sites are pooled
-  in a random-effects meta-analysis, model by model.
+  in a random-effects meta-analysis, model by model. Values a centre does not record are averaged
+  over FNO registry values, as in the calculator, rather than passed to the models' missing-value
+  terms (model card, section 4).
 - **Standards.** TRIPOD+AI item by item (status, where it is addressed, what is left), TRIPOD+AI
   for Abstracts, a PROBAST+AI self-assessment, the Riley sample-size criteria for development and
   validation, the standards that apply later (TRIPOD-Cluster, DECIDE-AI, CONSORT-AI/SPIRIT-AI,

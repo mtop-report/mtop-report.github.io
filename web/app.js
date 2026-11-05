@@ -154,9 +154,12 @@
     const e = entryOf(stage, target);
     return S.calcModel && e.learners[S.calcModel] ? S.calcModel : e.chosen;
   };
-  // Unknown optional inputs are averaged over registry values (quantiles / category mix),
-  // instead of using the models' missing-value handling, which encodes *who* had missing data.
-  // Inputs that do not apply (onset-to-IVT without IVT) stay missing, as in the registry.
+  // Unknown inputs are averaged over registry values (quantiles / category mix), instead of using
+  // the models' missing-value handling, which encodes *who* had missing data at FNO (some of those
+  // terms rest on a handful of patients). The calculator offers "unknown" for its optional inputs;
+  // "Validate on your data" averages any input a partner's file leaves empty or lacks (every input
+  // has values in B.impute since November 2026). Inputs that do not apply (onset-to-IVT without
+  // IVT) stay missing, as in the registry.
   const IMPUTE = B.impute || {};
   const PERMS = {};
   function perm(n, key) {

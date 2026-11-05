@@ -431,7 +431,9 @@
           text: tx(`Optional: collected for future versions, not used by the models yet. Each enters a model only after its added value is tested on at least ${(B.future || {}).min_per_outcome || 100} patients with mRS 0–2 and as many with mRS 3–6.`,
             `Nepovinné: sbírá se pro budoucí verze, modely je zatím nepoužívají. Do modelu vstoupí až po ověření přínosu alespoň na ${(B.future || {}).min_per_outcome || 100} pacientech s mRS 0–2 a stejném počtu s mRS 3–6.`) })),
         fRows.map(tr)) : null)));
-    det.appendChild(h("p", { class: "note", text: tx("Empty cells are treated as unknown. Common English and Czech spellings (ano/ne, M/F, M1/M2, ADAPT …) are recognised.", "Prázdné buňky se berou jako neznámé. Rozpoznávají se běžné anglické i české zápisy (ano/ne, M/Ž, M1/M2, ADAPT …).") }));
+    det.appendChild(h("p", { class: "note", text: tx(
+      "Empty cells and missing columns are treated as unknown: as in the calculator, the estimate is then averaged over FNO registry values since 2016 (where IV thrombolysis was given: over thrombolysed patients). Inputs that do not apply stay empty (onset to IVT without IVT). The more columns you record, the closer the result is to MTOP's performance on your patients. Common English and Czech spellings (ano/ne, M/F, M1/M2, ADAPT …) are recognised.",
+      "Prázdné buňky a chybějící sloupce se berou jako neznámé: stejně jako v kalkulačce se odhad zprůměruje přes hodnoty registru FNO od roku 2016 (místo podání IV trombolýzy: přes trombolyzované pacienty). Údaje, které se neuplatní, zůstávají prázdné (čas do IVT bez IVT). Čím více sloupců vyplníte, tím blíže bude výsledek výkonu MTOP u vašich pacientů. Rozpoznávají se běžné anglické i české zápisy (ano/ne, M/Ž, M1/M2, ADAPT …).") }));
     return det;
   }
 
@@ -443,7 +445,7 @@
     box.appendChild(h("p", null, h("b", { text: `${num(NS.records.length)} ${tx("rows", "řádků")}` }),
       ` · ${tx("recognised columns", "rozpoznané sloupce")}: ${found.length}/${KEYS.length}` +
       ` · ${tx("with 90-day mRS", "se mRS za 90 dní")}: ${num(NS.records.filter((x) => x.mrs90 !== null).length)}`));
-    if (missing.length) box.appendChild(h("p", { class: "note", text: `${tx("Not found (treated as unknown)", "Nenalezeno (bráno jako neznámé)")}: ${missing.join(", ")}` }));
+    if (missing.length) box.appendChild(h("p", { class: "note", text: `${tx("Not found (unknown: the estimate is averaged over FNO registry values)", "Nenalezeno (neznámé: odhad se zprůměruje přes hodnoty registru FNO)")}: ${missing.join(", ")}` }));
     if (futFound.length) {
       const G = { perfusion: tx("CT perfusion", "CT perfuze"), collaterals: tx("collaterals", "kolaterály"), gfap: "GFAP" };
       const per = Object.entries(NS.future || {}).map(([g, c]) => `${G[g] || g} ${num(c.n)} (${tx("mRS 0–2", "mRS 0–2")} ${num(c.good)}, ${tx("mRS 3–6", "mRS 3–6")} ${num(c.poor)})`);
@@ -452,7 +454,7 @@
         + ` · ${tx("not used by the models", "modely je nepoužívají")}` }));
     }
     const bad = Object.entries(NS.issues || {});
-    if (bad.length) box.appendChild(h("p", { class: "note", text: `${tx("Unrecognised or out-of-range values set to unknown", "Nerozpoznané nebo neplatné hodnoty nastavené jako neznámé")}: ${bad.map(([k, n]) => `${k} ${n}`).join(", ")}` }));
+    if (bad.length) box.appendChild(h("p", { class: "note", text: `${tx("Unrecognised or out-of-range values set to unknown (averaged)", "Nerozpoznané nebo neplatné hodnoty nastavené jako neznámé (průměrují se)")}: ${bad.map(([k, n]) => `${k} ${n}`).join(", ")}` }));
     return box;
   }
 

@@ -548,10 +548,12 @@ def main(argv=None) -> None:
     mr = sub.add_parser("mtop", help="MTOP's results from the app's predictions (scripts/mtop_predict_records.js)")
     mr.add_argument("predictions", type=Path)
     mr.add_argument("--out", type=Path, default=paths.RAW / "mrs_clean")
+    mr.add_argument("--label", default="", help="suffix of the result file, e.g. postfix")
     sg = sub.add_parser("subgroups", help="subgroup and sensitivity analyses from the app's predictions")
     sg.add_argument("predictions", type=Path)
     sg.add_argument("--variant", nargs=2, action="append", metavar=("NAME", "PREDICTIONS"), default=[])
     sg.add_argument("--out", type=Path, default=paths.RAW / "mrs_clean")
+    sg.add_argument("--label", default="", help="suffix of the result file, e.g. postfix")
     ph = sub.add_parser("posthoc-ivt-external", help="POST HOC: IVT location filled in (records, or results with --results)")
     ph.add_argument("--results", nargs=2, metavar=("PRIMARY_PREDICTIONS", "POSTHOC_PREDICTIONS"))
     ph.add_argument("--out", type=Path, default=paths.RAW / "mrs_clean")
@@ -571,8 +573,9 @@ def main(argv=None) -> None:
                                         {name: load_predictions(Path(f)) for name, f in a.variant})
         rep = paths.REPORTS / "mrs_clean"
         rep.mkdir(parents=True, exist_ok=True)
-        (rep / "subgroups_sensitivity.json").write_text(json.dumps(res, indent=1))
-        print(rep / "subgroups_sensitivity.json")
+        f = rep / f"subgroups_sensitivity{'_' + a.label if a.label else ''}.json"
+        f.write_text(json.dumps(res, indent=1))
+        print(f)
         return
     if a.cmd == "records":
         _check_ignored(a.out)
@@ -582,7 +585,7 @@ def main(argv=None) -> None:
         res = mtop_results(a.out, load_predictions(a.predictions))
         rep = paths.REPORTS / "mrs_clean"
         rep.mkdir(parents=True, exist_ok=True)
-        (rep / "mtop_results.json").write_text(json.dumps(res, indent=1))
+        (rep / f"mtop_results{'_' + a.label if a.label else ''}.json").write_text(json.dumps(res, indent=1))
         print(json.dumps({st: {tg: {k: e[k] for k in ("auroc", "slope", "oe", "discrimination_holds", "slope_ok")}
                                for tg, e in v.items()} for st, v in res["primary"].items()}, indent=1))
         return
