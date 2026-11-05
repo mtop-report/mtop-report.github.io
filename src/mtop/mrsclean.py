@@ -270,11 +270,11 @@ AUROC_MARGIN = 0.01
 COMPARATOR = {"admission": "mr_predicts", "h24": "mr_predicts_24h"}
 
 
-def write_records(out: Path) -> Path:
-    """The primary template as the in-browser validator holds it: one object per patient with every
-    template key (numbers, category values, null for unknown), the input of scripts/mtop_predict_records.js."""
+def write_records(out: Path, variant: str = "primary") -> Path:
+    """A template as the in-browser validator holds it: one object per patient with every template key
+    (numbers, category values, null for unknown), the input of scripts/mtop_predict_records.js."""
     from .fed.schema import read_site_csv
-    df, _ = read_site_csv(out / "template_primary.csv")
+    df, _ = read_site_csv(out / f"template_{variant}.csv")
     keys = [f.key for f in features_list() if f.type != "derived"] + ["mrs90", "year"]
     recs = []
     for row in df.to_dict("records"):
@@ -286,7 +286,7 @@ def write_records(out: Path) -> Path:
             else:
                 x[k] = float(v) if isinstance(v, (int, float, np.integer, np.floating)) else v
         recs.append(x)
-    f = out / "run" / "records.json"
+    f = out / "run" / ("records.json" if variant == "primary" else f"records_{variant}.json")
     f.parent.mkdir(parents=True, exist_ok=True)
     f.write_text(json.dumps(recs))
     return f
@@ -381,6 +381,126 @@ def mtop_results(out: Path, preds: dict, n_boot: int = 2000, seed: int = 2026) -
     return res
 
 
+SUBGROUPS = {
+    # the plan's subgroups, standing in for the source cohorts (the file has no cohort variable)
+    "Puncture within 6.5 h": lambda d: d["onset_to_puncture"] <= 390,
+    "Puncture after 6.5 h": lambda d: d["onset_to_puncture"] > 390,
+    "IV thrombolysis": lambda d: d["ivt"] == 1,
+    "No IV thrombolysis": lambda d: d["ivt"] == 0,
+    "Age under 80": lambda d: d["age"] < 80,
+    "Age 80 or over": lambda d: d["age"] >= 80,
+    "Occlusion: intracranial ICA (incl. ICA-T)": lambda d: d["occlusion"] == "ICA",
+    "Occlusion: MCA M1": lambda d: d["occlusion"] == "M1",
+    "Occlusion: MCA M2 / M3": lambda d: d["occlusion"] == "M2",
+}
+SENSITIVITY = {
+    "tici2c_as_2b": "eTICI 2c counted as mTICI 2b",
+    "smoker_ever": "Smoker = ever smoked",
+    "antithrombotic_unknown": "Antithrombotics unknown unless antiplatelet or heparin",
+    "indicators": "Model's own missing-value indicators instead of averaging",
+}
+MIN_EVENTS = 10
+
+
+def _chosen_p(preds: dict, st: str, tg: str, n: int):
+    """Probabilities of the calculator's model and the eligible patients' positions."""
+    ch = preds["meta"][st][tg]["chosen"]
+    P = preds["preds"]
+    idx = np.array([i for i in range(n) if P[str(i)][st] is not None])
+    return idx, np.array([P[str(i)][st][tg][ch] for i in idx])
+
+
+def subgroups_and_sensitivity(out: Path, preds: dict, variants: dict, n_boot: int = 2000, seed: int = 2026) -> dict:
+    """Plan analyses 5 and 6 for MTOP at Admission and 24 hours. Subgroups: AUROC with a bootstrap
+    interval, calibration-in-the-large, slope and observed/expected, reported only with at least 10
+    events and 10 non-events. Sensitivity: each variant's predictions (same patients) against the primary
+    ones, plus the primary predictions on patients without any unknown code or out-of-range value."""
+    from .fed.schema import read_site_csv
+    from .metrics import bootstrap_ci, oe_ratio, summary
+    df = typed(out)
+    n = len(df)
+    y_all = {"good_outcome": (df["mrs90"] <= 2).astype(float).to_numpy(), "death90": (df["mrs90"] == 6).astype(float).to_numpy()}
+    _, rep = read_site_csv(out / "template_primary.csv")
+    recorded = [k for k in rep["columns_found"] if k in df.columns]
+    complete = df[recorded].notna().all(axis=1).to_numpy()
+
+    def metrics(y, p, boot=False):
+        if y.sum() < MIN_EVENTS or (1 - y).sum() < MIN_EVENTS:
+            return {"n": int(len(y)), "events": int(y.sum()), "insufficient": True}
+        s = summary(y, p)
+        m = {"n": s["n"], "events": s["events"], "auroc": s["auroc"], "citl": s["citl"], "slope": s["slope"], "oe": oe_ratio(y, p)}
+        if boot:
+            m["auroc_ci"] = bootstrap_ci(y, {"m": p}, n_boot=n_boot, seed=seed, calibration=False)["m"]["auroc"]
+        return m
+
+    res = {"subgroups": {}, "sensitivity": {}, "complete_patients": {}}
+    for st in ("admission", "h24"):
+        for tg in ("good_outcome", "death90"):
+            idx, p = _chosen_p(preds, st, tg, n)
+            y = y_all[tg][idx]
+            key = f"{st}/{tg}"
+            res["subgroups"][key] = {name: metrics(y[m], p[m], boot=True)
+                                     for name, f in SUBGROUPS.items()
+                                     for m in [f(df).fillna(False).to_numpy()[idx]]}
+            base = metrics(y, p)
+            res["sensitivity"][key] = {"primary": base}
+            for v, vp in variants.items():
+                vidx, q = _chosen_p(vp, st, tg, n)
+                assert np.array_equal(vidx, idx), "variant run on different patients"
+                mv = metrics(y, q)
+                mv["delta_auroc"] = mv["auroc"] - base["auroc"]
+                mv["changed_patients"] = int((np.abs(q - p) > 1e-12).sum())
+                res["sensitivity"][key][v] = mv
+            c = complete[idx]
+            res["complete_patients"][key] = metrics(y[c], p[c])
+    return res
+
+
+def posthoc_ivt_external_records(out: Path) -> Path:
+    """POST HOC (not in the plan): the primary records with "thrombolysis given" set to the treating
+    centre for every thrombolysed patient. MRS CLEAN does not record where IVT was given; left unknown,
+    the models' missing-value term for it (learned from a handful of FNO patients) applies to every
+    thrombolysed patient but to no untreated one (whose value is "no" by definition)."""
+    f = out / "run" / "records.json"
+    recs = json.loads(f.read_text())
+    for x in recs:
+        if x["ivt"] == 1.0:
+            x["ivt_external"] = 0.0
+    g = out / "run" / "records_posthoc_ivtext0.json"
+    g.write_text(json.dumps(recs))
+    return g
+
+
+def posthoc_ivt_external(out: Path, preds: dict, preds_posthoc: dict, n_boot: int = 2000, seed: int = 2026) -> dict:
+    """POST HOC: MTOP with the IVT location filled in, against the primary run and MR PREDICTS."""
+    from sklearn.metrics import roc_auc_score
+
+    from .metrics import bootstrap_ci, oe_ratio, summary
+    df = typed(out)
+    n = len(df)
+    y_all = {"good_outcome": (df["mrs90"] <= 2).astype(float).to_numpy(), "death90": (df["mrs90"] == 6).astype(float).to_numpy()}
+    fr = comparator_frames(out)
+    res = {}
+    for st, cm in COMPARATOR.items():
+        X = fr[cm][0]
+        f = mrpredicts.lp_mr_predicts if cm == "mr_predicts" else mrpredicts.lp_mr_predicts_24h
+        lp = f(**{k: X[k].to_numpy() for k in X})
+        for tg in ("good_outcome", "death90"):
+            idx, p0 = _chosen_p(preds, st, tg, n)
+            _, p1 = _chosen_p(preds_posthoc, st, tg, n)
+            assert np.array_equal(idx, np.arange(n)), "every patient is eligible at these stages"
+            y = y_all[tg]
+            s0, s1 = summary(y, p0), summary(y, p1)
+            keep = X.index.to_numpy()
+            q = mrpredicts.outcomes(lp, cm)[tg]
+            b = bootstrap_ci(y[keep], {"mtop": p1[keep], cm: q}, n_boot=n_boot, seed=seed, ref=cm, calibration=False)
+            res[f"{st}/{tg}"] = {"auroc_primary": s0["auroc"], "auroc_posthoc": s1["auroc"], "citl_posthoc": s1["citl"],
+                                 "slope_posthoc": s1["slope"], "oe_posthoc": oe_ratio(y, p1),
+                                 "vs_comparator": float(roc_auc_score(y[keep], p1[keep]) - roc_auc_score(y[keep], q)),
+                                 "vs_comparator_ci": b["mtop"]["delta_auroc_vs_ref"]["ci"]}
+    return res
+
+
 def calibration_intercept_shift(y, p) -> float:
     """Re-estimated intercept: the shift a in logit(p) + a that makes the predictions match on average."""
     from .metrics import _fit_logistic, logit
@@ -424,13 +544,39 @@ def main(argv=None) -> None:
     fd.add_argument("--out", type=Path, default=paths.RAW / "mrs_clean")
     rc = sub.add_parser("records", help="validator-style records for scripts/mtop_predict_records.js")
     rc.add_argument("--out", type=Path, default=paths.RAW / "mrs_clean")
+    rc.add_argument("--variant", default="primary", choices=list(VARIANTS))
     mr = sub.add_parser("mtop", help="MTOP's results from the app's predictions (scripts/mtop_predict_records.js)")
     mr.add_argument("predictions", type=Path)
     mr.add_argument("--out", type=Path, default=paths.RAW / "mrs_clean")
+    sg = sub.add_parser("subgroups", help="subgroup and sensitivity analyses from the app's predictions")
+    sg.add_argument("predictions", type=Path)
+    sg.add_argument("--variant", nargs=2, action="append", metavar=("NAME", "PREDICTIONS"), default=[])
+    sg.add_argument("--out", type=Path, default=paths.RAW / "mrs_clean")
+    ph = sub.add_parser("posthoc-ivt-external", help="POST HOC: IVT location filled in (records, or results with --results)")
+    ph.add_argument("--results", nargs=2, metavar=("PRIMARY_PREDICTIONS", "POSTHOC_PREDICTIONS"))
+    ph.add_argument("--out", type=Path, default=paths.RAW / "mrs_clean")
     a = ap.parse_args(argv)
+    if a.cmd == "posthoc-ivt-external":
+        if not a.results:
+            print(posthoc_ivt_external_records(a.out))
+            return
+        res = posthoc_ivt_external(a.out, load_predictions(Path(a.results[0])), load_predictions(Path(a.results[1])))
+        rep = paths.REPORTS / "mrs_clean"
+        rep.mkdir(parents=True, exist_ok=True)
+        (rep / "posthoc_ivt_external.json").write_text(json.dumps(res, indent=1))
+        print(json.dumps(res, indent=1))
+        return
+    if a.cmd == "subgroups":
+        res = subgroups_and_sensitivity(a.out, load_predictions(a.predictions),
+                                        {name: load_predictions(Path(f)) for name, f in a.variant})
+        rep = paths.REPORTS / "mrs_clean"
+        rep.mkdir(parents=True, exist_ok=True)
+        (rep / "subgroups_sensitivity.json").write_text(json.dumps(res, indent=1))
+        print(rep / "subgroups_sensitivity.json")
+        return
     if a.cmd == "records":
         _check_ignored(a.out)
-        print(write_records(a.out))
+        print(write_records(a.out, a.variant))
         return
     if a.cmd == "mtop":
         res = mtop_results(a.out, load_predictions(a.predictions))

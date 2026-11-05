@@ -2,7 +2,9 @@
 // inputs) on validator-style records (python -m mtop.mrsclean records), with the validator's
 // eligibility rule; identical to what "Validate on your data" computes. Serve the built site locally
 // (python -m http.server in site/), then:
-//   node scripts/mtop_predict_records.js http://localhost:8765/index.html records.json preds.json [all]
+//   node scripts/mtop_predict_records.js http://localhost:8765/index.html records.json preds.json [chosen|all|indicators]
+// (chosen: the calculator's model; all: every published learner; indicators: the calculator's model
+// with the model's own missing-value indicators instead of averaging unknown inputs)
 // Row-level output: write it only to a git-ignored folder (data/raw/...).
 const { chromium } = require('playwright');
 const fs = require('fs');
@@ -37,7 +39,13 @@ const fs = require('fs');
             const e = A.entryOf(st, tg);
             const names = mode === 'all' ? [e.chosen].concat(Object.keys(e.learners).filter((k) => k !== e.chosen)) : [e.chosen];
             row[st][tg] = {};
-            for (const nm of names) row[st][tg][nm] = A.predictStage(st, x, tg, nm).p;
+            for (const nm of names) {
+              // "indicators": the model's own missing-value handling (development median plus a
+              // missing indicator) instead of the calculator's averaging over registry values
+              row[st][tg][nm] = mode === 'indicators'
+                ? A.M.predict(e.learners[nm], A.M.buildRow(e.columns, A.B.features, x), { recent: true }).p
+                : A.predictStage(st, x, tg, nm).p;
+            }
           }
         }
         return row;
