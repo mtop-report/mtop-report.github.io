@@ -23,6 +23,14 @@ writes the primary template, the three conversion-level sensitivity variants and
 the comparator variables (collateral score, ICA vs ICA-T, eTICI) used by the MR PREDICTS formulas.
     python -m mtop.mrsclean casemix
 compares MRS CLEAN with the FNO cohort on the app's Table 1 rows (aggregates, reports/mrs_clean/).
+    python -m mtop.mrsclean fidelity
+applies the published MR PREDICTS models (mrpredicts.py) and checks them against their Registry results.
+    python -m mtop.mrsclean records
+    node scripts/mtop_predict_records.js <local site> data/raw/mrs_clean/run/records.json <preds.json> all
+    python -m mtop.mrsclean mtop <preds.json>
+runs MTOP through the app's own predictor (the same numbers as "Validate on your data"; checked with
+scripts/validator_ui_results.js) and reports performance, the intercept update and the paired
+comparison with MR PREDICTS (aggregates, reports/mrs_clean/).
 """
 from __future__ import annotations
 
@@ -253,6 +261,133 @@ def fidelity(out: Path, n_boot: int = 2000) -> dict:
     return res
 
 
+# The plan's reading of MTOP: the lower limit of each stage's AUROC interval on the FNO temporal test
+# (validation.json, development version), the update policy's slope range, and the model-choice rule's
+# smallest AUROC difference that counts
+FNO_AUROC_LOWER = {("admission", "good_outcome"): 0.74318, ("admission", "death90"): 0.63527,
+                   ("h24", "good_outcome"): 0.81843, ("h24", "death90"): 0.72607}
+AUROC_MARGIN = 0.01
+COMPARATOR = {"admission": "mr_predicts", "h24": "mr_predicts_24h"}
+
+
+def write_records(out: Path) -> Path:
+    """The primary template as the in-browser validator holds it: one object per patient with every
+    template key (numbers, category values, null for unknown), the input of scripts/mtop_predict_records.js."""
+    from .fed.schema import read_site_csv
+    df, _ = read_site_csv(out / "template_primary.csv")
+    keys = [f.key for f in features_list() if f.type != "derived"] + ["mrs90", "year"]
+    recs = []
+    for row in df.to_dict("records"):
+        x = {}
+        for k in keys:
+            v = row.get(k)
+            if v is None or (isinstance(v, float) and np.isnan(v)):
+                x[k] = None
+            else:
+                x[k] = float(v) if isinstance(v, (int, float, np.integer, np.floating)) else v
+        recs.append(x)
+    f = out / "run" / "records.json"
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(json.dumps(recs))
+    return f
+
+
+def features_list():
+    from .config import features
+    return features()
+
+
+def load_predictions(path: Path) -> dict:
+    """Per-patient probabilities written by scripts/mtop_predict_records.js (the app's own predictor)."""
+    return json.loads(path.read_text())
+
+
+def _boot_oe(y, p, n_boot=2000, seed=2026):
+    rng = np.random.default_rng(seed)
+    n, v = len(y), []
+    for _ in range(n_boot):
+        i = rng.integers(0, n, n)
+        v.append(y[i].sum() / p[i].sum())
+    return [float(np.percentile(v, 2.5)), float(np.percentile(v, 97.5))]
+
+
+def mtop_results(out: Path, preds: dict, n_boot: int = 2000, seed: int = 2026) -> dict:
+    """MTOP as published on MRS CLEAN (plan, analyses 3, 4 and 7): performance of the calculator's model
+    at Admission and 24 hours, the paired AUROC difference against the matching MR PREDICTS model, the
+    intercept update of the update policy on a random half, and every learner at every stage."""
+    from .metrics import bootstrap_ci, calibration_bins, decision_curve, delong_p, expit, logit, oe_ratio, summary
+    df = typed(out)
+    y_all = {"good_outcome": (df["mrs90"] <= 2).astype(float).to_numpy(), "death90": (df["mrs90"] == 6).astype(float).to_numpy()}
+    P = preds["preds"]
+    fr = comparator_frames(out)
+    lp = {"mr_predicts": mrpredicts.lp_mr_predicts(**{k: fr["mr_predicts"][0][k].to_numpy() for k in fr["mr_predicts"][0]}),
+          "mr_predicts_24h": mrpredicts.lp_mr_predicts_24h(**{k: fr["mr_predicts_24h"][0][k].to_numpy()
+                                                               for k in fr["mr_predicts_24h"][0]})}
+    half = np.random.default_rng(seed).permutation(len(df)) % 2 == 0     # True = intercept is re-estimated here
+    res = {"primary": {}, "learners": {}}
+    for st in ("admission", "procedure", "h24"):
+        idx = np.array([i for i in range(len(df)) if P[str(i)][st] is not None])
+        res["learners"][st] = {}
+        for tg in ("good_outcome", "death90"):
+            y = y_all[tg][idx]
+            chosen = preds["meta"][st][tg]["chosen"]
+            res["learners"][st][tg] = {}
+            for nm in preds["meta"][st][tg]["learners"]:
+                p = np.array([P[str(i)][st][tg][nm] for i in idx])
+                s = summary(y, p)
+                res["learners"][st][tg][nm] = {k: s[k] for k in ("n", "auroc", "citl", "slope", "brier_scaled")} | {
+                    "oe": oe_ratio(y, p), "chosen": nm == chosen}
+            if st not in COMPARATOR:
+                continue
+            p = np.array([P[str(i)][st][tg][chosen] for i in idx])
+            s = summary(y, p)
+            ci = bootstrap_ci(y, {"mtop": p}, n_boot=n_boot, seed=seed)["mtop"]
+            entry = {"model": chosen, **{k: s[k] for k in ("n", "events", "prevalence", "mean_pred", "auroc", "brier",
+                                                           "brier_scaled", "citl", "slope", "ici")},
+                     "oe": oe_ratio(y, p), "ci": {**{k: ci[k] for k in ("auroc", "citl", "slope")}, "oe": _boot_oe(y, p, n_boot, seed)},
+                     "calibration_bins": calibration_bins(y, p), "decision_curve": decision_curve(y, p)}
+            # pre-set reading (plan, interpretation table)
+            entry["discrimination_holds"] = bool(s["auroc"] >= FNO_AUROC_LOWER[(st, tg)])
+            entry["slope_ok"] = bool(SLOPE_RANGE[0] <= s["slope"] <= SLOPE_RANGE[1])
+            lo, hi = entry["ci"]["oe"]
+            entry["intercept_update_needed"] = bool(lo > 1 or hi < 1)
+            # intercept update on one random half, checked on the other
+            a_idx, b_idx = half[idx], ~half[idx]
+            a = calibration_intercept_shift(y[a_idx], p[a_idx])
+            pb = expit(logit(p[b_idx]) + a)
+            sb = summary(y[b_idx], pb)
+            entry["intercept_update"] = {"shift": a, "n_estimate": int(a_idx.sum()), "n_check": int(b_idx.sum()),
+                                         "check_citl": sb["citl"], "check_slope": sb["slope"], "check_oe": oe_ratio(y[b_idx], pb),
+                                         "check_ici": sb["ici"], "check_ici_before": summary(y[b_idx], p[b_idx])["ici"],
+                                         "enough": bool(SLOPE_RANGE[0] <= sb["slope"] <= SLOPE_RANGE[1])}
+            # paired comparison with the matching published model, on the patients it applies to
+            cm = COMPARATOR[st]
+            cidx = fr[cm][0].index.to_numpy()
+            pos = {i: j for j, i in enumerate(idx)}
+            keep = np.array([pos[i] for i in cidx if i in pos])
+            q = mrpredicts.outcomes(lp[cm], cm, "registry")[tg][[k for k, i in enumerate(cidx) if i in pos]]
+            yy, pp = y[keep], p[keep]
+            b = bootstrap_ci(yy, {"mtop": pp, cm: q}, n_boot=n_boot, seed=seed, ref=cm, calibration=False)
+            d = b["mtop"]["delta_auroc_vs_ref"]
+            from sklearn.metrics import roc_auc_score
+            diff = float(roc_auc_score(yy, pp) - roc_auc_score(yy, q))
+            verdict = ("better" if diff >= AUROC_MARGIN and d["ci"][0] > 0 else
+                       "worse" if diff <= -AUROC_MARGIN and d["ci"][1] < 0 else "comparable")
+            entry["vs_comparator"] = {"comparator": cm, "n": int(len(yy)), "mtop_auroc": float(roc_auc_score(yy, pp)),
+                                      "comparator_auroc": float(roc_auc_score(yy, q)), "difference": diff,
+                                      "difference_ci": d["ci"], "bootstrap_p": d["p_two_sided"], "delong_p": delong_p(yy, pp, q),
+                                      "verdict": verdict}
+            res["primary"].setdefault(st, {})[tg] = entry
+    return res
+
+
+def calibration_intercept_shift(y, p) -> float:
+    """Re-estimated intercept: the shift a in logit(p) + a that makes the predictions match on average."""
+    from .metrics import _fit_logistic, logit
+    lp = logit(p)
+    return float(_fit_logistic(np.zeros_like(lp), y, offset=lp, slope=False)[0])
+
+
 def _cell_text(c: dict, kind: str) -> str:
     if kind == "median":
         return "–" if c["median"] is None else f"{c['median']:g} ({c['iqr'][0]:g}–{c['iqr'][1]:g})"
@@ -287,7 +422,24 @@ def main(argv=None) -> None:
     m.add_argument("--out", type=Path, default=paths.RAW / "mrs_clean")
     fd = sub.add_parser("fidelity", help="published MR PREDICTS models on MRS CLEAN vs their Registry results")
     fd.add_argument("--out", type=Path, default=paths.RAW / "mrs_clean")
+    rc = sub.add_parser("records", help="validator-style records for scripts/mtop_predict_records.js")
+    rc.add_argument("--out", type=Path, default=paths.RAW / "mrs_clean")
+    mr = sub.add_parser("mtop", help="MTOP's results from the app's predictions (scripts/mtop_predict_records.js)")
+    mr.add_argument("predictions", type=Path)
+    mr.add_argument("--out", type=Path, default=paths.RAW / "mrs_clean")
     a = ap.parse_args(argv)
+    if a.cmd == "records":
+        _check_ignored(a.out)
+        print(write_records(a.out))
+        return
+    if a.cmd == "mtop":
+        res = mtop_results(a.out, load_predictions(a.predictions))
+        rep = paths.REPORTS / "mrs_clean"
+        rep.mkdir(parents=True, exist_ok=True)
+        (rep / "mtop_results.json").write_text(json.dumps(res, indent=1))
+        print(json.dumps({st: {tg: {k: e[k] for k in ("auroc", "slope", "oe", "discrimination_holds", "slope_ok")}
+                               for tg, e in v.items()} for st, v in res["primary"].items()}, indent=1))
+        return
     if a.cmd == "fidelity":
         res = fidelity(a.out)
         rep = paths.REPORTS / "mrs_clean"
