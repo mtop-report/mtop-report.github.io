@@ -34,7 +34,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from . import paths
+from . import mrpredicts, paths
 
 SOURCE_COLUMNS = [
     "StudySubjectID", "r_age", "r_sex", "bl_NIHSS_sumscore", "bl_phy_rrsyst", "bl_phy_rrdiast",
@@ -188,6 +188,71 @@ def case_mix(out: Path, min_cell: int = 10) -> dict:
     return {"n": {k: int(len(g)) for k, g in groups.items()}, "min_cell": min_cell, "rows": rows}
 
 
+# Published results in the MR CLEAN Registry (the plan's comparator table): c-statistics, and for MR
+# PREDICTS@24H the survival c-statistic, which equals that for death
+PUBLISHED_C = {("mr_predicts", "good_outcome"): 0.80, ("mr_predicts_24h", "good_outcome"): 0.91,
+               ("mr_predicts_24h", "death90"): 0.89}
+C_TOLERANCE, SLOPE_RANGE = 0.03, (0.8, 1.2)
+
+
+def comparator_frames(out: Path) -> dict:
+    """Inputs of both published models for the patients they apply to (settings fixed in the plan):
+    MR PREDICTS on patients punctured within 6.5 h, MR PREDICTS@24H on all; patients with occlusion code
+    0, unknown IVT or an input outside the app's ranges are left out."""
+    df = typed(out)
+    side = pd.read_csv(out / "comparators.csv", dtype={"etici": str})
+    loc = side["occlusion_detail"].map({"ICA": "ICA-(T)", "ICA-T": "ICA-(T)", "M1": "M1", "M2": "M2"})
+    etici = side["etici"].map({"0": 0, "1": 1, "2a": 2, "2b": 3, "2c": 4, "3": 5}).astype(float)
+    y = df[["good_outcome", "death90"]]
+    mrp = pd.DataFrame({"evt": 1.0, "age": df["age"], "nihss": df["nihss_adm"], "premrs": df["mrs_pre"],
+                        "diabetes": df["dm"], "sbp": df["sbp"], "ivt": df["ivt"],
+                        "glucose_mgdl": df["glucose"] * mrpredicts.GLUCOSE_MG_PER_MMOL, "aspects": df["aspects"],
+                        "location": loc, "collaterals": df["collaterals_tan"], "onset_to_groin": df["onset_to_puncture"]})
+    m24 = pd.DataFrame({"age": df["age"], "nihss": df["nihss_adm"], "diabetes": df["dm"], "premrs": df["mrs_pre"],
+                        "location": loc, "collaterals": df["collaterals_tan"], "etici": etici,
+                        "nihss_24h": df["nihss_24h"], "sich": df["sich"]})
+    ok_mrp = mrp.notna().all(axis=1) & (mrp["onset_to_groin"] <= 390)
+    ok_24 = m24.notna().all(axis=1)
+    return {"mr_predicts": (mrp[ok_mrp], y[ok_mrp]), "mr_predicts_24h": (m24[ok_24], y[ok_24]),
+            "excluded": {"mr_predicts_beyond_6_5h": int((mrp.drop(columns="onset_to_groin").notna().all(axis=1)
+                                                          & (mrp["onset_to_groin"] > 390)).sum()),
+                         "mr_predicts_incomplete": int((~mrp.notna().all(axis=1)).sum()),
+                         "mr_predicts_24h_incomplete": int((~ok_24).sum())}}
+
+
+def fidelity(out: Path, n_boot: int = 2000) -> dict:
+    """The plan's fidelity check: both published models on MRS CLEAN, against their Registry results."""
+    from .metrics import bootstrap_ci, oe_ratio, summary
+    fr = comparator_frames(out)
+    lp = {"mr_predicts": mrpredicts.lp_mr_predicts(**{k: fr["mr_predicts"][0][k].to_numpy() for k in fr["mr_predicts"][0]}),
+          "mr_predicts_24h": mrpredicts.lp_mr_predicts_24h(**{k: fr["mr_predicts_24h"][0][k].to_numpy()
+                                                               for k in fr["mr_predicts_24h"][0]})}
+    res = {"excluded": fr["excluded"], "models": {}}
+    for model in ("mr_predicts", "mr_predicts_24h"):
+        y_all = fr[model][1]
+        res["models"][model] = {"n": int(len(y_all))}
+        for target in ("good_outcome", "death90"):
+            y = y_all[target].to_numpy()
+            entry = {}
+            for which in ("registry", "hermes"):
+                p = mrpredicts.outcomes(lp[model], model, which)[target]
+                s = summary(y, p)
+                entry[which] = {k: s[k] for k in ("events", "prevalence", "mean_pred", "auroc", "citl", "slope", "ici", "brier_scaled")}
+                entry[which]["oe"] = oe_ratio(y, p)
+                if which == "registry":
+                    ci = bootstrap_ci(y, {"m": p}, n_boot=n_boot, seed=2026)["m"]
+                    entry[which]["ci"] = {k: ci[k] for k in ("auroc", "citl", "slope")}
+            pub = PUBLISHED_C.get((model, target))
+            if pub is not None:
+                a, b = entry["registry"]["auroc"], entry["registry"]["slope"]
+                entry["published_c"] = pub
+                entry["passes"] = bool(abs(a - pub) <= C_TOLERANCE and SLOPE_RANGE[0] <= b <= SLOPE_RANGE[1])
+            res["models"][model][target] = entry
+    checks = [e["passes"] for m in res["models"].values() for t, e in m.items() if isinstance(e, dict) and "passes" in e]
+    res["faithful"] = bool(all(checks))
+    return res
+
+
 def _cell_text(c: dict, kind: str) -> str:
     if kind == "median":
         return "–" if c["median"] is None else f"{c['median']:g} ({c['iqr'][0]:g}–{c['iqr'][1]:g})"
@@ -220,7 +285,16 @@ def main(argv=None) -> None:
     c.add_argument("--out", type=Path, default=paths.RAW / "mrs_clean")
     m = sub.add_parser("casemix", help="Table 1 rows: FNO vs MRS CLEAN (aggregates, to reports/)")
     m.add_argument("--out", type=Path, default=paths.RAW / "mrs_clean")
+    fd = sub.add_parser("fidelity", help="published MR PREDICTS models on MRS CLEAN vs their Registry results")
+    fd.add_argument("--out", type=Path, default=paths.RAW / "mrs_clean")
     a = ap.parse_args(argv)
+    if a.cmd == "fidelity":
+        res = fidelity(a.out)
+        rep = paths.REPORTS / "mrs_clean"
+        rep.mkdir(parents=True, exist_ok=True)
+        (rep / "fidelity.json").write_text(json.dumps(res, indent=1))
+        print(json.dumps(res, indent=1))
+        return
     if a.cmd == "casemix":
         cm = case_mix(a.out)
         rep = paths.REPORTS / "mrs_clean"
