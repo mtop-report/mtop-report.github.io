@@ -57,14 +57,16 @@ calculator an unknown input is averaged over 20 registry values (2016 onwards). 
 apply (onset to IVT without IVT) stay missing, as in the registry.
 
 The missing-value indicators encode who had missing data at FNO, and several rest on a handful of
-patients (fewer than about 10 lack sex, age, side, atrial fibrillation, intra-arterial lysis or
-where IVT was given), with terms of 1–3 log-odds. The calculator never uses them for these inputs,
-which always have a value there. A partner's file can lack a whole column, so since November 2026
+patients: at most 9 development patients lack age, sex, affected side, IVT, where IVT was given,
+hypertension, atrial fibrillation / arrhythmia, intra-arterial lysis or procedure duration, and their
+terms reach 1–4 log-odds. The calculator never uses them: these inputs always have a value there or,
+if optional, are averaged over registry values. A partner's file can lack a whole column, so since November 2026
 *Validate on your data* averages any unknown value over registry values too (every input has 20; for
 where IVT was given, from thrombolysed patients). The models and their fingerprint are unchanged.
 This was found in a pre-specified dry run on synthetic registry data (MRS CLEAN, DOI
 10.5281/zenodo.18846304): where IVT was given is not recorded there, and the term for it (+2.18
-log-odds of death at 24 hours) applied to every thrombolysed patient but no untreated one. The next
+log-odds of death at 24 hours, learned from 4 of 1,235 patients) applied to every thrombolysed
+patient but none without IVT. The next
 model version should give an input a missing-value term only when at least 20 development patients
 lack it.
 

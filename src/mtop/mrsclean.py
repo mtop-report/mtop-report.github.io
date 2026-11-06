@@ -262,8 +262,9 @@ def fidelity(out: Path, n_boot: int = 2000) -> dict:
 
 
 # The plan's reading of MTOP: the lower limit of each stage's AUROC interval on the FNO temporal test
-# (validation.json, development version), the update policy's slope range, and the model-choice rule's
-# smallest AUROC difference that counts
+# (validation.json, development version), the draft update policy's slope range, and a 0.01 AUROC margin
+# for the paired comparison (the margin the model-choice rule uses for cross-validation gains; here a
+# difference also needs its bootstrap interval to exclude 0)
 FNO_AUROC_LOWER = {("admission", "good_outcome"): 0.74318, ("admission", "death90"): 0.63527,
                    ("h24", "good_outcome"): 0.81843, ("h24", "death90"): 0.72607}
 AUROC_MARGIN = 0.01
