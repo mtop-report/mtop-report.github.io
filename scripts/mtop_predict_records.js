@@ -2,14 +2,16 @@
 // inputs) on validator-style records (python -m mtop.mrsclean records), with the validator's
 // eligibility rule; identical to what "Validate on your data" computes. Serve the built site locally
 // (python -m http.server in site/), then:
-//   node scripts/mtop_predict_records.js http://localhost:8765/index.html records.json preds.json [chosen|all|indicators]
+//   node scripts/mtop_predict_records.js http://localhost:8765/index.html records.json preds.json [chosen|all|indicators] [blind]
 // (chosen: the calculator's model; all: every published learner; indicators: the calculator's model
-// with the model's own missing-value indicators instead of averaging unknown inputs)
+// with the model's own missing-value indicators instead of averaging unknown inputs; blind: the
+// outcome is not needed, so records without it are estimated too: the tool check of plan version 2)
 // Row-level output: write it only to a git-ignored folder (data/raw/...).
 const { chromium } = require('playwright');
 const fs = require('fs');
 (async () => {
-  const [url, recFile, outFile, learnerMode] = process.argv.slice(2);
+  const [url, recFile, outFile, learnerMode, blindArg] = process.argv.slice(2);
+  const blind = blindArg === 'blind';
   const recs = JSON.parse(fs.readFileSync(recFile, 'utf8'));
   const browser = await chromium.launch();
   const page = await browser.newPage();
@@ -27,9 +29,9 @@ const fs = require('fs');
   const t0 = Date.now();
   for (let i = 0; i < recs.length; i += CH) {
     const chunk = recs.slice(i, i + CH);
-    const res = await page.evaluate(({ chunk, mode }) => {
+    const res = await page.evaluate(({ chunk, mode, blind }) => {
       const A = window.MTOPApp;
-      const eligible = (x, st) => x.mrs90 !== null && (A.idx(st) < 1 || x.tici !== null) && (st !== 'h24' || x.nihss_24h !== null);
+      const eligible = (x, st) => (blind || x.mrs90 !== null) && (A.idx(st) < 1 || x.tici !== null) && (st !== 'h24' || x.nihss_24h !== null);
       return chunk.map((x) => {
         const row = {};
         for (const st of ['admission', 'procedure', 'h24']) {
@@ -50,7 +52,7 @@ const fs = require('fs');
         }
         return row;
       });
-    }, { chunk, mode: learnerMode || 'chosen' });
+    }, { chunk, mode: learnerMode || 'chosen', blind });
     for (let j = 0; j < res.length; j++) out.preds[i + j] = res[j];
     if (i === 0 || (i / CH) % 10 === 0) console.log(`rows ${i + res.length} / ${recs.length}, ${((Date.now() - t0) / 1000).toFixed(0)} s`);
   }
