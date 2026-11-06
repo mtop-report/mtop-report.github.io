@@ -212,7 +212,7 @@ audit log with its time, round, size and SHA-256.
 3. **Install the node** on a computer inside the hospital that can make outgoing HTTPS connections:
 
    ```bash
-   pip install "mtop[federated] @ git+https://github.com/viktorgajdosik/mt"
+   pip install "mtop[federated] @ git+https://github.com/mtop-report/mtop-report.github.io"
    python -m mtop.fed site --coordinator https://COORDINATOR --site-id YOUR-CENTRE \
        --token-file centre.token --data registry.csv          # console on http://127.0.0.1:8751
    ```

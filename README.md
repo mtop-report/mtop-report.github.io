@@ -24,7 +24,7 @@ browser: no server, no patient data, nothing typed in is sent anywhere.
 
 > **Research tool, not a medical device.** Do not use it on its own to decide treatment.
 
-**Live app:** https://viktorgajdosik.github.io/mt/ (published by GitHub Actions on every push to `main`).
+**Live app:** https://mtop-report.github.io/ (published by GitHub Actions on every push to `main`).
 It can be installed on a phone or laptop and works offline. The page is a single file, light or
 dark, with its typeface bundled, so opening it contacts no third-party server.
 
@@ -228,7 +228,7 @@ password-protected, listens on this computer only and is not part of the public 
 ## Quick start
 
 ```bash
-git clone https://github.com/viktorgajdosik/mt && cd mt
+git clone https://github.com/mtop-report/mtop-report.github.io mt && cd mt
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 

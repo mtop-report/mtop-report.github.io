@@ -1,0 +1,24 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "MTOP: Mechanical Thrombectomy Outcome Predictor"
+type: software
+authors:
+  - family-names: "Gajdošík"
+    given-names: "Viktor"
+    affiliation: "University Hospital Ostrava; Faculty of Medicine, University of Ostrava"
+    orcid: "https://orcid.org/0009-0008-0849-7628"
+  - family-names: "Brzobohatý"
+    given-names: "Tomáš"
+    affiliation: "IT4Innovations, VSB – Technical University of Ostrava"
+  - family-names: "Procházka"
+    given-names: "Václav"
+    affiliation: "University Hospital Ostrava"
+version: "1.0.0"
+license: MIT
+repository-code: "https://github.com/mtop-report/mtop-report.github.io"
+url: "https://mtop-report.github.io/"
+keywords:
+  - stroke
+  - mechanical thrombectomy
+  - outcome prediction
+  - clinical prediction model

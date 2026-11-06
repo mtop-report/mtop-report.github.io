@@ -95,8 +95,8 @@ stages:
 
 site:
   title: "MTOP · Mechanical Thrombectomy Outcome Predictor"
-  repo_url: "https://github.com/viktorgajdosik/mt"
-  site_url: "https://viktorgajdosik.github.io/mt/"
+  repo_url: "https://github.com/mtop-report/mtop-report.github.io"
+  site_url: "https://mtop-report.github.io/"
   contact: "viktor.gajdosik@fno.cz"
   authors:
     - name: "Viktor Gajdošík"

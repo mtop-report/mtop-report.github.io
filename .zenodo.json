@@ -1,0 +1,13 @@
+{
+  "title": "MTOP: Mechanical Thrombectomy Outcome Predictor",
+  "upload_type": "software",
+  "description": "<p>MTOP predicts 90-day functional outcome (modified Rankin Scale 0–2) and death after mechanical thrombectomy for ischaemic stroke at four stages of care, from the thrombectomy registry of University Hospital Ostrava. This archive holds the code of the training pipeline, the published models and the public web app (<a href=\"https://mtop-report.github.io/\">mtop-report.github.io</a>), including the in-browser tool for validation at partner centres. It contains no patient-level data.</p>",
+  "creators": [
+    {"name": "Gajdošík, Viktor", "affiliation": "University Hospital Ostrava; Faculty of Medicine, University of Ostrava", "orcid": "0009-0008-0849-7628"},
+    {"name": "Brzobohatý, Tomáš", "affiliation": "IT4Innovations, VSB – Technical University of Ostrava"},
+    {"name": "Procházka, Václav", "affiliation": "University Hospital Ostrava"}
+  ],
+  "license": "MIT",
+  "access_right": "open",
+  "keywords": ["stroke", "mechanical thrombectomy", "outcome prediction", "clinical prediction model", "modified Rankin Scale", "machine learning"]
+}

@@ -686,7 +686,7 @@
     card.appendChild(h("div", { class: "chart-head" }, h("div", null,
       h("div", { class: "chart-title", text: tx("How a centre joins", "Jak se centrum připojí") }),
       h("div", { class: "chart-sub", text: tx("What it takes for the registry and IT teams", "Co to obnáší pro tým registru a IT") }))));
-    const repo = (A.SITE.repo_url || "https://github.com/viktorgajdosik/mt").replace(/\/$/, "");
+    const repo = (A.SITE.repo_url || "https://github.com/mtop-report/mtop-report.github.io").replace(/\/$/, "");
     const cmd = `pip install "mtop[federated] @ git+${repo}"\npython -m mtop.fed check registry.csv\npython -m mtop.fed site --coordinator https://… --site-id YOUR-CENTRE \\\n    --token-file centre.token --data registry.csv`;
     const code = h("pre", { class: "fx-code" }, h("code", { text: cmd }));
     const copy = h("button", { class: "btn btn-ghost fx-copy", type: "button", text: tx("Copy", "Kopírovat") });
