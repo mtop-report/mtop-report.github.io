@@ -158,7 +158,9 @@ def rare_section(base: pd.DataFrame, bundle: dict) -> str:
 
 def optimism_section() -> str:
     files = sorted((paths.REPORTS / "optimism").glob("*_*.json")) if (paths.REPORTS / "optimism").exists() else []
-    files = [f for f in files if not f.name.endswith("_resamples.jsonl")]
+    order = {"good_outcome": 0, "death90": 1}
+    files = sorted((f for f in files if not f.name.endswith("_resamples.jsonl")),
+                   key=lambda f: order.get(f.stem.split("_", 1)[1], 9))
     if not files:
         return "## Bootstrap internal validation\n\nNot yet run (plan: docs/registrations/bootstrap_optimism_plan.md).\n"
     names = {"auroc": "AUROC", "brier": "Brier score", "logloss": "Log-loss", "citl": "Calibration-in-the-large",
@@ -171,8 +173,8 @@ def optimism_section() -> str:
              "Percentiles: 2.5th–97.5th of the 500 optimism values.\n"]
     for f in files:
         r = json.loads(f.read_text())
-        rows = [[names[k], f"{o['apparent']:.3f}", f"{o['mean_optimism']:+.3f} (±{o['monte_carlo_se']:.3f})",
-                 f"{o['optimism_p2_5']:+.3f} to {o['optimism_p97_5']:+.3f}", f"{o['corrected']:.3f}"]
+        rows = [[names[k], f"{o['apparent']:.3f}".replace("-0.000", "0.000"), f"{o['mean_optimism']:+.3f} (±{o['monte_carlo_se']:.3f})",
+                 f"{o['optimism_p2_5']:+.3f} to {o['optimism_p97_5']:+.3f}", f"{o['corrected']:.3f}".replace("-0.000", "0.000")]
                 for k, o in r["optimism"].items()]
         s = r["stability"]
         rep = r["reproduction"]
@@ -180,19 +182,19 @@ def optimism_section() -> str:
                      + _table(["Measure", "Apparent", "Mean optimism (Monte Carlo SE)", "Optimism, 2.5th–97.5th percentile",
                                "Optimism-corrected"], rows)
                      + f"\n\n- Pipeline check: the refit reproduced the published settings ({rep['refit']['knots']} knots, "
-                       f"C = {rep['refit']['C']:.4f}) and test-year estimates (largest difference {rep['test_predictions_max_difference']:.1e}). "
+                       f"C = {rep['refit']['C']:.4f}) and test-year estimates (largest difference {rep['test_predictions_max_difference']:.1g}). "
                        f"With grouped inner folds on the original data: {r['original_with_grouped_folds']['knots']} knots, "
                        f"C = {r['original_with_grouped_folds']['C']:.4f}.\n"
                      + f"- Knots chosen: 3 in {s['knots_share']['3']:.0%}, 4 in {s['knots_share']['4']:.0%}, 5 in "
                        f"{s['knots_share']['5']:.0%} of samples. C: median {10 ** s['log10_C']['median']:.4f} (interquartile range "
                        f"{10 ** s['log10_C']['q1']:.4f}–{10 ** s['log10_C']['q3']:.4f}); at an end of the grid in "
-                       f"{s['share_C_at_grid_end']:.0%}.\n"
+                       f"{s['share_C_at_grid_end']:.0%}. Samples hold on average {s['mean_unique_patients']:.0f} distinct patients, "
+                       "which may explain why they chose a somewhat stronger penalty than the original data.\n"
                      + f"- Each development patient's risk across the 500 models: median width of its 95 % range "
                        f"{100 * s['risk_range_width']['median']:.1f} percentage points (90th percentile "
                        f"{100 * s['risk_range_width']['p90']:.1f}); wider than 10 points for "
                        f"{s['risk_range_width']['share_wider_than_10_points']:.0%} of patients.\n"
-                     + f"- Resamples with convergence warnings: {s['resamples_with_convergence_warnings']}; on average "
-                       f"{s['mean_unique_patients']:.0f} distinct patients per sample.\n")
+                     + f"- Resamples with convergence warnings: {s['resamples_with_convergence_warnings']}.\n")
     return "\n".join(parts)
 
 

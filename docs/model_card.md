@@ -114,7 +114,26 @@ patients without each input, and rare categories: [model diagnostics](model_diag
 - Sensitivity of the test result to the 62 test-year patients without a 90-day outcome (extremes and
   20 imputations): Validation tab.
 - Results: README and the Validation tab. Before thrombectomy, mRS 0–2: regression with splines
-  AUROC 0.809 (0.743–0.867); development model calibration intercept −0.41, slope 1.47.
+  AUROC 0.809 (0.743–0.867). Calibration of the development model on the test years, before any
+  recalibration: calibration-in-the-large −0.41 (−0.72 to −0.12), i.e. good outcomes over-predicted
+  in 2023–2025, and slope 1.47 (1.06–2.03). A slope above 1 means the estimates are too close
+  together (too timid), the opposite of the usual sign of overfitting; linear regression without
+  splines gives 1.44, so the splines are not the cause. Every stage: [model diagnostics](model_diagnostics.md).
+- Bootstrap internal validation (plan registered before the run:
+  [bootstrap_optimism_plan.md](registrations/bootstrap_optimism_plan.md); 500 samples of the
+  development patients with the whole pipeline repeated), before thrombectomy:
+  - AUROC: mRS 0–2 0.796 apparent, **0.761 optimism-corrected** (nested cross-validation: 0.762);
+    death 0.826 and **0.790**.
+  - Calibration slope, optimism-corrected: **1.09** (mRS 0–2) and **1.10** (death). The tuned
+    penalty shrinks the estimates about 10 % more than the development data need. The test years' 1.47 for mRS 0–2 is
+    larger than this, so it reflects change over time, or chance (its interval reaches 1.06), more
+    than the penalty. For death the test-year slope was 0.94 (0.53–1.47).
+  - Stability: 3 knots in 83 % and 86 % of samples, the penalty within a narrow range and never
+    at the end of the grid, no convergence warnings. Each patient's estimated risk, however, varied
+    across the bootstrap models by a median of 21 (mRS 0–2) and 15 (death) percentage points
+    (2.5th–97.5th percentile range), as expected with about 3–5 events per parameter (Riley criteria
+    not met). Individual estimates are therefore uncertain; version 1.1 should have fewer
+    parameters, more patients, or both. MTOP v1.0.0 is unchanged.
 
 ## 7. Deployed models
 

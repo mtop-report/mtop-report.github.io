@@ -117,8 +117,12 @@ lead at the later stages (day 7, mRS 0–2: LightGBM 0.917 and CatBoost 0.915 ag
 which the Validation tab shows next to the primary split.
 
 Calibration: the development models over-predicted good outcomes in 2023–2025 (regression with
-splines before thrombectomy: calibration intercept −0.41, slope 1.47, O/E 0.78). The published
-models are refitted on all years and their intercepts re-estimated on the pooled years 2023–2025.
+splines before thrombectomy: calibration intercept −0.41, slope 1.47, O/E 0.78; a slope above 1 means
+the estimates were too close together, not overfitted). The published models are refitted on all
+years and their intercepts re-estimated on the pooled years 2023–2025. A bootstrap internal
+validation registered before it was run (500 samples, whole pipeline repeated) gives an
+optimism-corrected AUROC of 0.761 for mRS 0–2 and 0.790 for death before thrombectomy, and
+optimism-corrected calibration slopes of 1.09 and 1.10: [model diagnostics](docs/model_diagnostics.md).
 
 **Keeping the model up to date** (regression with splines, before thrombectomy, mRS 0–2, test years
 2018–2025, models trained only on earlier years): a model frozen in 2015 had calibration-in-the-large

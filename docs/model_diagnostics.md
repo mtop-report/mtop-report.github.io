@@ -90,7 +90,7 @@ Recorded for every patient: Final reperfusion (mTICI), NIHSS at 24 h, NIHSS on d
 
 ## Rare categories
 
-Categories and yes/no values held by fewer than 20 patients of the stage's cohort (all years). Every other category has at least 20.
+Categories and yes/no values held by fewer than 20 patients of the stage's cohort (all years). Every other category has at least 20. Ordinal inputs (pre-stroke mRS, mTICI) enter as one numeric term each, so their rare grades (for example pre-stroke mRS 3–5) add no term of their own but sit in a sparse part of that term.
 
 | Stage | Input | Category | Patients | In the model |
 |---|---|---|---|---|
@@ -98,4 +98,36 @@ Categories and yes/no values held by fewer than 20 patients of the stage's cohor
 
 ## Bootstrap internal validation
 
-Not yet run (plan: docs/registrations/bootstrap_optimism_plan.md).
+Plan: docs/registrations/bootstrap_optimism_plan.md (committed before the run). In each of 500 bootstrap samples of the development patients the whole pipeline was repeated: knot placement and number, imputation and scaling, and the penalty tuned by cross-validated log-loss. Optimism = performance on the bootstrap sample minus performance of the same model on the original patients; corrected = apparent − mean optimism. Percentiles: 2.5th–97.5th of the 500 optimism values.
+
+### Admission, mRS 0–2 (n = 1,225; 493 events)
+
+| Measure | Apparent | Mean optimism (Monte Carlo SE) | Optimism, 2.5th–97.5th percentile | Optimism-corrected |
+|---|---|---|---|---|
+| AUROC | 0.796 | +0.035 (±0.001) | +0.010 to +0.059 | 0.761 |
+| Brier score | 0.181 | -0.012 (±0.000) | -0.023 to -0.003 | 0.194 |
+| Log-loss | 0.542 | -0.029 (±0.001) | -0.059 to -0.006 | 0.571 |
+| Calibration-in-the-large | 0.000 | +0.001 (±0.003) | -0.116 to +0.124 | -0.001 |
+| Calibration slope | 1.389 | +0.296 (±0.004) | +0.114 to +0.465 | 1.092 |
+| Observed/expected | 1.000 | -0.000 (±0.001) | -0.063 to +0.060 | 1.000 |
+
+- Pipeline check: the refit reproduced the published settings (3 knots, C = 0.0091) and test-year estimates (largest difference 0). With grouped inner folds on the original data: 3 knots, C = 0.0091.
+- Knots chosen: 3 in 83%, 4 in 11%, 5 in 6% of samples. C: median 0.0052 (interquartile range 0.0052–0.0069); at an end of the grid in 0%. Samples hold on average 774 distinct patients, which may explain why they chose a somewhat stronger penalty than the original data.
+- Each development patient's risk across the 500 models: median width of its 95 % range 20.7 percentage points (90th percentile 32.9); wider than 10 points for 99% of patients.
+- Resamples with convergence warnings: 0.
+
+### Admission, death (n = 1,225; 269 events)
+
+| Measure | Apparent | Mean optimism (Monte Carlo SE) | Optimism, 2.5th–97.5th percentile | Optimism-corrected |
+|---|---|---|---|---|
+| AUROC | 0.826 | +0.037 (±0.001) | +0.009 to +0.063 | 0.790 |
+| Brier score | 0.130 | -0.009 (±0.000) | -0.022 to +0.002 | 0.139 |
+| Log-loss | 0.410 | -0.025 (±0.001) | -0.058 to +0.003 | 0.435 |
+| Calibration-in-the-large | 0.000 | -0.004 (±0.003) | -0.149 to +0.128 | 0.003 |
+| Calibration slope | 1.380 | +0.281 (±0.005) | +0.059 to +0.464 | 1.100 |
+| Observed/expected | 1.000 | -0.004 (±0.002) | -0.107 to +0.080 | 1.004 |
+
+- Pipeline check: the refit reproduced the published settings (3 knots, C = 0.0091) and test-year estimates (largest difference 0). With grouped inner folds on the original data: 3 knots, C = 0.0091.
+- Knots chosen: 3 in 86%, 4 in 10%, 5 in 4% of samples. C: median 0.0052 (interquartile range 0.0052–0.0069); at an end of the grid in 0%. Samples hold on average 774 distinct patients, which may explain why they chose a somewhat stronger penalty than the original data.
+- Each development patient's risk across the 500 models: median width of its 95 % range 14.8 percentage points (90th percentile 30.1); wider than 10 points for 75% of patients.
+- Resamples with convergence warnings: 0.
