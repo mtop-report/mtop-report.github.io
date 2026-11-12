@@ -68,7 +68,10 @@ This was found in a pre-specified dry run on synthetic registry data (MRS CLEAN,
 log-odds of death at 24 hours, learned from 4 of 1,235 patients) applied to every thrombolysed
 patient but none without IVT. The next
 model version should give an input a missing-value term only when at least 20 development patients
-lack it.
+lack it. Counted over all years (the data the deployed models were fitted on), 19 inputs from
+admission to day 7 have fewer than 20 patients without them (13 of them fewer than 10); over the
+development years alone the number can only be the same or larger. Counts, outcomes among the
+patients without each input, and rare categories: [model diagnostics](model_diagnostics.md).
 
 ## 5. Model development
 
@@ -94,6 +97,9 @@ lack it.
 - Sample size: with 33 pre-procedural predictors (92 regression parameters) the development data
   fall short of the Riley criteria (Standards tab); estimation is penalised (L2) and the expected
   shrinkage is reported.
+- Tuned settings of the reference ([model diagnostics](model_diagnostics.md)): 3 knots at every
+  stage and outcome except death at day 7 (4 knots), so the smallest option was chosen almost
+  everywhere; penalty C 0.009–0.037 on a grid of 10⁻⁴–10², none at either end of the grid.
 
 ## 6. Validation
 
