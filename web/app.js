@@ -18,8 +18,8 @@
     get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : v; } catch (e) { return d; } },
     set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* storage unavailable */ } },
   };
-  const navLang = (navigator.language || "").toLowerCase();
-  let lang = store.get("mtop.lang", navLang.startsWith("cs") || navLang.startsWith("sk") ? "cs" : "en");
+  // English unless the visitor has chosen Czech here (the choice is remembered)
+  let lang = store.get("mtop.lang", "en");
   if (!I18N[lang]) lang = "en";
   const t = () => I18N[lang];
   const L = (o) => (o && typeof o === "object" ? o[lang] || o.en : o);
