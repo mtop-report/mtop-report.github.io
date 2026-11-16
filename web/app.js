@@ -91,8 +91,8 @@
   };
   const S = {
     view: "calc",
-    current: "h24",
-    viewed: "h24",
+    current: "admission",     // opens before thrombectomy; later stages are added one by one
+    viewed: "admission",
     inputs: Object.assign({}, EXAMPLE),
     isExample: true,
     explainTarget: "good_outcome",
@@ -349,7 +349,7 @@
     const ex = h("div", { class: "example-bar" },
       S.isExample ? h("span", { class: "pill", text: t().example }) : null,
       h("span", { text: t().exampleNote }),
-      h("button", { class: "btn", type: "button", onclick: () => { S.inputs = Object.assign({}, EXAMPLE); S.isExample = true; S.current = "h24"; S.viewed = "h24"; renderCalc(); } }, t().resetExample));
+      h("button", { class: "btn", type: "button", onclick: () => { S.inputs = Object.assign({}, EXAMPLE); S.isExample = true; S.current = "admission"; S.viewed = "admission"; renderCalc(); } }, t().resetExample));
     left.appendChild(ex);
     for (const st of STAGES) left.appendChild(stageCard(st));
     readoutEl = h("div", { class: "readout", "aria-live": "polite" });
