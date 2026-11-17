@@ -166,3 +166,6 @@ identifiers, dates or hospital names. `tests/test_privacy.py` checks every publi
 Update policy (draft) on the Adaptive tab: quarterly observed-vs-expected monitoring, yearly
 discrimination and slope checks, intercept re-estimation on recent complete years, full refit with
 temporal validation when performance falls outside its validation interval.
+
+Version 1.1 is planned in [registrations/v1_1_plan.md](registrations/v1_1_plan.md) (17 November 2026,
+committed before any version 1.1 code); v1.0.0 stays the pre-specified primary model.
