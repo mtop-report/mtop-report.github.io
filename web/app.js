@@ -67,6 +67,21 @@
   for (const per of Object.values(B.models)) for (const e of Object.values(per)) {
     for (const Lm of Object.values(e.learners)) if (Lm.kind === "stack") Lm.bases = Lm.bases.map((b) => (b.same_as ? e.learners[b.same_as] : b));
   }
+  // Version 1.1 (docs/registrations/v1_1_plan.md): the calculator's reference model is version 1.1;
+  // version 1.0.0, the pre-specified primary model of the validation, stays selectable (B.archive).
+  // In validation.json "Logistic regression (splines)" is v1.0.0 and version 1.1 has its own key, so
+  // the calculator looks its learners up through vkey().
+  const REF_V11 = "Logistic regression (splines) · v1.1";
+  const REF_V100 = "Logistic regression (splines) · v1.0.0";
+  const ARCHIVE = (B.archive || {})["1.0.0"] || null;
+  if (ARCHIVE) {
+    for (const [st, per] of Object.entries(ARCHIVE.models)) for (const [tg, ls] of Object.entries(per)) {
+      const e = (B.models[st] || {})[tg];
+      if (e && ls[B.reference || "Logistic regression (splines)"]) e.learners[REF_V100] = ls[B.reference || "Logistic regression (splines)"];
+    }
+  }
+  const IS_V11 = !!ARCHIVE && !!(V.v1_1);
+  const vkey = (nm) => (IS_V11 && nm === (B.reference || "Logistic regression (splines)") ? REF_V11 : nm === REF_V100 ? (B.reference || "Logistic regression (splines)") : nm);
   const STAGES = B.stages.map((s) => s.id);
   const STAGE = Object.fromEntries(B.stages.map((s) => [s.id, s]));
   const FEAT = Object.fromEntries(B.features.map((f) => [f.key, f]));
@@ -222,7 +237,7 @@
   }
   function realityBin(stage, p, name) {
     const dep = ((V.deployed || {})[stage] || {}).good_outcome;
-    const lr = dep && dep.learners[name || dep.chosen];
+    const lr = dep && dep.learners[vkey(name || dep.chosen)];
     const bins = (lr && lr.reality_bins) || [];
     if (!bins.length) return null;
     let best = bins[0];
@@ -430,6 +445,7 @@
     candidate: () => ({ cls: "st-planned", text: tx("Candidate", "Kandidát") }),
     template: () => ({ cls: "st-planned", text: tx("In the template", "V šabloně") }),
     proposed: () => ({ cls: "st-planned", text: tx("Proposed", "Navrženo") }),
+    archived: () => ({ cls: "st-planned", text: tx("Archived", "Archiv") }),
   };
 
   function statusChip(kind) {
@@ -696,9 +712,9 @@
     const names = Object.keys(e.learners);
     const sel = h("select", { class: "sel", id: "calc-model", "aria-label": tx("Model", "Model") });
     sel.appendChild(h("option", { value: "", selected: S.calcModel ? null : true }, tx("Chosen by the pre-specified rule", "Zvolený předem stanoveným pravidlem")));
-    for (const nm of names) sel.appendChild(h("option", { value: nm, selected: S.calcModel === nm ? true : null }, mname(nm)));
+    for (const nm of names) sel.appendChild(h("option", { value: nm, selected: S.calcModel === nm ? true : null }, cname(nm)));
     sel.addEventListener("change", () => { S.calcModel = sel.value || null; updateReadout(); });
-    const now = pv.good.name === pv.death.name ? mname(pv.good.name) : `${mname(pv.good.name)} · ${tx("death", "úmrtí")}: ${mname(pv.death.name)}`;
+    const now = pv.good.name === pv.death.name ? cname(pv.good.name) : `${cname(pv.good.name)} · ${tx("death", "úmrtí")}: ${cname(pv.death.name)}`;
     return h("div", { class: "card card-pad model-chooser" },
       h("label", { class: "controls", for: "calc-model", style: "margin:0" }, h("span", { text: tx("Model", "Model") }), sel),
       h("p", { class: "note", style: "margin:6px 0 0", text: S.calcModel
@@ -718,7 +734,7 @@
         h("div", { class: "big" }, num(g * 100, 0), h("small", { text: lang === "cs" ? " %" : "%" })),
         h("div", { class: "big-label", text: t().headline })),
       h("div", { class: "side-stat" }, h("div", { class: "v", text: pct(d) }), h("div", { class: "l", text: t().deathLabel }),
-        st === "d7" ? h("div", { class: "l", text: t().lateDeaths }) : null)));
+        st === "d7" ? h("div", { class: "l", text: t().lateDeaths(((((V.splits.primary || {}).stages || {}).d7 || {}).targets || {}).death90 ? V.splits.primary.stages.d7.targets.death90.events_test : null) }) : null)));
 
     // scale
     const P = (v) => `${(Math.max(0, Math.min(1, v)) * 100).toFixed(2)}%`;
@@ -836,7 +852,7 @@
     const sp = V.splits[split || "primary"];
     for (const s2 of [st, "admission", "h24"]) {
       const r = ((sp.stages[s2] || {}).targets || {}).good_outcome;
-      if (r && r.models[name]) return { auc: r.models[name].auroc, stage: s2 };
+      if (r && r.models[vkey(name)]) return { auc: r.models[vkey(name)].auroc, stage: s2 };
     }
     return null;
   }
@@ -909,7 +925,7 @@
     const rows = [];
     for (const nm of Object.keys(e.learners)) {
       const p = nm === pv.good.name ? pv.good.p : predictStage(st, x, "good_outcome", nm).p;
-      rows.push({ name: mname(nm), detail: nm === e.chosen ? tx("chosen by the rule", "zvolen pravidlem") : "", p, auc: aucFor(st, nm), main: nm === pv.good.name });
+      rows.push({ name: cname(nm), detail: nm === e.chosen ? tx("chosen by the rule", "zvolen pravidlem") : nm === REF_V100 ? tx("archived", "archivní") : "", p, auc: aucFor(st, nm), main: nm === pv.good.name });
     }
     for (const [name, comp] of Object.entries(comps)) {
       let sum = 0, ok = 0, pts = null;
@@ -1498,6 +1514,8 @@
   // ================================================================== validation
   const MODEL_NAMES = {
     "Logistic regression (splines)": { en: "Regression with splines", cs: "Regrese se splajny" },
+    "Logistic regression (splines) · v1.1": { en: "Regression with splines, version 1.1", cs: "Regrese se splajny, verze 1.1" },
+    "Logistic regression (splines) · v1.0.0": { en: "Regression with splines, version 1.0.0 (archived)", cs: "Regrese se splajny, verze 1.0.0 (archiv)" },
     "Logistic regression": { en: "Linear regression", cs: "Lineární regrese" },
     "LightGBM": { en: "LightGBM", cs: "LightGBM" },
     "XGBoost": { en: "XGBoost", cs: "XGBoost" },
@@ -1538,7 +1556,9 @@
   const MODEL_COLORS = ["var(--c1)", "var(--c2)", "var(--c3)", "var(--c4)", "var(--c5)", "var(--c6)", "var(--c7)", "var(--c8)"];
   const GREY = "var(--faint)";
   const mname = (k) => L(MODEL_NAMES[k] || { en: k, cs: k });
-  const mcolor = (k) => { const i = CANDIDATES.indexOf(k); return i >= 0 && i < MODEL_COLORS.length ? MODEL_COLORS[i] : GREY; };
+  // in the calculator the reference learner is version 1.1 (in the validation tables it is v1.0.0)
+  const cname = (k) => (IS_V11 && k === REF ? mname(REF_V11) : mname(k));
+  const mcolor = (k) => { if (k === REF_V11) return "var(--ink)"; const i = CANDIDATES.indexOf(k); return i >= 0 && i < MODEL_COLORS.length ? MODEL_COLORS[i] : GREY; };
   const isComp = (k) => COMPARISON.includes(k);
   const dotOf = (k) => h("span", { class: isComp(k) ? "dot comp" : "dot", style: isComp(k) ? null : `background:${mcolor(k)}` });
   const pFmt = (p) => (p === null || p === undefined ? "–" : p < 0.001 ? "<0.001" : num(p, 3));
@@ -1549,6 +1569,46 @@
   const valSplit = () => V.splits[S.valSplit] || V.splits.primary;
   const valRes = (st, tg) => valSplit().stages[st].targets[tg];
 
+
+  // Version 1.1 (docs/registrations/v1_1_plan.md, results in docs/registrations/v1_1_results.md): what
+  // changed, its registered evaluation on 2005-2022 and the decisions; v1.0.0 stays the primary model here.
+  function v11Card(tg) {
+    const W = V.v1_1;
+    const card = h("div", { class: "card card-pad block" });
+    card.appendChild(h("div", { class: "chart-title", text: tx("Version 1.1 of the reference model", "Verze 1.1 referenčního modelu") }));
+    card.appendChild(h("p", { class: "note", text: tx(
+      `The calculator uses version 1.1 of the regression with splines (fingerprint ${B.fingerprint.slice(0, 12)}…). It was developed by a plan registered before any version 1.1 code, on exactly the data of v1.0.0: one missing-value indicator per input, and only for inputs missing in at least 20 patients; no input that is an exact function of others; a category under 20 patients joins its clinical parent; knots and penalty chosen by 5-fold cross-validation repeated 5 times. Elsewhere on this tab, "Regression with splines" is v1.0.0, the pre-specified primary model; version 1.1 has its own row. Its results on ${yearsOf("primary")} are not independent: version 1.1 was designed after they were known.`,
+      `Kalkulačka používá verzi 1.1 regrese se splajny (otisk ${B.fingerprint.slice(0, 12)}…). Vznikla podle plánu zaregistrovaného před jakýmkoli kódem verze 1.1, na přesně týchž datech jako v1.0.0: jeden indikátor chybění na vstup, a to jen u vstupů chybějících alespoň u 20 pacientů; žádný vstup, který je přesnou funkcí jiných; kategorie s méně než 20 pacienty se slučuje se svou klinickou nadřazenou; uzly a penalizace volené 5násobnou křížovou validací opakovanou 5krát. Jinde na této kartě je „Regrese se splajny“ verze 1.0.0, předem stanovený primární model; verze 1.1 má vlastní řádek. Její výsledky na letech ${yearsOf("primary")} nejsou nezávislé: verze 1.1 byla navržena, když už byly známy.`) }));
+    const rows = STAGES.map((st) => {
+      const r = ((W.rows || {})[st] || {})[tg];
+      if (!r) return null;
+      const arrow = (a, b, d = 3) => `${num(a, d)} → ${num(b, d)}`;
+      return [L(STAGE[st].title), `${r.coef_v100} → ${r.coef_v11}`, arrow(r.nested_auroc_v100, r.nested_auroc_v11), arrow(r.boot_auroc_v100, r.boot_auroc_v11),
+        num(r.boot_slope_v11, 2) + (r.slope_factor !== 1 ? tx(` (corrected × ${num(r.slope_factor, 2)})`, ` (korigováno × ${num(r.slope_factor, 2)})`) : ""),
+        arrow(r.temporal_auroc_v100, r.temporal_auroc_v11)];
+    }).filter(Boolean);
+    const cols = [t().stage, tx("Coefficients (deployed)", "Koeficienty (nasazený model)"), tx("AUROC, nested CV", "AUROC, vnořená CV"), tx("AUROC, bootstrap-corrected", "AUROC, bootstrap korekce"),
+      tx("Calibration slope, corrected", "Kalibrační sklon, korigovaný"), tx(`AUROC ${yearsOf("primary")} (not independent)`, `AUROC ${yearsOf("primary")} (není nezávislé)`)];
+    card.appendChild(h("div", { class: "table-scroll" }, h("table", { class: "data" },
+      h("thead", null, h("tr", null, cols.map((c) => h("th", { scope: "col", text: c })))),
+      h("tbody", null, rows.map((r) => h("tr", null, h("th", { scope: "row", text: r[0] }), ...r.slice(1).map((c) => h("td", { text: c }))))))));
+    card.appendChild(h("p", { class: "note", text: tx(
+      `${tg === "good_outcome" ? "mRS 0–2" : "Death"}; v1.0.0 → version 1.1. Nested cross-validation (5 folds × 3 repeats) and the bootstrap (${num(W.n_boot || 500)} resamples, optimism-corrected) use only 2005–2022.`,
+      `${tg === "good_outcome" ? "mRS 0–2" : "Úmrtí"}; v1.0.0 → verze 1.1. Vnořená křížová validace (5 foldů × 3 opakování) a bootstrap (${num(W.n_boot || 500)} vzorků, korekce optimismu) používají jen roky 2005–2022.`) }));
+    const D = W.decisions || {};
+    const li = (en, cs) => h("li", { text: tx(en, cs) });
+    const list = h("ul", { class: "v11-list" });
+    if (D.rule_a) list.appendChild(li(D.rule_a.en, D.rule_a.cs));
+    if (D.rule_b) list.appendChild(li(D.rule_b.en, D.rule_b.cs));
+    if (D.rule_c) list.appendChild(li(D.rule_c.en, D.rule_c.cs));
+    if (D.selection) list.appendChild(li(D.selection.en, D.selection.cs));
+    card.appendChild(list);
+    const repo = SITE.repo_url || "";
+    if (repo) card.appendChild(h("p", { class: "note" }, tx("Plan and results: ", "Plán a výsledky: "),
+      h("a", { href: `${repo}/blob/main/docs/registrations/v1_1_plan.md`, target: "_blank", rel: "noopener", text: tx("registered plan", "registrovaný plán") }), " · ",
+      h("a", { href: `${repo}/blob/main/docs/registrations/v1_1_results.md`, target: "_blank", rel: "noopener", text: tx("results", "výsledky") })));
+    return card;
+  }
   function renderValidation() {
     const root = $("#view-validation");
     root.replaceChildren();
@@ -1574,6 +1634,7 @@
       h("label", { for: "val-split" }, tx("Test years", "Testovací roky")), spSel, h("span", { text: tx("Charts", "Grafy") }), linesSeg));
 
     const tg = S.valTarget, st = S.valStage;
+    if (IS_V11) root.appendChild(v11Card(tg));
     const vt = valRes(st, tg);
     const models = vt.models;
     const cands = CANDIDATES.filter((k) => models[k]);
@@ -2233,6 +2294,7 @@
     if (SITE.contact) add(en ? "Contact" : "Kontakt", h("span", { class: "copyable", text: SITE.contact }));
     add(en ? "Version" : "Verze", h("span", { text: `${B.version} · ${B.generated}` }));
     if (B.fingerprint) add(en ? "Model fingerprint (SHA-256)" : "Otisk modelu (SHA-256)", h("span", { class: "copyable", title: B.fingerprint, text: `${B.fingerprint.slice(0, 16)}…` }));
+    if (ARCHIVE) add(en ? "Archived version" : "Archivní verze", h("span", { class: "copyable", title: ARCHIVE.fingerprint, text: `${ARCHIVE.version} · ${ARCHIVE.fingerprint.slice(0, 16)}…` }));
     if (SITE.repo_url) add(en ? "Code" : "Kód", h("a", { href: SITE.repo_url, target: "_blank", rel: "noopener", text: SITE.repo_url.replace(/^https?:\/\//, "") }));
     add(en ? "Reporting" : "Reporting", h("a", { href: "#reporting", onclick: (e) => { e.preventDefault(); goTo("reporting"); }, text: en ? "TRIPOD+AI checklist and other standards" : "Checklist TRIPOD+AI a další standardy" }));
     add(en ? "Intended use" : "Určení", h("span", { text: en ? "Research and teaching. Not a medical device; not for individual treatment decisions." : "Výzkum a výuka. Není zdravotnickým prostředkem; není určeno k rozhodování o léčbě jednotlivce." }));
@@ -2250,6 +2312,7 @@
   // ------------------------------------------------------------------ shared API for the other views
   window.MTOPApp = {
     DATA, B, V, E, X, SITE, M, XE, C, h, S, STAGES, STAGE, FEAT, TARGETS, MODEL_NAMES, LEARNERS, MRS_COLORS, REF, SPLITS, RECENT,
+    REF_V11, REF_V100, ARCHIVE, IS_V11, vkey, cname,
     t, L, tx, lang: () => lang, num, pct, pct100, signed, stageLabel, idx, mname, mcolor, statusChip, yearsOf, devYears, chosenOf, entryOf,
     predictStage, modelInputs, samples, threeBand, registerView, render, renderView, goTo, store,
     viewLabel: (id) => { const v = VIEWS[ALIASES[id] ? ALIASES[id][0] : id]; return v ? v.label() : id; },

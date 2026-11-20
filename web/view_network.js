@@ -466,11 +466,11 @@
     const tg = S.netTarget;
     const lnSel = h("select", { class: "sel", id: "lv-learner" });
     lnSel.appendChild(h("option", { value: "", selected: S.netLearner ? null : true }, tx("Calculator's model for each stage", "Model kalkulačky pro každou fázi")));
-    for (const k of ALL_LEARNERS) lnSel.appendChild(h("option", { value: k, selected: S.netLearner === k ? true : null }, A.mname(k)));
+    for (const k of ALL_LEARNERS) lnSel.appendChild(h("option", { value: k, selected: S.netLearner === k ? true : null }, A.cname(k)));
     lnSel.addEventListener("change", () => { S.netLearner = lnSel.value || null; render(root); });
     box.appendChild(h("div", { class: "controls" }, h("label", { for: "lv-learner" }, tx("Model", "Model")), lnSel));
     const fnoYrs = A.yearsOf("primary");
-    const ref = (st) => A.V.splits.primary.stages[st].targets[tg].models[netLearner(st, tg)];
+    const ref = (st) => A.V.splits.primary.stages[st].targets[tg].models[A.vkey(netLearner(st, tg))];
     const tbl = h("table", { class: "data" },
       h("thead", null, h("tr", null, [tx("Stage", "Fáze"), tx("Model", "Model"), "n", tx("Events", "Události"), "AUROC (95% CI)", "Brier", tx("Cal. intercept", "Kal. intercept"), tx("Cal. slope", "Kal. sklon"), `FNO ${fnoYrs}`].map((x) => h("th", { scope: "col", text: x })))),
       h("tbody", null, STAGES.map((st) => {
@@ -480,13 +480,13 @@
           : [h("td", { text: num(r.n) }), h("td", { text: num(r.events) }),
             h("td", null, `${num(r.auroc, 3)} `, h("span", { class: "ci", text: `${num(r.auroc_ci[0], 3)}–${num(r.auroc_ci[1], 3)}` })),
             h("td", { text: num(r.brier, 3) }), h("td", { text: signed(r.citl) }), h("td", { text: num(r.slope, 2) })];
-        return h("tr", null, h("th", { scope: "row", text: A.stageLabel(st) }), h("td", { text: A.mname(netLearner(st, tg)) }), ...cells, h("td", { text: ref(st) ? num(ref(st).auroc, 3) : "–" }));
+        return h("tr", null, h("th", { scope: "row", text: A.stageLabel(st) }), h("td", { text: A.cname(netLearner(st, tg)) }), ...cells, h("td", { text: ref(st) ? num(ref(st).auroc, 3) : "–" }));
       })));
     box.appendChild(h("div", { class: "table-scroll" }, tbl));
     // every learner at the selected stage
     const cmpRows = learnersOf(S.netStage, tg).map((nm) => {
       const r = NS.results[S.netStage][tg][nm];
-      const f = A.V.splits.primary.stages[S.netStage].targets[tg].models[nm];
+      const f = A.V.splits.primary.stages[S.netStage].targets[tg].models[A.vkey(nm)];
       return h("tr", { class: nm === A.chosenOf(S.netStage, tg) ? "chosen" : "" },
         h("th", { scope: "row" }, h("span", { class: "dot", style: `background:${A.mcolor(nm)}` }), A.mname(nm), nm === A.chosenOf(S.netStage, tg) ? h("span", { class: "tag", text: tx("calculator", "kalkulačka") }) : null),
         ...(r.insufficient ? [h("td", { colspan: 4, text: tx("too few patients or events", "příliš málo pacientů nebo událostí") })]

@@ -1,5 +1,12 @@
 # MTOP model card
 
+**Version 1.1.0** (fingerprint `841d810c28097e00d32ea2e0de6ea6f6b432f235a5a8e228ed7021b955556296`) refines the reference model on the data of v1.0.0
+([plan](registrations/v1_1_plan.md), [results](registrations/v1_1_results.md),
+[diagnostics](model_diagnostics_v1_1.md), [changelog](../CHANGELOG.md)). **Version 1.0.0**
+(fingerprint `77bb37a3…`) is archived and selectable in the app; it remains the pre-specified primary
+model of the first manuscript and of the external validations under way. Sections 1–3 and 8–9 apply
+to both; where they differ, the version is named.
+
 Structured after TRIPOD+AI (Collins et al., BMJ 2024). The full item-by-item checklist, with what
 is still to do, is on the app's **Standards** tab. Numbers come from `artifacts/public/validation.json`;
 `python -m mtop report` writes the complete tables to `reports/validation_report.md` (local).
@@ -66,12 +73,15 @@ where IVT was given, from thrombolysed patients). The models and their fingerpri
 This was found in a pre-specified dry run on synthetic registry data (MRS CLEAN, DOI
 10.5281/zenodo.18846304): where IVT was given is not recorded there, and the term for it (+2.18
 log-odds of death at 24 hours, learned from 4 of 1,235 patients) applied to every thrombolysed
-patient but none without IVT. The next
-model version should give an input a missing-value term only when at least 20 development patients
-lack it. Counted over all years (the data the deployed models were fitted on), 19 inputs from
-admission to day 7 have fewer than 20 patients without them (13 of them fewer than 10); over the
-development years alone the number can only be the same or larger. Counts, outcomes among the
-patients without each input, and rare categories: [model diagnostics](model_diagnostics.md).
+patient but none without IVT. In v1.0.0, counted over all years (the data the deployed models were
+fitted on), 19 inputs from admission to day 7 have fewer than 20 patients without them (13 of them
+fewer than 10). Counts, outcomes among the patients without each input, and rare categories:
+[model diagnostics](model_diagnostics.md).
+
+**Version 1.1** gives an input one missing-value term (v1.0.0 had one per model column, including
+copies for inputs spanning several columns), and only when at least 20 of the patients the model is
+fitted on lack it; otherwise a missing value is set to the median. The deployed model before
+thrombectomy has 17 missing-value terms instead of 45 ([diagnostics](model_diagnostics_v1_1.md)).
 
 ## 5. Model development
 
@@ -100,6 +110,24 @@ patients without each input, and rare categories: [model diagnostics](model_diag
 - Tuned settings of the reference ([model diagnostics](model_diagnostics.md)): 3 knots at every
   stage and outcome except death at day 7 (4 knots), so the smallest option was chosen almost
   everywhere; penalty C 0.009–0.037 on a grid of 10⁻⁴–10², none at either end of the grid.
+- **Version 1.1** ([plan](registrations/v1_1_plan.md), registered before any version 1.1 code;
+  amendments 1–2 committed before any change was evaluated) changes only the reference model, on
+  exactly the data, cohorts and split of v1.0.0:
+  - one missing-value term per input, only for inputs that at least 20 fitting patients lack (2.1–2.2);
+  - no input that is an exact function of others (2.3): pulse pressure, IV thrombolysis to
+    puncture, NIHSS change in 24 hours, glucose above 7.8 mmol/L, clock time of onset and early
+    neurological improvement are left out, their source inputs stay;
+  - a category needs at least 20 fitting patients for its own term (2.4): at 24 hours and day 7,
+    basilar + vertebral occlusion joins basilar;
+  - knots and penalty chosen by 5-fold cross-validation repeated 5 times, and a slope correction
+    where the optimism-corrected calibration slope is outside 0.9–1.1 (2.5): applied only to death
+    at 24 hours (× 1.102);
+  - the same penalised likelihood fitted by Newton–Raphson to convergence instead of L-BFGS.
+  - Coefficients of the deployed models: 91 → 59 before thrombectomy, 119 → 77 at the end of the
+    procedure, 127 → 76 at 24 hours, 135–148 → 82 on day 7. Every model chose 3 knots.
+  - Not adopted: an "update" model at 24 hours and day 7 (previous stage's log-odds, current NIHSS,
+    the stage's events), which gained +0.007 AUROC for mRS 0–2 in nested cross-validation where the
+    plan required +0.010.
 
 ## 6. Validation
 
@@ -134,6 +162,24 @@ patients without each input, and rare categories: [model diagnostics](model_diag
     (2.5th–97.5th percentile range), as expected with about 3–5 events per parameter (Riley criteria
     not met). Individual estimates are therefore uncertain; version 1.1 should have fewer
     parameters, more patients, or both. MTOP v1.0.0 is unchanged.
+- **Version 1.1** ([results](registrations/v1_1_results.md)). Decided on 2005–2022 only, against
+  the v1.0.0 specification refitted with the same solver; mRS 0–2:
+  - Nested cross-validation (5 folds × 3 repeats): AUROC 0.749 → 0.753 before thrombectomy,
+    0.781 → 0.789 at the end of the procedure, 0.894 → 0.893 at 24 hours, 0.902 → 0.915 on day 7;
+    log-loss lower at every stage and for both outcomes.
+  - Bootstrap (500 resamples, whole pipeline repeated, the resamples of the v1.0.0 bootstrap, which
+    it reproduces exactly): optimism-corrected AUROC 0.761 → 0.761, 0.796 → 0.797, 0.903 → 0.899 and
+    0.919 → 0.923; corrected calibration slopes of version 1.1 between 0.99 and 1.10. The median
+    width of a patient's risk range is unchanged (21 points before thrombectomy): fewer parameters
+    alone do not make individual estimates more certain; more patients (version 1.2) should.
+  - The registered rules: the simplifications are kept (before thrombectomy optimism-corrected AUROC
+    −0.0003 and log-loss −0.002; at 24 hours −0.003 and +0.004; limits −0.01 and +0.005).
+  - 2023–2025, reported but not independent (version 1.1 was designed after these results were
+    known): AUROC for mRS 0–2 0.809 → 0.816, 0.842 → 0.845, 0.883 → 0.907 and 0.884 → 0.920; for
+    death 0.734 → 0.742, 0.746 → 0.737, 0.859 → 0.836 and 0.805 → 0.813.
+  - The selection rule of amendment 1, applied again with version 1.1 as the reference, keeps the
+    reference at every stage and outcome; in nested cross-validation on all years version 1.1 has
+    AUROC 0.768 (v1.0.0: 0.762), above every candidate.
 
 ## 7. Deployed models
 
@@ -145,6 +191,13 @@ offered in the calculator, because the browser cannot repeat its random imputati
 missing inputs. The calculator uses the chosen model by default; the others can be selected, each
 with exact attributions computed in the browser. The model bundle carries a SHA-256 fingerprint
 shown on the About tab.
+
+Version 1.1 replaces only the reference (regression with splines), deployed the same way: knots and
+penalty from the 2005–2022 tuning, refitted on all 1,451 patients, intercept re-estimated on
+2023–2025 from out-of-fold estimates. The other learners are carried over from v1.0.0 unchanged
+(the stacking keeps its v1.0.0 reference base). The v1.0.0 reference is kept in the bundle's
+archive and can be selected in the calculator. The day-7 death estimate is labelled as limited
+evidence (6 deaths at that stage in 2023–2025).
 
 ## 8. Limitations
 
@@ -167,7 +220,13 @@ Update policy (draft) on the Adaptive tab: quarterly observed-vs-expected monito
 discrimination and slope checks, intercept re-estimation on recent complete years, full refit with
 temporal validation when performance falls outside its validation interval.
 
-Version 1.1 is planned in [registrations/v1_1_plan.md](registrations/v1_1_plan.md) (17 November 2026,
-committed before any version 1.1 code); amendment 1 (20 November 2026) splits it into version 1.1
-(specification changes on the data of v1.0.0) and version 1.2 (completed follow-up and the 2026
-patients). v1.0.0 stays the pre-specified primary model.
+Versions ([changelog](../CHANGELOG.md)):
+
+- **1.0.0** (fingerprint 77bb37a3…, Zenodo DOI 10.5281/zenodo.24396393): the pre-specified primary
+  model; archived and selectable in the app.
+- **1.1.0** (fingerprint 841d810c…): the refined reference model on the data of v1.0.0
+  ([plan](registrations/v1_1_plan.md) of 17 November 2026 with amendments 1 and 2 of
+  20 November 2026; [results](registrations/v1_1_results.md)).
+- **1.2** (planned, about April 2027): the frozen version 1.1 pipeline run unchanged on the
+  completed follow-up and the patients of 2026, after the 2026 patients have been used to check
+  versions 1.0.0 and 1.1.

@@ -131,6 +131,21 @@ years gave −0.03 and 0.769. Every learner is compared on the Adaptive tab.
 
 `python -m mtop report` writes the full tables to `reports/validation_report.md` (local only).
 
+### Version 1.1
+
+The calculator uses **version 1.1** of the reference model (fingerprint `841d810c…`); v1.0.0, the
+pre-specified primary model of the results above, is archived and selectable. Version 1.1 was
+developed by a [plan](docs/registrations/v1_1_plan.md) registered before any version 1.1 code, on
+exactly the data of v1.0.0: one missing-value term per input and only for inputs that at least 20
+patients lack, no input that is an exact function of others, at least 20 patients per category
+term, and knots and penalty chosen by repeated cross-validation. The reference model before
+thrombectomy has 59 coefficients instead of 91. On 2005–2022 (nested cross-validation and a
+500-resample bootstrap) discrimination is unchanged or slightly better and log-loss is lower at
+every stage; an "update" model for 24 hours and day 7 fell short of its pre-specified gain and was
+not adopted. On 2023–2025, which version 1.1 is not independent of, AUROC for mRS 0–2 was 0.816,
+0.845, 0.907 and 0.920 at the four stages (v1.0.0: 0.809, 0.842, 0.883, 0.884). Full results:
+[v1_1_results.md](docs/registrations/v1_1_results.md); changes: [CHANGELOG.md](CHANGELOG.md).
+
 ## How it works
 
 1. **Cleaning** (`src/mtop/clean.py`). Czech registry coding is mapped to standard variables.

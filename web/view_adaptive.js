@@ -51,7 +51,7 @@
     for (const s2 of STAGES.filter((x) => AD.results[x])) stSel.appendChild(h("option", { value: s2, selected: s2 === st ? true : null }, `${A.idx(s2) + 1} · ${A.L(STAGE[s2].title)}`));
     stSel.addEventListener("change", () => { S.adStage = stSel.value; render(root); });
     const lnSel = h("select", { class: "sel", id: "ad-learner" });
-    for (const k of LEARN) lnSel.appendChild(h("option", { value: k, selected: k === ln ? true : null }, `${A.mname(k)}${k === A.chosenOf(st, tg) ? tx(" (calculator)", " (kalkulačka)") : ""}`));
+    for (const k of LEARN) lnSel.appendChild(h("option", { value: k, selected: k === ln ? true : null }, `${A.mname(k)}${k === A.chosenOf(st, tg) ? (A.IS_V11 && k === A.REF ? tx(" (v1.0.0 specification)", " (specifikace v1.0.0)") : tx(" (calculator)", " (kalkulačka)")) : ""}`));
     lnSel.addEventListener("change", () => { S.adLearner = lnSel.value; render(root); });
     root.appendChild(h("div", { class: "controls" }, h("span", { text: A.t().outcome }), seg, h("label", { for: "ad-stage" }, A.t().stage), stSel,
       AD.learners ? h("label", { for: "ad-learner" }, tx("Model", "Model")) : null, AD.learners ? lnSel : null));
@@ -256,11 +256,16 @@
     const B = A.B;
     const card = h("div", { class: "card card-pad" });
     card.appendChild(h("div", { class: "chart-title", text: tx("Model versions", "Verze modelu"), style: "margin-bottom:10px" }));
+    const ARC = A.ARCHIVE;
     const items = [
       { v: `v${B.version}`, date: B.generated, status: "live",
-        text: tx(`Trained on ${A.E.period[0]}–${A.E.period[1]}, intercepts recalibrated to ${A.RECENT}. Fingerprint ${(B.fingerprint || "").slice(0, 12)}…`, `Trénováno na letech ${A.E.period[0]}–${A.E.period[1]}, intercepty rekalibrovány na ${A.RECENT}. Otisk ${(B.fingerprint || "").slice(0, 12)}…`) },
-      { v: "v1.1", date: tx("after 2026 follow-up", "po dokončení sledování 2026"), status: "proposed",
-        text: tx("Scheduled recalibration once 90-day outcomes of 2026 patients are complete.", "Plánovaná rekalibrace po dokončení 90denních výsledků pacientů z roku 2026.") },
+        text: ARC
+          ? tx(`Refined reference model on the data of v1.0.0 (registered plan with amendments), intercepts recalibrated to ${A.RECENT}. Fingerprint ${(B.fingerprint || "").slice(0, 12)}…`, `Zpřesněný referenční model na datech v1.0.0 (registrovaný plán s dodatky), intercepty rekalibrovány na ${A.RECENT}. Otisk ${(B.fingerprint || "").slice(0, 12)}…`)
+          : tx(`Trained on ${A.E.period[0]}–${A.E.period[1]}, intercepts recalibrated to ${A.RECENT}. Fingerprint ${(B.fingerprint || "").slice(0, 12)}…`, `Trénováno na letech ${A.E.period[0]}–${A.E.period[1]}, intercepty rekalibrovány na ${A.RECENT}. Otisk ${(B.fingerprint || "").slice(0, 12)}…`) },
+      ...(ARC ? [{ v: `v${ARC.version}`, date: ARC.generated, status: "archived",
+        text: tx(`Pre-specified primary model of the first validation; selectable in the calculator. Fingerprint ${ARC.fingerprint.slice(0, 12)}…`, `Předem stanovený primární model první validace; lze jej zvolit v kalkulačce. Otisk ${ARC.fingerprint.slice(0, 12)}…`) }] : []),
+      { v: ARC ? "v1.2" : "v1.1", date: tx("after 2026 follow-up (about April 2027)", "po dokončení sledování 2026 (asi duben 2027)"), status: "proposed",
+        text: tx("Scheduled recalibration with the completed follow-up and the patients of 2026, with the frozen version 1.1 pipeline.", "Plánovaná rekalibrace s doplněným sledováním a pacienty z roku 2026, se zmrazeným postupem verze 1.1.") },
       { v: "v2.0", date: tx("when data allow", "až to data dovolí"), status: "candidate",
         text: tx("Refit with new predictors (serum GFAP; imaging if recorded), external validation first.", "Přetrénování s novými prediktory (sérový GFAP; zobrazení, bude-li evidováno), nejprve externí validace.") },
     ];

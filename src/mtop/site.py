@@ -16,7 +16,7 @@ from .paths import PUBLIC, SITE, WEB
 
 JS_FILES = ["i18n.js", "model.js", "models_extra.js", "metrics.js", "charts.js", "app.js", "view_preprocessing.js",
             "view_adaptive.js", "view_network.js", "view_federated.js", "view_reporting.js", "view_roadmap.js", "boot.js"]
-ASSETS = ["icon-192.png", "icon-512.png", "icon-maskable-512.png", "apple-touch-icon.png", "mark.svg"]
+ASSETS = ["icon-192.png", "icon-512.png", "icon-maskable-512.png", "apple-touch-icon.png", "mark.svg", "favicon.ico"]
 
 # Instrument Sans (SIL OFL 1.1, web/assets/fonts/OFL.txt), self-hosted and inlined so the page makes
 # no third-party requests and works offline. Two subsets: Latin and Latin Extended (Czech).
@@ -42,6 +42,7 @@ PAGE_HEAD = """<!doctype html>
 (function(){try{var t=localStorage.getItem("mtop.theme");if(t!=="dark"&&t!=="light")t=matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";
 document.documentElement.setAttribute("data-theme",t);if(t==="dark")document.querySelector('meta[name="theme-color"]').setAttribute("content","#0a1120");}catch(e){}})();</script>
 <link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="favicon.ico" sizes="48x48">
 <link rel="icon" type="image/svg+xml" href="mark.svg">
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">

@@ -1320,3 +1320,7 @@ table.data.periods td.small-row { text-align: left; font-size: 12px; white-space
 .spark { display: block; width: 96px; height: 24px; margin-left: auto; overflow: visible; }
 .spark-line { fill: none; stroke: var(--c1); stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; }
 .spark-dot { fill: var(--c1); }
+
+/* ---------------------------------------------------------------- version 1.1 card (Validation tab) */
+.v11-list { margin: 10px 0 0; padding-left: 20px; display: grid; gap: 6px; }
+.v11-list li { color: var(--ink-2); font-size: 14px; line-height: 1.55; }

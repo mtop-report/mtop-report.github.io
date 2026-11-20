@@ -13,7 +13,7 @@ authors:
   - family-names: "Procházka"
     given-names: "Václav"
     affiliation: "University Hospital Ostrava"
-version: "1.0.0"
+version: "1.1.0"
 license: MIT
 repository-code: "https://github.com/mtop-report/mtop-report.github.io"
 url: "https://mtop-report.github.io/"
