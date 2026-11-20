@@ -217,4 +217,48 @@ artery (ACA) is rarer, and it already has none.
 
 ## 8. Amendments
 
-None yet.
+### Amendment 1 (20 November 2026, before any version 1.1 code)
+
+Committed before any version 1.1 code is written or any version 1.1 model is fitted.
+
+**What changes: the plan is split into two releases.**
+
+- **Version 1.1: specification only, on the data of v1.0.0.**
+  - It contains changes 2.1–2.5 (reference model), 3.1 (update model at 24 hours and day 7) and
+    4.2 (day-7 death label).
+  - It is developed and evaluated on exactly the data of v1.0.0: the same registry export, cohorts,
+    temporal split and cross-validation folds. No data are added or completed.
+  - Section 6, steps 1–4, apply as written. The deployed models are refitted on the same patients
+    as v1.0.0, with intercepts re-estimated as in change 4.1 on the most recent three complete years
+    (2023–2025).
+  - It is released after section 6, steps 1–4.
+- **Version 1.2: data update, with the frozen version 1.1 pipeline.**
+  - It contains changes 1.1 (complete the follow-up) and 1.2 (add the patients treated in 2026),
+    and the refit and recalibration of change 4.1 on these data.
+  - The frozen version 1.1 pipeline, including its tuning procedure, is run unchanged on the
+    updated data. No specification change is allowed in version 1.2.
+  - Data: all patients treated up to 31 December 2026. The data are frozen once the 90-day follow-up
+    of the last 2026 patients is complete (expected April 2027), and the SHA-256 of the frozen
+    export is published in this folder before any fit.
+  - The 2026 check (section 6, step 5) moves to version 1.2: before the 2026 patients join the fit,
+    versions 1.0.0 and 1.1 are scored on them. It stays descriptive.
+- **External validation (section 6, step 6).**
+  - Every version is frozen before any external result for it is seen.
+  - Version 1.1 joins an external analysis plan, as the secondary model next to the primary v1.0.0,
+    only if it is frozen before that analysis starts.
+  - Version 1.2 is validated on data that did not influence it.
+- **Release.** Each version gets its own fingerprint, changelog entry, model card and diagnostics,
+  and a GitHub release that creates a new version under the all-versions Zenodo DOI
+  (10.5281/zenodo.24396392). Earlier versions stay archived and selectable in the app.
+
+**Why.**
+
+- Comparing v1.0.0 with version 1.1 on identical data shows the effect of the specification changes
+  alone; when data and methods change together, their effects cannot be separated.
+- Version 1.1 no longer waits for the follow-up to be completed or for the 2026 outcomes, so it can
+  be frozen before external results arrive and be validated next to v1.0.0.
+- Version 1.2 is the scheduled recalibration that the app's update policy calls for.
+
+**What was known when this was written.** Nothing beyond section 2: no version 1.1 code exists, no
+new model has been fitted, no MR CLEAN Registry or trial data have been received, and no
+outcome-based result for patients treated in 2026 has been looked at.
