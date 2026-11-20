@@ -262,3 +262,87 @@ Committed before any version 1.1 code is written or any version 1.1 model is fit
 **What was known when this was written.** Nothing beyond section 2: no version 1.1 code exists, no
 new model has been fitted, no MR CLEAN Registry or trial data have been received, and no
 outcome-based result for patients treated in 2026 has been looked at.
+
+### Amendment 2 (20 November 2026, after the pipeline check, before any change is evaluated)
+
+Committed after the pipeline check of section 5, step 2, and before any version 1.1 change is
+evaluated: no version 1.1 model has been compared with v1.0.0 on any performance measure.
+
+**1. The pipeline check passes to numerical tolerance, not bit for bit.**
+
+- **Result.** With every change switched off, the code reproduces v1.0.0 from the same registry
+  export (SHA-256 `1a19f809ed688a3940c38ed4d0b1198f0a978b806f9ed7b50721777d980d50f7`):
+  - identical: the data checks, the cohorts and their events at every stage, the model columns, the
+    chosen knots and penalties, the knot positions, medians, missing-value indicators and scaling,
+    and the 2023–2025 test results of v1.0.0 (AUROC, Brier score, calibration-in-the-large and
+    slope, to 5 decimals);
+  - not identical: the fitted coefficients of the regression with splines and of the linear
+    regression differ from the published ones by at most 6 × 10⁻⁶, and two recent-era intercepts
+    differ in the sixth decimal. Every patient's estimate differs by at most 4 × 10⁻⁶ (0.0004
+    percentage points). The fingerprint, a hash of every digit, therefore differs.
+- **Why.** scikit-learn's L-BFGS solver stops when the gradient falls below 10⁻⁴, about 5 × 10⁻⁴ from
+  the exact optimum. Where it stops depends on the arithmetic of the machine that ran it. Here the
+  result did not change with scikit-learn 1.5–1.9, SciPy 1.14–1.18, NumPy 2.2–2.5, row order, thread
+  count or the processor instruction sets available, so the fingerprint cannot be reproduced on
+  another machine. The check can be repeated exactly on the machine that built v1.0.0.
+- **New criterion.** The check passes when every exported number other than the fitted coefficients
+  and recent-era intercepts is identical, the 2023–2025 results are identical to 5 decimals, and every
+  patient's estimate agrees within 10⁻⁵. It passed.
+- **Unchanged.** v1.0.0 in every comparison and in the app is the published bundle (fingerprint
+  77bb37a3…).
+
+**2. Version 1.1 fits the reference model with an exact solver.**
+
+- It minimises the same penalised likelihood (C × the sum of log-losses + half the squared
+  coefficients, intercept not penalised) by Newton–Raphson to convergence, instead of L-BFGS.
+- Why: with L-BFGS, the choice between two neighbouring penalties can depend on where the solver
+  stopped (seen while testing the code); the exact solver is also about twice as fast, which makes
+  500 bootstrap resamples at four stages feasible.
+- Check: at the v1.0.0 specification it chooses the same knots and penalty as v1.0.0 at all eight
+  stage–outcome pairs.
+- In section 6, the specification before each change is fitted with the same solver, so each
+  comparison measures the registered change alone.
+
+**3. How the plan is carried out (fixed before any evaluation).**
+
+- **Rules 2.2 and 2.4 count the patients a model is fitted on.** Inside cross-validation and the
+  bootstrap this is the training part, so the rules are part of the pipeline that is validated.
+- **Change 2.4 has an effect, contrary to section 3.2.** In 2005–2022, the basilar + vertebral
+  category has 16 patients at 24 hours and 15 on day 7. In those models it joins the basilar
+  category, its clinical parent. A category without a parent (vertebral or posterior cerebral artery)
+  keeps its term, as in the registry-level rule.
+- **Change 2.3 applies to the reference model** (section 3.2). The candidate learners keep their
+  inputs; their data and code are unchanged (amendment 1), so their v1.0.0 deployed models are
+  carried over unchanged.
+- **The selection rule of amendment 1 is applied again with the version 1.1 reference.** For the
+  temporal criterion, the candidates' 2005–2022 fits are regenerated with the v1.0.0 code. For the
+  nested cross-validation criterion, the v1.0.0 folds are used (all years, before thrombectomy,
+  mRS 0–2).
+- **Nested cross-validation on 2005–2022.** v1.0.0's nested cross-validation used all years, so "the
+  same folds" means the same generator: 5 folds × 3 repeats, seed 20261016, on each stage's
+  development patients, with inner tuning seeds 20261116 + k as in v1.0.0. Every specification is
+  evaluated on the same folds.
+- **The bootstrap at all four stages.** The 500 resamples are drawn once over the development
+  patients before thrombectomy (seed 2026, the resamples of the v1.0.0 bootstrap). Each later stage
+  uses the resampled patients who are eligible for it. All stages and specifications therefore share
+  the same resamples, and the update model's previous-stage model is fitted on the same resample.
+- **Repeated cross-validation (2.5).** Repeat r uses random state 20261016 + r, so repeat 1 is
+  v1.0.0's split. In the bootstrap, the folds keep a patient's copies together, as in v1.0.0.
+- **Slope correction (2.5).** The factor is the optimism-corrected calibration slope from the
+  2005–2022 bootstrap of the specification with change 2.5. If it is outside 0.9–1.1, it is applied
+  to that stage and outcome's 2005–2022 model and to its deployed model, each with the intercept
+  re-estimated on the patients it is fitted on.
+- **Update model (3.1).** LP is the log-odds of the version 1.1 model chosen at the previous stage,
+  without the recent-era intercept, cross-fitted over 5 stratified folds with that model's knots and
+  penalty fixed. The previous stage for day 7 is the model chosen at 24 hours. Missing event inputs
+  follow changes 2.1–2.2. "The NIHSS alone" is the published points-to-risk benchmark ("NIHSS 24 h",
+  "NIHSS day 7").
+- **Changes 2.1–2.4 are evaluated together as one step**, as section 5 lists them. Nested
+  cross-validation also reports each change's cumulative effect, for the record.
+- **Deployment (4.1 under amendment 1)** follows v1.0.0: knots and penalty from the 2005–2022
+  tuning, refitted on all patients of 2005–2025, recent-era intercept from out-of-fold estimates in
+  2023–2025.
+
+**What was known when this was written.** The pipeline check above, and the knots and penalties that
+the version 1.1 specifications choose in 2005–2022 (seen while testing the code). No performance
+measure of any version 1.1 model has been computed.
