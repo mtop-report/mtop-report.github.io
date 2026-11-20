@@ -58,6 +58,8 @@ def test_no_identifiers_or_dates():
         data = json.loads(raw)
         if isinstance(data, dict) and "generated" in data:
             allowed.add(data["generated"])
+        if isinstance(data, dict):   # build dates of archived model versions (model_bundle.json "archive")
+            allowed |= {a.get("generated") for a in (data.get("archive") or {}).values() if isinstance(a, dict)}
         assert dates <= allowed, f"unexpected dates in {name}: {dates - allowed}"
 
 

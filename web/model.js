@@ -203,18 +203,26 @@
 
   /** Expanded row of the spline regression: base columns, then each knotted variable's terms;
    *  `owner[j]` is the base column each expanded column belongs to. */
-  function splineExpand(spec, base) {
+  function splineExpand(spec, x) {
+    // version 1.1 (src/mtop/reference.py): `from` lists, for each base column, the stage-row positions
+    // summed into it, so a model can leave inputs out and join a small category to its parent
+    let base = x;
+    let own0 = x.map((_, i) => i);
+    if (spec.from) {
+      base = spec.from.map((src) => (src.some((i) => miss(x[i])) ? NaN : src.reduce((a, i) => a + Number(x[i]), 0)));
+      own0 = spec.from.map((src) => src[0]);
+    }
     const row = base.slice();
-    const owner = base.map((_, i) => i);
+    const owner = own0.slice();
     for (const [v, knots] of Object.entries(spec.knots)) {
       const i = spec.base_columns.indexOf(v);
-      for (const z of rcsTerms(base[i], knots)) { row.push(z); owner.push(i); }
+      for (const z of rcsTerms(base[i], knots)) { row.push(z); owner.push(own0[i]); }
     }
     // interactions (LR + interactions): products of centred inputs, owned half by each input
     for (const [ia, ib, ca, cb] of spec.products || []) {
       const a = base[ia], b = base[ib];
       row.push(miss(a) || miss(b) ? NaN : (Number(a) - ca) * (Number(b) - cb));
-      owner.push([ia, ib]);
+      owner.push([own0[ia], own0[ib]]);
     }
     return { row, owner };
   }
