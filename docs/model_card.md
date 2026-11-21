@@ -224,7 +224,7 @@ Versions ([changelog](../CHANGELOG.md)):
 
 - **1.0.0** (fingerprint 77bb37a3…, Zenodo DOI 10.5281/zenodo.24396393): the pre-specified primary
   model; archived and selectable in the app.
-- **1.1.0** (fingerprint 841d810c…): the refined reference model on the data of v1.0.0
+- **1.1.0** (fingerprint 841d810c…, Zenodo DOI 10.5281/zenodo.24420424): the refined reference model on the data of v1.0.0
   ([plan](registrations/v1_1_plan.md) of 17 November 2026 with amendments 1 and 2 of
   20 November 2026; [results](registrations/v1_1_results.md)).
 - **1.2** (planned, about April 2027): the frozen version 1.1 pipeline run unchanged on the

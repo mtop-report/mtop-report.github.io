@@ -4,9 +4,10 @@ Every published model version has its own fingerprint (SHA-256 of the models in
 `artifacts/public/model_bundle.json`), shown on the app's About tab. Earlier versions stay archived
 and selectable in the app, so every published result can be reproduced.
 
-## 1.1.0 (planned release: November 2026)
+## 1.1.0 (21 November 2026)
 
-Fingerprint `841d810c28097e00d32ea2e0de6ea6f6b432f235a5a8e228ed7021b955556296`. Plan: [docs/registrations/v1_1_plan.md](docs/registrations/v1_1_plan.md),
+Fingerprint `841d810c28097e00d32ea2e0de6ea6f6b432f235a5a8e228ed7021b955556296`. Zenodo DOI
+[10.5281/zenodo.24420424](https://doi.org/10.5281/zenodo.24420424); all versions: 10.5281/zenodo.24396392. Plan: [docs/registrations/v1_1_plan.md](docs/registrations/v1_1_plan.md),
 registered before any version 1.1 code, with amendments 1 and 2 committed before any change was
 evaluated. Results: [docs/registrations/v1_1_results.md](docs/registrations/v1_1_results.md).
 
