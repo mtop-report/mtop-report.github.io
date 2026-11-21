@@ -176,8 +176,8 @@ def compare(sites, co, stage: str, target: str, p: GBDTParams, folds: int, seed:
             for m in MODELS:
                 entry[m] = _metrics(y, P[m], ci[m])
             for m in ("network", "adapted"):
-                dl = ci[m]["delta_auroc_vs_ref"]               # alone - model
-                entry[f"gain_{m}"] = {"mean": _r(-dl["mean"]), "ci": [_r(-dl["ci"][1]), _r(-dl["ci"][0])],
+                dl = ci[m]["delta_auroc_vs_ref"]               # model - alone (positive: better than alone)
+                entry[f"gain_{m}"] = {"mean": _r(dl["mean"]), "ci": [_r(dl["ci"][0]), _r(dl["ci"][1])],
                                       "p": _r(dl["p_two_sided"], 3)}
         else:
             for m in MODELS:

@@ -335,3 +335,16 @@ def test_future_columns_are_optional_and_never_model_inputs(tmp_path):
     for stage in ("admission", "d7"):
         (_, B1, _), (_, B2, _) = a.cohort(stage, TARGET), b.cohort(stage, TARGET)
         assert np.array_equal(B1, B2)                                     # same model inputs
+
+
+def test_published_gains_point_the_same_way_as_the_aurocs():
+    """A centre's gain is the network (or adapted) model minus the centre alone: positive means better."""
+    from mtop import paths
+    f = json.loads((paths.ROOT / "artifacts" / "public" / "federated.json").read_text())
+    for res in f["outcomes"].values():
+        for e in res["per_centre"]:
+            for m in ("network", "adapted"):
+                g, d = e[f"gain_{m}"], e[m]["auroc"] - e["alone"]["auroc"]
+                assert g["ci"][0] <= g["mean"] <= g["ci"][1]
+                if abs(d) > 0.005:
+                    assert g["mean"] * d > 0, (e["id"], m, g["mean"], d)
