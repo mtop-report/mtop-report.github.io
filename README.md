@@ -146,6 +146,16 @@ not adopted. On 2023–2025, which version 1.1 is not independent of, AUROC for 
 0.845, 0.907 and 0.920 at the four stages (v1.0.0: 0.809, 0.842, 0.883, 0.884). Full results:
 [v1_1_results.md](docs/registrations/v1_1_results.md); changes: [CHANGELOG.md](CHANGELOG.md).
 
+### MTOP ordinal
+
+A separate proportional-odds model of all seven 90-day mRS grades (MTOP ordinal 1.0.0), developed
+under its own [plan](docs/registrations/ordinal_plan.md) registered before any of its code. By the
+plan's rules it now splits the calculator's independent and dependent bands into single grades
+(the headline estimates still come from the binary models), and it goes to external validation as
+a secondary model. Its implied P(death) is poorly calibrated at 24 hours and day 7. Results:
+[ordinal_results.md](docs/registrations/ordinal_results.md); model card:
+[model_card_ordinal.md](docs/model_card_ordinal.md); `python -m mtop.ordinal_run` reruns every step.
+
 ## How it works
 
 1. **Cleaning** (`src/mtop/clean.py`). Czech registry coding is mapped to standard variables.

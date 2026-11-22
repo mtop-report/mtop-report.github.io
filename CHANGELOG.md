@@ -4,6 +4,31 @@ Every published model version has its own fingerprint (SHA-256 of the models in
 `artifacts/public/model_bundle.json`), shown on the app's About tab. Earlier versions stay archived
 and selectable in the app, so every published result can be reproduced.
 
+## MTOP ordinal 1.0.0 (22 November 2026)
+
+A new, separate model: a proportional-odds regression of all seven 90-day mRS grades at each stage,
+with the inputs of the v1.1 reference. Fingerprint `78436c388af37724da897a7d29e95f103b12b2a3a8c5de47d30b4286b393ea46`
+(`artifacts/public/ordinal_bundle.json`). Plan: [docs/registrations/ordinal_plan.md](docs/registrations/ordinal_plan.md),
+committed before any of its code, with amendment 1 committed before any result. Results:
+[docs/registrations/ordinal_results.md](docs/registrations/ordinal_results.md); model card:
+[docs/model_card_ordinal.md](docs/model_card_ordinal.md).
+
+- **The binary models (1.1.0) are unchanged** and keep the headline estimates of independence and death.
+- **Calculator (rule O1):** the independent and dependent bands are now split into single grades by
+  the ordinal model's shares instead of the v1.1 layer (lower nested cross-validated ranked
+  probability score at both primary stages).
+- **External validation (rule O2):** frozen and registered as a secondary model next to v1.0.0
+  (primary) and v1.1 ([external_validation_models.md](docs/registrations/external_validation_models.md)).
+- **Slope correction (rule O3):** day 7 only (× 0.887).
+- **Validation tab:** an MTOP ordinal card (development years and the 2023–2025 test, which is not
+  independent). **Multicentre tab:** the validation tool also evaluates the ordinal model and writes
+  its results, with its own fingerprint, into the results file.
+- **Known weakness:** death. The implied P(death) is poorly calibrated at 24 hours and day 7, and the
+  recent-era threshold shift over-predicts it in 2023–2025; this is why the binary models keep the
+  headline estimates.
+- A comparison-only ordinal LightGBM did slightly better at the end of the procedure in both the
+  nested cross-validation and the 2023–2025 test; it is not deployed.
+
 ## 1.1.0 (21 November 2026)
 
 Fingerprint `841d810c28097e00d32ea2e0de6ea6f6b432f235a5a8e228ed7021b955556296`. Zenodo DOI

@@ -7,6 +7,8 @@
 model of the first manuscript and of the external validations under way. Sections 1–3 and 8–9 apply
 to both; where they differ, the version is named.
 
+**MTOP ordinal 1.0.0** (fingerprint `78436c38…`), a separate proportional-odds model of all seven mRS grades, splits the calculator's bands into grades; it has its own [model card](model_card_ordinal.md).
+
 Structured after TRIPOD+AI (Collins et al., BMJ 2024). The full item-by-item checklist, with what
 is still to do, is on the app's **Standards** tab. Numbers come from `artifacts/public/validation.json`;
 `python -m mtop report` writes the complete tables to `reports/validation_report.md` (local).
