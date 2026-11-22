@@ -400,6 +400,75 @@ def _ordinal_key(y, P) -> dict:
             "death_auroc": _auc(y == 6, P[:, 6]), "uw_diff": float(np.mean(P @ UW) - np.mean(UW[y]))}
 
 
+def ordinal_tool_check(out: Path, preds: dict) -> dict:
+    """The app's MTOP ordinal estimates against an independent computation: the deployed Python model
+    (artifacts/private/ordinal), its own feature construction (features.design_matrix) and the
+    bundle's averaging values paired as the app pairs them (mrsclean_v11.python_estimates_v11);
+    and, without averaging, the model's own missing-value handling."""
+    import pickle
+
+    from . import mrsclean2
+    from .config import features
+    from .features import column_to_feature, design_matrix
+    from .ordinal import probs
+    recs = json.loads((out / "run" / "records.json").read_text())
+    bundle = json.loads((paths.PUBLIC / "model_bundle.json").read_text())
+    ob = json.loads((paths.PUBLIC / "ordinal_bundle.json").read_text())
+    imp = bundle["impute"]
+    req_ivt = {f.key for f in features() if f.spec.get("requires_ivt")}
+    keys = [f.key for f in features() if f.type != "derived"]
+    perms = {k: mrsclean2._perm(len(v["values"]), k) for k, v in imp.items()}
+    P = preds["preds"]
+    res, worst = {}, 0.0
+    for st in ("admission", "procedure", "h24"):
+        m = pickle.loads((paths.PRIVATE / "ordinal" / f"deployed_{st}.pkl").read_bytes())
+        shift = ob["models"][st]["spec"]["theta_shift"]
+        used = set(column_to_feature(st).values())
+        pos, rows, owner, plain = [], [], [], []
+        for i, x0 in enumerate(recs):
+            if x0.get("mrs90") is None or (st != "admission" and x0.get("tici") is None) or (st == "h24" and x0.get("nihss_24h") is None):
+                continue
+            unk = [k for k in imp if k in used and x0.get(k) is None and not (k in req_ivt and x0.get("ivt") == 0)]
+            n = max((len(imp[k]["values"]) for k in unk), default=1)
+            for s_ in range(n):
+                x = {k: x0.get(k) for k in keys}
+                for k in unk:
+                    vals = imp[k]["values"]
+                    x[k] = vals[perms[k][s_ % len(vals)]]
+                if x.get("ivt") == 0:
+                    x["onset_to_ivt"] = None
+                    x["ivt_external"] = 0.0
+                rows.append(x)
+                owner.append(len(pos))
+            x = {k: x0.get(k) for k in keys}
+            if x.get("ivt") == 0:
+                x["onset_to_ivt"] = None
+                x["ivt_external"] = 0.0
+            plain.append(x)
+            pos.append(i)
+
+        def frame(rr):
+            df = pd.DataFrame(rr)
+            for f in features():
+                if f.type == "derived" or f.key not in df:
+                    continue
+                if f.type == "categorical":
+                    df[f.key] = df[f.key].astype(object).where(df[f.key].notna(), None)
+                else:
+                    df[f.key] = pd.to_numeric(df[f.key], errors="coerce").astype(float)
+            return design_matrix(df, st)
+        Q = probs(m.theta + shift, m.lp(frame(rows)))
+        owner = np.asarray(owner)
+        Qa = np.column_stack([np.bincount(owner, weights=Q[:, k]) / np.bincount(owner) for k in range(7)])
+        Qi = probs(m.theta + shift, m.lp(frame(plain)))
+        app = np.array([P[str(i)][st]["ord"] for i in pos])
+        app_i = np.array([P[str(i)][st]["ord_indicators"] for i in pos])
+        d, di = float(np.max(np.abs(app - Qa))), float(np.max(np.abs(app_i - Qi)))
+        worst = max(worst, d, di)
+        res[st] = {"n": len(pos), "averaging_max_abs_difference": d, "indicators_max_abs_difference": di}
+    return {"stages": res, "max_abs_difference": worst, "passes": bool(worst <= 1e-7)}
+
+
 def ordinal_results(out: Path, preds: dict, n_boot: int = 2000, seed: int = 2026) -> dict:
     """MTOP ordinal on MRS CLEAN (ordinal plan, amendment 2): a pipeline check on synthetic data."""
     from .ordinal import probs
@@ -650,7 +719,8 @@ def main(argv=None) -> None:
     a = ap.parse_args(argv)
     if a.cmd == "ordinal":
         from .export import clean_json
-        res = clean_json(ordinal_results(a.out, load_predictions(a.predictions)))
+        pr = load_predictions(a.predictions)
+        res = clean_json({"tool_check": ordinal_tool_check(a.out, pr), **ordinal_results(a.out, pr)})
         rep = paths.REPORTS / "mrs_clean"
         rep.mkdir(parents=True, exist_ok=True)
         (rep / "ordinal_results.json").write_text(json.dumps(res, indent=1))
