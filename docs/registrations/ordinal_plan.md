@@ -288,3 +288,29 @@ decision rule.
     95 % Wald interval.
 12. **Computation:** the solver's per-patient arithmetic runs through numba when it is installed;
     a unit test requires it to match the plain NumPy code to 10⁻⁹ (relative).
+
+### Amendment 2 (22 November 2026): the MRS CLEAN pipeline check
+
+Written after MTOP ordinal 1.0.0 was frozen (fingerprint `78436c38…`, commit c8f4949) and after the
+MR CLEAN team agreed to the run (by telephone, 22 November 2026), before the ordinal model has been
+applied to MRS CLEAN. It sets out what section 12's check computes; it changes nothing in the model.
+
+1. **Data:** the MRS CLEAN primary template of the earlier MTOP runs (same conversion, same
+   eligibility as "Validate on your data"): patients with a recorded 90-day mRS, at the stages the
+   file supports (before thrombectomy, end of procedure, 24 hours; day 7 is not recorded).
+2. **Tool:** the app's own predictor (scripts/mtop_predict_records.js on the built site, the code of
+   "Validate on your data"), unknown inputs averaged as in the app. Sensitivity: the model's own
+   missing-value indicators instead of averaging.
+3. **Distributions:** MTOP ordinal as deployed (recent-era shift applied); the calculator's
+   distribution (v1.1 bands split by the ordinal model's shares); the previous calculator
+   distribution (v1.1 bands split by the layer).
+4. **Comparators:** MR PREDICTS (published formula with the collateral score, Registry intercepts) on
+   the patients it applies to (puncture within 6.5 hours, complete inputs), before thrombectomy;
+   MR PREDICTS@24H at 24 hours on the patients with complete inputs.
+5. **Measures:** those of section 6 (ranked probability score, ordinal log-loss, generalised
+   concordance, implied dichotomies with calibration-in-the-large and slope, mean predicted against
+   observed share of each grade, utility-weighted mRS), with 2,000 paired bootstrap resamples (seed
+   2026) for intervals and differences.
+6. **Reading:** a check that the pipeline runs and of the order of magnitude of the results on
+   synthetic data, not evidence of validity. The results go to the MR CLEAN team before any other
+   use, stay outside the repository, and change nothing in MTOP ordinal 1.0.0.
