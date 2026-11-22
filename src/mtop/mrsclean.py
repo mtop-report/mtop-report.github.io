@@ -382,6 +382,92 @@ def mtop_results(out: Path, preds: dict, n_boot: int = 2000, seed: int = 2026) -
     return res
 
 
+def _auc(y, s):
+    from scipy.stats import rankdata
+    y = np.asarray(y, bool)
+    n1, n0 = int(y.sum()), int((~y).sum())
+    if n1 == 0 or n0 == 0:
+        return float("nan")
+    r = rankdata(s)
+    return float((r[y].sum() - n1 * (n1 + 1) / 2) / (n1 * n0))
+
+
+def _ordinal_key(y, P) -> dict:
+    """The measures carried through the bootstrap (fast versions of ordinal_run's)."""
+    from .ordinal_run import UW, gen_c, ologloss, rps
+    return {"rps": rps(y, P), "ologloss": ologloss(y, P), "genc_uw": gen_c(P @ UW, y),
+            "genc_grade": gen_c(-(P @ np.arange(7)), y), "mrs02_auroc": _auc(y <= 2, P[:, :3].sum(1)),
+            "death_auroc": _auc(y == 6, P[:, 6]), "uw_diff": float(np.mean(P @ UW) - np.mean(UW[y]))}
+
+
+def ordinal_results(out: Path, preds: dict, n_boot: int = 2000, seed: int = 2026) -> dict:
+    """MTOP ordinal on MRS CLEAN (ordinal plan, amendment 2): a pipeline check on synthetic data."""
+    from .ordinal import probs
+    from .ordinal_run import cum_to_P, dist_measures, flat
+    df = typed(out)
+    y_all = df["mrs90"].to_numpy(float)
+    P = preds["preds"]
+    fr = comparator_frames(out)
+    comp = {"admission": "mr_predicts", "h24": "mr_predicts_24h"}
+    lp_c = {"mr_predicts": mrpredicts.lp_mr_predicts(**{k: fr["mr_predicts"][0][k].to_numpy() for k in fr["mr_predicts"][0]}),
+            "mr_predicts_24h": mrpredicts.lp_mr_predicts_24h(**{k: fr["mr_predicts_24h"][0][k].to_numpy() for k in fr["mr_predicts_24h"][0]})}
+    labels = {"ord": "MTOP ordinal", "calc": "Calculator: v1.1 bands, ordinal shares", "layer": "Previous calculator: v1.1 bands, layer",
+              "ord_indicators": "MTOP ordinal, own missing-value indicators"}
+    res = {"n_boot": n_boot, "seed": seed, "excluded_comparators": fr["excluded"], "stages": {}}
+    for st in ("admission", "procedure", "h24"):
+        idx = np.array([i for i in range(len(df)) if P[str(i)][st] is not None and not np.isnan(y_all[i])])
+        y = y_all[idx].astype(int)
+        D = {k: np.array([P[str(i)][st][k] for i in idx], float) for k in labels if P[str(idx[0])][st].get(k) is not None}
+        lp_ind = np.array([P[str(i)][st]["lp_indicators"] for i in idx], float)
+        r = {"n": int(len(idx)), "grades": [int(np.sum(y == g)) for g in range(7)], "models": {}}
+        for k, Pm in D.items():
+            r["models"][labels[k]] = dist_measures(y, Pm, lp_ind if k == "ord_indicators" else None)
+        rng = np.random.default_rng(seed)
+        B = {k: [] for k in D}
+        for _ in range(n_boot):
+            b = rng.integers(0, len(y), len(y))
+            for k, Pm in D.items():
+                B[k].append(_ordinal_key(y[b], Pm[b]))
+        r["ci"] = {labels[k]: {m: [float(np.nanpercentile([v[m] for v in B[k]], q)) for q in (2.5, 97.5)] for m in B[k][0]} for k in B}
+        pt = {k: _ordinal_key(y, Pm) for k, Pm in D.items()}
+        r["differences"] = {}
+        for a, b_ in (("calc", "layer"), ("ord", "layer"), ("ord", "calc")):
+            if a in D and b_ in D:
+                r["differences"][f"{labels[a]} − {labels[b_]}"] = {
+                    m: {"estimate": pt[a][m] - pt[b_][m],
+                        "ci": [float(np.nanpercentile([u[m] - v[m] for u, v in zip(B[a], B[b_])], q)) for q in (2.5, 97.5)]}
+                    for m in pt[a]}
+        if st in comp:
+            cm = comp[st]
+            cidx = fr[cm][0].index.to_numpy()
+            pos = {i: j for j, i in enumerate(idx)}
+            sel = [k for k, i in enumerate(cidx) if i in pos]
+            keep = np.array([pos[cidx[k]] for k in sel])
+            Pc = cum_to_P(mrpredicts.cumulative(lp_c[cm][sel], cm, "registry"))
+            yy = y[keep]
+            sub = {"comparator": cm, "n": int(len(yy)), "models": {}}
+            Dc = {"ord": D["ord"][keep], "calc": D["calc"][keep], cm: Pc}
+            name = {"ord": labels["ord"], "calc": labels["calc"], cm: "MR PREDICTS (published, with collaterals)" if cm == "mr_predicts" else "MR PREDICTS@24H (published)"}
+            for k, Pm in Dc.items():
+                sub["models"][name[k]] = dist_measures(yy, Pm, lp_c[cm][sel] * -1 if k == cm else None)
+            rng = np.random.default_rng(seed)
+            Bc = {k: [] for k in Dc}
+            for _ in range(n_boot):
+                b = rng.integers(0, len(yy), len(yy))
+                for k, Pm in Dc.items():
+                    Bc[k].append(_ordinal_key(yy[b], Pm[b]))
+            ptc = {k: _ordinal_key(yy, Pm) for k, Pm in Dc.items()}
+            sub["ci"] = {name[k]: {m: [float(np.nanpercentile([v[m] for v in Bc[k]], q)) for q in (2.5, 97.5)] for m in Bc[k][0]} for k in Bc}
+            sub["differences"] = {f"{name[a]} − {name[cm]}": {
+                m: {"estimate": ptc[a][m] - ptc[cm][m],
+                    "ci": [float(np.nanpercentile([u[m] - v[m] for u, v in zip(Bc[a], Bc[cm])], q)) for q in (2.5, 97.5)]}
+                for m in ptc[a]} for a in ("ord", "calc")}
+            r["vs_comparator"] = sub
+        res["stages"][st] = r
+        print(f"  ordinal on MRS CLEAN, {st}: {len(idx)} patients", flush=True)
+    return res
+
+
 SUBGROUPS = {
     # the plan's subgroups, standing in for the source cohorts (the file has no cohort variable)
     "Puncture within 6.5 h": lambda d: d["onset_to_puncture"] <= 390,
@@ -555,10 +641,21 @@ def main(argv=None) -> None:
     sg.add_argument("--variant", nargs=2, action="append", metavar=("NAME", "PREDICTIONS"), default=[])
     sg.add_argument("--out", type=Path, default=paths.RAW / "mrs_clean")
     sg.add_argument("--label", default="", help="suffix of the result file, e.g. postfix")
+    od = sub.add_parser("ordinal", help="MTOP ordinal from the app's predictions (mode ordinal): ordinal plan, amendment 2")
+    od.add_argument("predictions", type=Path)
+    od.add_argument("--out", type=Path, default=paths.RAW / "mrs_clean")
     ph = sub.add_parser("posthoc-ivt-external", help="POST HOC: IVT location filled in (records, or results with --results)")
     ph.add_argument("--results", nargs=2, metavar=("PRIMARY_PREDICTIONS", "POSTHOC_PREDICTIONS"))
     ph.add_argument("--out", type=Path, default=paths.RAW / "mrs_clean")
     a = ap.parse_args(argv)
+    if a.cmd == "ordinal":
+        from .export import clean_json
+        res = clean_json(ordinal_results(a.out, load_predictions(a.predictions)))
+        rep = paths.REPORTS / "mrs_clean"
+        rep.mkdir(parents=True, exist_ok=True)
+        (rep / "ordinal_results.json").write_text(json.dumps(res, indent=1))
+        print(rep / "ordinal_results.json")
+        return
     if a.cmd == "posthoc-ivt-external":
         if not a.results:
             print(posthoc_ivt_external_records(a.out))

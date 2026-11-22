@@ -2,8 +2,8 @@
 // inputs) on validator-style records (python -m mtop.mrsclean records), with the validator's
 // eligibility rule; identical to what "Validate on your data" computes. Serve the built site locally
 // (python -m http.server in site/), then:
-//   node scripts/mtop_predict_records.js http://localhost:8765/index.html records.json preds.json [chosen|all|indicators] [blind]
-// (chosen: the calculator's model; all: every published learner; indicators: the calculator's model
+//   node scripts/mtop_predict_records.js http://localhost:8765/index.html records.json preds.json [chosen|all|ordinal|indicators] [blind]
+// (chosen: the calculator's model; all: every published learner; ordinal: MTOP ordinal; indicators: the calculator's model
 // with the model's own missing-value indicators instead of averaging unknown inputs; blind: the
 // outcome is not needed, so records without it are estimated too: the tool check of plan version 2)
 // Row-level output: write it only to a git-ignored folder (data/raw/...).
@@ -36,6 +36,21 @@ const fs = require('fs');
         const row = {};
         for (const st of ['admission', 'procedure', 'h24']) {
           if (!eligible(x, st)) { row[st] = null; continue; }
+          if (mode === 'ordinal') {
+            // MTOP ordinal (docs/registrations/ordinal_plan.md, amendment 2): its own distribution, the
+            // calculator's (binary bands split by its shares), the previous calculator's (the v1.1 layer),
+            // and the model's own missing-value handling as a sensitivity analysis
+            const pg = A.predictStage(st, x, 'good_outcome'), pd = A.predictStage(st, x, 'death90');
+            const q = A.ordinalStage(st, x);
+            const Lm = A.OB.models[st];
+            const lay = (A.X.ordinal || {})[st];
+            const zg = pg.logit - (pg.spec.intercept_recent || 0), zd = pd.logit - (pd.spec.intercept_recent || 0);
+            const ind = A.M.ordinal(Lm, A.M.buildRow(Lm.columns, A.B.features, x));
+            row[st] = { ord: q, calc: A.XE.fullDistribution(pg.p, pd.p, q),
+              layer: lay ? A.XE.fullDistribution(pg.p, pd.p, A.XE.ordinalProbs(zg, zd, lay)) : null,
+              ord_indicators: ind.p, lp_indicators: ind.lp, pg: pg.p, pd: pd.p };
+            continue;
+          }
           row[st] = {};
           for (const tg of A.TARGETS) {
             const e = A.entryOf(st, tg);
