@@ -239,4 +239,52 @@ is evaluated alongside the regression, for comparison only.
 
 ## 14. Amendments
 
-None yet.
+### Amendment 1 (22 November 2026): how the plan is carried out
+
+Written after steps 2 and 3 (code, unit tests, pipeline check: passed; no grade has fewer than 20
+development patients at any stage, so no grades are merged) and before any ordinal-model or
+comparison-learner result has been computed. It fixes details the plan leaves open; it changes no
+decision rule.
+
+1. **Folds.** The outer folds are v1.1's nested folds for mRS 0–2 (5 × 3, seed 20261016,
+   stratified by mRS 0–2), used for every model, the death model included, so that all comparisons
+   are on identical patients. In outer fold k the inner seed is 20261016 + 100 + k, as in v1.1; the
+   ordinal model's inner tuning folds are stratified by mRS grade.
+2. **v1.1 binary models in each fold:** the v1.1 full structure tuned on the outer training part,
+   with rule (b)'s factor (1.10193, 24 hours, death) applied on that part, as deployed.
+3. **The v1.1 layer in each fold:** refitted on the training part's out-of-fold log-odds of both
+   binary models (5 folds, seed + 1, settings fixed), as the deployed layer is built; within the
+   development years its thresholds are not re-estimated on recent years.
+4. **Ordinal log-loss** floors the probability of the observed grade at machine epsilon (2.2 ×
+   10⁻¹⁶), as the tuning code does; the number of patients whose observed grade had a probability
+   below 10⁻⁶ is reported, because the running maximum of the comparison-only learner can give a
+   grade a probability of exactly 0. The ranked probability score is unaffected.
+5. **The ordinal calibration slope** is computed for models with a linear predictor (the ordinal
+   regression and the proportional-odds comparators). The layer, the bands with ordinal shares and
+   the comparison-only learner are calibrated through their dichotomies.
+6. **Comparison-only learner:** also in the full-pipeline bootstrap (settings fixed, seed 20261016),
+   so its optimism-corrected measures and stability can be reported with the same method.
+7. **Bootstrap:** apparent measures on the resample, copies counted; test measures on the original
+   stage cohort; stability from the 2.5th and 97.5th percentiles of each patient's 500 estimates.
+8. **Proportional odds (rule O4):** at each cut-point k, a penalised binary model of mRS > k with
+   the development model's layout and penalty; reported are the slope and correlation of its linear
+   predictor on the shared one (both 1 under proportional odds, apart from the penalty) and the
+   calibration of each implied dichotomy.
+9. **Sample size:** at each cut-point, Riley et al.'s three criteria (shrinkage ≥ 0.9, optimism in
+   Nagelkerke R² ≤ 0.05, intercept within ± 0.05) with the development model's number of
+   coefficients; the anticipated Cox–Snell R² is 15 % of its maximum at every cut-point (their
+   conservative default) and, at mRS 0–2 and death, also the value implied by v1.1's nested
+   cross-validated AUROC (Riley et al. 2021).
+10. **Temporal comparators:** the MR PREDICTS and MR PREDICTS@24H predictor sets are refitted as
+    proportional-odds models with the pipeline of the binary refits (median imputation with
+    missing-value indicators, standardisation, L2 penalty chosen by 5-fold cross-validation, here on
+    ordinal log-loss); NIHSS alone uses a 3-knot spline (knots at the 10th, 50th and 90th
+    percentiles) in the same pipeline. Rule O3's factor, decided in 2005–2022, is used in both
+    splits, as v1.1 did. The learner's settings in the sensitivity split are those tuned for v1.0.0
+    in 2005–2020.
+11. **Deployment:** the threshold shift is the maximum-likelihood common shift of the 2023–2025
+    out-of-fold cumulative log-odds (5 folds, seed + 1, stratified by grade, settings fixed); the
+    slope check of the update policy uses the ordinal calibration slope of the same estimates with a
+    95 % Wald interval.
+12. **Computation:** the solver's per-patient arithmetic runs through numba when it is installed;
+    a unit test requires it to match the plain NumPy code to 10⁻⁹ (relative).
