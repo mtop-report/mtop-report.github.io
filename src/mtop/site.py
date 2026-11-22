@@ -129,6 +129,8 @@ def build_site():
         "validation_pool": _load("validation_pool.json", {"results": []}),
         "analyses": _load("analyses.json", {}),
         "shap": _load("shap.json"),
+        "ordinal": _load("ordinal_bundle.json"),
+        "ordinal_results": _load("ordinal.json"),
         "site": site_cfg,
     }
     tpl = (WEB / "index.html").read_text(encoding="utf-8")

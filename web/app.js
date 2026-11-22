@@ -7,6 +7,8 @@
   const E = DATA.explorer;
   const SITE = DATA.site || {};
   const X = DATA.extras || {};
+  const OB = DATA.ordinal || null;            // MTOP ordinal (docs/registrations/ordinal_plan.md)
+  const ORES = DATA.ordinal_results || null;
   const M = window.MTOPModel;
   const XE = window.MTOPExtra;
   const C = window.MTOPCharts;
@@ -220,6 +222,17 @@
     for (const row of rows) { const r = M.predict(spec, row, { recent: true }); p += r.p; lg += r.logit; }
     return { entry, spec, name: nm, chosen: nm === entry.chosen, rows, p: p / rows.length, logit: lg / rows.length, unknown: unknownKeys(entry, x0) };
   }
+  /** MTOP ordinal: the seven grade probabilities at a stage, averaged over the same samples of unknown
+   *  inputs as the binary models (the ordinal model uses the same columns). */
+  function ordinalStage(stage, inputs) {
+    if (!OB || !OB.models || !OB.models[stage]) return null;
+    const Lm = OB.models[stage];
+    const xs = samples(entryOf(stage, "good_outcome"), inputs || modelInputs());
+    const p = [0, 0, 0, 0, 0, 0, 0];
+    for (const x of xs) M.ordinal(Lm, M.buildRow(Lm.columns, B.features, x)).p.forEach((v, k) => { p[k] += v / xs.length; });
+    return p;
+  }
+  const ordinalShares = () => !!(OB && OB.calculator_distribution === "ordinal shares");
   function explainStage(pr) {
     const acc = {};
     let base = 0;
@@ -790,6 +803,8 @@
   }
 
   function patientDistribution(st, pv) {
+    // rule O1 of the ordinal plan: the binary models' bands split by the MTOP ordinal model's shares
+    if (ordinalShares() && OB.models[st]) return XE.fullDistribution(pv.good.p, pv.death.p, ordinalStage(st));
     const ord = (X.ordinal || {})[st];
     if (!ord) return null;
     const zg = pv.good.logit - (pv.good.spec.intercept_recent || 0);
@@ -842,8 +857,12 @@
       `Of 100 patients like this, about <b>${g}</b> would live independently at 3 months, <b>${dep}</b> would need help in daily life and <b>${dd}</b> would die.`,
       `Ze 100 takových pacientů by přibližně <b>${g}</b> za 3 měsíce žilo samostatně, <b>${dep}</b> by potřebovalo pomoc v běžném životě a <b>${dd}</b> by zemřelo.`) }));
     card.appendChild(h("p", { class: "note", text: tx(
-      `Utility-weighted mRS ${num(uw, 2)} (1 = no symptoms, 0 = severe disability or death). The split into single grades comes from an ordinal layer on the two models; its validation is on the Validation tab.`,
-      `Užitkově vážené mRS ${num(uw, 2)} (1 = bez příznaků, 0 = těžké postižení nebo úmrtí). Rozdělení na jednotlivé stupně pochází z ordinální vrstvy nad oběma modely; její validace je na kartě Validace.`) }));
+      ordinalShares()
+        ? `Utility-weighted mRS ${num(uw, 2)} (1 = no symptoms, 0 = severe disability or death). The three bands come from the two models above; the split into single grades comes from MTOP ordinal ${OB.version}, a proportional-odds model of all seven grades. Its validation is on the Validation tab.`
+        : `Utility-weighted mRS ${num(uw, 2)} (1 = no symptoms, 0 = severe disability or death). The split into single grades comes from an ordinal layer on the two models; its validation is on the Validation tab.`,
+      ordinalShares()
+        ? `Užitkově vážené mRS ${num(uw, 2)} (1 = bez příznaků, 0 = těžké postižení nebo úmrtí). Tři pásma pocházejí z obou modelů výše; rozdělení na jednotlivé stupně pochází z MTOP ordinal ${OB.version}, modelu proporcionálních šancí všech sedmi stupňů. Jeho validace je na kartě Validace.`
+        : `Užitkově vážené mRS ${num(uw, 2)} (1 = bez příznaků, 0 = těžké postižení nebo úmrtí). Rozdělení na jednotlivé stupně pochází z ordinální vrstvy nad oběma modely; její validace je na kartě Validace.`) }));
     return card;
   }
 
@@ -1773,6 +1792,8 @@
     root.appendChild(row3);
     const oc = ordinalCard(st);
     if (oc) { oc.classList.add("block"); root.appendChild(oc); }
+    const omc = ordinalModelCard(st);
+    if (omc) { omc.classList.add("block"); root.appendChild(omc); }
     const nc = nestedCard();
     if (nc) root.appendChild(nc);
     root.appendChild(driftCard(st, tg, vt, chosen, yrs, dyrs));
@@ -2113,6 +2134,47 @@
     return card;
   }
 
+  // MTOP ordinal: development-year evaluation, decisions and the temporal test (ordinal_results.md)
+  function ordinalModelCard(st) {
+    if (!ORES || !ORES.nested || !ORES.nested[st]) return null;
+    const ORD = "Ordinal regression", LAY = "v1.1 layer", HYB = "v1.1 bands with ordinal shares", LGB = "Ordinal LightGBM (comparison only)";
+    const NAME = { [ORD]: tx("MTOP ordinal", "MTOP ordinal"), [LAY]: tx("v1.1 layer", "Vrstva v1.1"), [HYB]: tx("v1.1 bands, ordinal shares", "Pásma v1.1, ordinální podíly"),
+      [LGB]: tx("Ordinal LightGBM (comparison only)", "Ordinální LightGBM (jen srovnání)") };
+    const card = h("div", { class: "card card-pad" });
+    const nst = ORES.nested[st].models;
+    const tp = ORES.temporal && ORES.temporal.primary && ORES.temporal.primary[st];
+    const legend = [0, 1, 2, 3, 4, 5, 6].map((m) => ({ label: `mRS ${m}`, color: `var(--mrs${m})` }));
+    const labs = [ORD, HYB, LAY, LGB].filter((k) => nst[k]);
+    const cols = [tx("Model", "Model"), tx("RPS (CV)", "RPS (CV)"), tx("C utility (CV)", "C užitek (CV)"), "AUROC 0–2 (CV)", tx("AUROC death (CV)", "AUROC úmrtí (CV)")]
+      .concat(tp ? [tx(`RPS ${tp.test_from}–2025`, `RPS ${tp.test_from}–2025`), tx(`C utility ${tp.test_from}–2025`, `C užitek ${tp.test_from}–2025`)] : []);
+    const rowsT = labs.map((k) => {
+      const m = nst[k];
+      const r = [NAME[k], num(m.rps, 4), num(m.genc_uw, 3), num(m.mrs02_auroc, 3), num(m.death_auroc, 3)];
+      if (tp) {
+        const tm = tp.models[k];
+        r.push(tm ? `${num(tm.rps, 4)} (${num(tm.ci.rps[0], 4)}–${num(tm.ci.rps[1], 4)})` : "–", tm ? `${num(tm.genc_uw, 3)} (${num(tm.ci.genc_uw[0], 3)}–${num(tm.ci.genc_uw[1], 3)})` : "–");
+      }
+      return r;
+    });
+    const obsHidden = !!(tp && tp.observed.some((v) => v === null));   // a grade with 1-9 patients: not shown
+    const bars = tp ? (obsHidden ? [] : [{ label: tx(`Observed ${tp.test_from}–2025`, `Pozorováno ${tp.test_from}–2025`), n: tp.n_test, segs: tp.observed.map((v) => v * 100) }])
+      .concat([ORD, LAY].filter((k) => tp.predicted[k]).map((k) => ({ label: NAME[k], n: tp.n_test, segs: tp.predicted[k].map((v) => v * 100) }))) : [];
+    const f = C.figure(card, { title: tx("MTOP ordinal: all seven grades", "MTOP ordinal: všech sedm stupňů"),
+      sub: tx(`Proportional-odds model of the 90-day mRS${OB ? ` · version ${OB.version} · fingerprint ${OB.fingerprint.slice(0, 12)}…` : ""} · CV = nested cross-validation 2005–2022`,
+        `Model proporcionálních šancí mRS za 90 dní${OB ? ` · verze ${OB.version} · otisk ${OB.fingerprint.slice(0, 12)}…` : ""} · CV = vnořená křížová validace 2005–2022`),
+      legend: bars.length ? legend : null,
+      table: bars.length ? { columns: ["", "n"].concat(legend.map((l) => l.label)), rows: bars.map((r) => [r.label, r.n].concat(r.segs.map((v) => pct100(v, 1)))) } : null,
+      labels: { table: t().showTable, chart: t().showChart } });
+    if (bars.length) C.grotta(f.body, { rows: bars, colors: MRS_COLORS, segLabels: legend.map((l) => l.label), fmt: (v) => pct100(v, 1), nLabel: "n", aria: "MTOP ordinal mRS distribution" });
+    card.appendChild(h("div", { class: "table-scroll" }, C.dataTable(cols, rowsT)));
+    const d = ORES.decisions || {};
+    const o1 = d.O1 && d.O1.replace_layer, o2 = d.O2 && d.O2.send_to_external_validation;
+    card.appendChild(h("p", { class: "note", text: tx(
+      `RPS: ranked probability score over the seven grades (lower is better); C utility: generalised concordance on the expected utility-weighted mRS. Pre-specified decisions from the development years: ${o1 ? "the calculator splits its bands into grades with this model's shares" : "the calculator keeps the layer"}; ${o2 ? "the model goes to external validation as a secondary model" : "the model is not sent to external validation"}. The temporal test is not independent: the inputs are those of version 1.1, chosen with these years known. The LightGBM is for comparison only and is not used.${obsHidden ? " The observed shares are not shown because a grade has fewer than 10 patients." : ""}`,
+      `RPS: skóre pořadové pravděpodobnosti přes sedm stupňů (nižší je lepší); C užitek: zobecněná konkordance na očekávaném užitkově váženém mRS. Předem stanovená rozhodnutí z vývojových let: ${o1 ? "kalkulačka dělí svá pásma na stupně podíly tohoto modelu" : "kalkulačka ponechává vrstvu"}; ${o2 ? "model jde do externí validace jako sekundární" : "model do externí validace nejde"}. Časový test není nezávislý: vstupy jsou ty z verze 1.1, zvolené se znalostí těchto let. LightGBM slouží jen ke srovnání a nepoužívá se.${obsHidden ? " Pozorované podíly nejsou uvedeny, protože některý stupeň má méně než 10 pacientů." : ""}`) }));
+    return card;
+  }
+
   function stabilityCard(st, tg) {
     const bins = ((X.uncertainty || {})[st] || {})[tg];
     const stab = ((X.stability || {})[st] || {})[tg];
@@ -2314,7 +2376,7 @@
     DATA, B, V, E, X, SITE, M, XE, C, h, S, STAGES, STAGE, FEAT, TARGETS, MODEL_NAMES, LEARNERS, MRS_COLORS, REF, SPLITS, RECENT,
     REF_V11, REF_V100, ARCHIVE, IS_V11, vkey, cname,
     t, L, tx, lang: () => lang, num, pct, pct100, signed, stageLabel, idx, mname, mcolor, statusChip, yearsOf, devYears, chosenOf, entryOf,
-    predictStage, modelInputs, samples, threeBand, registerView, render, renderView, goTo, store,
+    predictStage, modelInputs, samples, threeBand, OB, ORES, ordinalStage, registerView, render, renderView, goTo, store,
     viewLabel: (id) => { const v = VIEWS[ALIASES[id] ? ALIASES[id][0] : id]; return v ? v.label() : id; },
     boot() {
       const hash = (location.hash || "").replace("#", "");

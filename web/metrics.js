@@ -156,7 +156,54 @@
     return { mu, lo: mu - 1.96 * seMu, hi: mu + 1.96 * seMu, piLo: mu - half, piHi: mu + half, tau2, i2, k, weights: wr.map((v) => v / swr) };
   }
 
-  const api = { auroc, brier, logisticFit, citl, slope, calibrationBins, bootAuroc, summary, randomEffects, mulberry32 };
+  /** Generalised concordance: of two patients with different mRS, the probability that the one with the
+   *  better score had the better outcome (ties in the score count 1/2); as src/mtop/ordinal_run.py gen_c. */
+  function genC(score, y) {
+    let conc = 0, tot = 0;
+    for (let i = 0; i < y.length; i++) {
+      for (let j = 0; j < y.length; j++) {
+        if (y[i] >= y[j]) continue;          // i had the better outcome
+        tot += 1;
+        if (score[i] > score[j]) conc += 1; else if (score[i] === score[j]) conc += 0.5;
+      }
+    }
+    return tot ? conc / tot : null;
+  }
+
+  /** MTOP ordinal measures (plan, section 6) of predicted distributions P (n x 7) against the 90-day mRS y:
+   *  ranked probability score, ordinal log-loss, generalised concordance, the implied dichotomies, and the
+   *  mean predicted against observed share of each grade (counts from 1 to 9 withheld). */
+  function ordinalSummary(y, P, uw, minCell = 10) {
+    const n = y.length;
+    let rps = 0, ll = 0;
+    const pred = [0, 0, 0, 0, 0, 0, 0], obs = [0, 0, 0, 0, 0, 0, 0];
+    for (let i = 0; i < n; i++) {
+      let F = 0, s = 0;
+      for (let k = 0; k < 6; k++) { F += P[i][k]; const d = F - (y[i] <= k ? 1 : 0); s += d * d; }
+      rps += s / 6;
+      ll -= Math.log(Math.max(P[i][y[i]], 2.220446049250313e-16));
+      for (let k = 0; k < 7; k++) pred[k] += P[i][k] / n;
+      obs[y[i]] += 1;
+    }
+    const ev = P.map((p) => p.reduce((a, v, k) => a + v * uw[k], 0));
+    const eg = P.map((p) => -p.reduce((a, v, k) => a + v * k, 0));
+    const dich = (k) => {
+      const yy = y.map((v) => (v <= k ? 1 : 0)), pp = P.map((p) => p.slice(0, k + 1).reduce((a, b) => a + b, 0));
+      const e = yy.reduce((a, b) => a + b, 0);
+      return e < minCell || n - e < minCell ? { insufficient: true } : { auroc: auroc(yy, pp), citl: citl(yy, pp), slope: slope(yy, pp) };
+    };
+    const yd = y.map((v) => (v === 6 ? 1 : 0)), pd = P.map((p) => p[6]);
+    const nd = yd.reduce((a, b) => a + b, 0);
+    return {
+      n, rps: rps / n, ologloss: ll / n, genc_uw: genC(ev, y), genc_grade: genC(eg, y),
+      mrs01: dich(1), mrs02: dich(2), mrs03: dich(3),
+      death: nd < minCell || n - nd < minCell ? { insufficient: true } : { auroc: auroc(yd, pd), citl: citl(yd, pd), slope: slope(yd, pd) },
+      grade_pred: pred, grade_obs: obs.map((c) => (c > 0 && c < minCell ? null : c / n)),
+      uw_pred: ev.reduce((a, b) => a + b, 0) / n, uw_obs: y.reduce((a, v) => a + uw[v], 0) / n,
+    };
+  }
+
+  const api = { auroc, brier, logisticFit, citl, slope, calibrationBins, bootAuroc, summary, randomEffects, mulberry32, genC, ordinalSummary };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   root.MTOPMetrics = api;
 })(typeof globalThis !== "undefined" ? globalThis : this);

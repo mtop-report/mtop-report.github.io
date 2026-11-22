@@ -18,7 +18,7 @@ from mtop.paths import PUBLIC
 
 FILES = ["model_bundle.json", "validation.json", "explorer.json", "extras.json", "adaptive.json", "federated.json",
          "associations.json", "data_checks.json", "preprocessing.json", "raw_profile.json", "reporting.json",
-         "analyses.json", "shap.json"]
+         "analyses.json", "shap.json", "ordinal.json", "ordinal_bundle.json"]
 # column names that may appear as labels (never with values) in the data report
 COLUMN_LABELS = {"preprocessing.json": ("Patient ID", "onset_date"), "raw_profile.json": ("Patient ID",),
                  "data_checks.json": ("onset_date",)}
@@ -352,3 +352,23 @@ def test_report_analyses_suppress_small_counts():
     mo = a.get("missing_outcome", {})
     if mo:
         assert mo["n_missing"] >= k and mo["n_all"] - mo["n_missing"] >= k
+
+
+def test_ordinal_outputs_are_aggregates():
+    """MTOP ordinal (docs/registrations/ordinal_plan.md, section 11): the bundle holds the model's numbers
+    only; the results file holds summaries, with counts from 1 to 9 withheld."""
+    b = _load("ordinal_bundle.json")
+    allowed = {"columns", "medians", "indicators", "mean", "scale", "coef", "intercept", "shift", "base_columns", "knots",
+               "theta", "theta_shift", "from"}
+    for st, m in b["models"].items():
+        assert m["kind"] == "ordinal"
+        assert set(m["spec"]) <= allowed, st
+        assert len(m["spec"]["theta"]) == 6
+    o = _load("ordinal.json")
+    for path, k, v in _walk(o):
+        if isinstance(v, list):
+            assert len(v) <= 10, f"{path}.{k} is a long list"
+    for sp in (o.get("temporal") or {}).values():
+        for st in sp.values():
+            for v in st["observed"]:
+                assert v is None or round(v * st["n_test"]) >= 10

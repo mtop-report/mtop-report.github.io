@@ -135,3 +135,89 @@ def test_fused_and_numpy_arithmetic_agree():
     assert np.max(np.abs(g1 - g0)) < 1e-9 * max(1, np.max(np.abs(g0)))
     assert np.max(np.abs(H1 - H0)) < 1e-9 * max(1, np.max(np.abs(H0)))
     assert abs(f1 - f0) < 1e-9 * abs(f0)
+
+
+def _registry_like(n=900, seed=3):
+    import pandas as pd
+    rng = np.random.default_rng(seed)
+    occ = rng.choice(["M1", "basilar", "basilar_vertebral"], size=n, p=[0.8, 0.185, 0.015])
+    X = pd.DataFrame({
+        "age": rng.normal(70, 12, n).round(),
+        "nihss_adm": rng.integers(0, 40, n).astype(float),
+        "occlusion__M1": (occ == "M1").astype(float),
+        "occlusion__basilar": (occ == "basilar").astype(float),
+        "occlusion__basilar_vertebral": (occ == "basilar_vertebral").astype(float),
+        "glucose": rng.normal(7.5, 2.5, n).round(1).clip(3, 25),
+        "flag": rng.integers(0, 2, n).astype(float),
+    })
+    X.loc[rng.random(n) < 0.05, ["occlusion__M1", "occlusion__basilar", "occlusion__basilar_vertebral"]] = np.nan
+    X.loc[rng.random(n) < 0.2, "glucose"] = np.nan
+    eta = 0.04 * (X["age"] - 70) + 0.1 * X["nihss_adm"] - 0.5 * X["occlusion__basilar"].fillna(0)
+    P = O.probs(np.array([-2.5, -1.5, -0.8, 0.0, 0.9, 2.0]), eta.to_numpy())
+    y = np.array([rng.choice(7, p=r / r.sum()) for r in P])
+    return X, y
+
+
+def test_export_and_browser_reproduce_the_model(tmp_path):
+    import json
+    import shutil
+    import subprocess
+    from pathlib import Path
+    X, y = _registry_like()
+    m = O.fit(X, y, 7, 5, repeats=1)
+    spec = m.export(shift=0.137)
+    rows = np.vstack([X.sample(200, random_state=2).to_numpy(float), np.full(X.shape[1], np.nan)])
+    import pandas as pd
+    Xr = pd.DataFrame(rows, columns=X.columns)
+    lp, P, phi = O.eval_export(spec, Xr)
+    assert np.max(np.abs(lp - m.lp(Xr))) < 1e-10
+    assert np.max(np.abs(P - O.probs(m.theta + 0.137, m.lp(Xr)))) < 1e-12
+    assert np.max(np.abs(phi - m.contributions(Xr).to_numpy())) < 1e-10
+    assert np.max(np.abs(phi.sum(1) - lp)) < 1e-10
+    node = shutil.which("node")
+    if node is None:
+        return
+    here = Path(__file__).parent
+    inp, out = tmp_path / "in.json", tmp_path / "out.json"
+    inp.write_text(json.dumps({"model": {"kind": "ordinal", "spec": spec},
+                               "rows": [[None if np.isnan(v) else float(v) for v in r] for r in rows]}))
+    subprocess.run([node, str(here / "node_ordinal.js"), str(inp), str(out)], check=True)
+    res = json.loads(out.read_text())
+    assert np.max(np.abs(np.array([r["lp"] for r in res]) - lp)) < 1e-9
+    assert np.max(np.abs(np.array([r["p"] for r in res]) - P)) < 1e-9
+    assert np.max(np.abs(np.array([r["phi"] for r in res]) - phi)) < 1e-9
+    assert max(abs(r["base"]) for r in res) == 0.0
+
+
+def test_browser_ordinal_measures_match_python(tmp_path):
+    """web/metrics.js ordinalSummary (the validation tool) against ordinal_run.dist_measures."""
+    import json
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    from mtop import ordinal_run as OR
+    node = shutil.which("node")
+    if node is None:
+        return
+    rng = np.random.default_rng(5)
+    P = rng.dirichlet(np.ones(7) * 0.8, 300)
+    y = np.array([rng.choice(7, p=p) for p in P])
+    root = Path(__file__).parent.parent
+    script = tmp_path / "run.js"
+    script.write_text(
+        "const M = require(%r); const fs = require('fs');" % str(root / "web" / "metrics.js")
+        + "const j = JSON.parse(fs.readFileSync(process.argv[2]));"
+        + "fs.writeFileSync(process.argv[3], JSON.stringify(M.ordinalSummary(j.y, j.P, j.uw, 10)));")
+    inp, out = tmp_path / "in.json", tmp_path / "out.json"
+    inp.write_text(json.dumps({"y": y.tolist(), "P": P.tolist(), "uw": OR.UW.tolist()}))
+    subprocess.run([node, str(script), str(inp), str(out)], check=True)
+    js = json.loads(out.read_text())
+    py = OR.dist_measures(y, P)
+    for k in ("rps", "ologloss", "genc_uw", "genc_grade", "uw_pred", "uw_obs"):
+        assert abs(js[k] - py[k]) < 1e-12, k
+    for d in ("mrs01", "mrs02", "mrs03", "death"):
+        assert abs(js[d]["auroc"] - py[d]["auroc"]) < 1e-12, d
+        assert abs(js[d]["citl"] - py[d]["citl"]) < 1e-4, d
+        assert abs(js[d]["slope"] - py[d]["slope"]) < 1e-4, d
+    assert np.max(np.abs(np.array(js["grade_pred"]) - np.array(py["grade_pred"]))) < 1e-12

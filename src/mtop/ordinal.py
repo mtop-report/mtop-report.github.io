@@ -313,6 +313,60 @@ class Ordinal:
     def n_coef(self) -> int:
         return int(len(self.coef))
 
+    def contributions(self, X: pd.DataFrame) -> pd.DataFrame:
+        """Exact additive explanation of the linear predictor per stage column (coefficient x
+        standardised value, spline terms and indicator with their input, a merged category with its
+        parent); the same for every cut-point because the coefficients are shared. Rows sum to lp."""
+        parts = self.layout.Z(X) * self.coef[None, :]
+        out = np.zeros((len(X), len(self.columns)))
+        for j, o in enumerate(self.layout.owners):
+            out[:, self.layout.sources[o][0]] += parts[:, j]
+        return pd.DataFrame(out, columns=self.columns, index=X.index)
+
+    def export(self, shift: float = 0.0) -> dict:
+        """The numbers the browser needs (web/model.js, kind "ordinal"): the spline-regression layout
+        of reference.Reference.export with intercept 0, the thresholds and the recent-era shift."""
+        lay = self.layout
+        spec = {"columns": list(lay.columns), "medians": [float(v) for v in lay.medians],
+                "indicators": [int(i) for i in lay.ind], "mean": [float(v) for v in lay.mean],
+                "scale": [float(v) for v in lay.scale], "coef": [float(v) for v in self.coef], "intercept": 0.0,
+                "shift": 0.0, "base_columns": list(lay.base), "knots": lay.knots,
+                "theta": [float(v) for v in self.theta], "theta_shift": float(shift)}
+        if lay.base != lay.stage_columns:
+            spec["from"] = [[int(i) for i in src] for src in lay.sources]
+        return spec
+
+
+def eval_export(spec: dict, X: pd.DataFrame, recent: bool = True):
+    """Linear predictor, grade probabilities and per-column contributions from an exported model
+    (the arithmetic of web/model.js), for parity tests and the validation tool."""
+    from .splines import rcs_terms
+    A = X.to_numpy(float)
+    if "from" in spec:
+        B = np.column_stack([A[:, src].sum(axis=1) for src in spec["from"]])
+        own0 = [src[0] for src in spec["from"]]
+    else:
+        B, own0 = A, list(range(A.shape[1]))
+    cols, owner = [B], list(own0)
+    for v, knots in spec["knots"].items():
+        i = spec["base_columns"].index(v)
+        T = rcs_terms(B[:, i], knots)
+        cols.append(T)
+        owner += [own0[i]] * T.shape[1]
+    E = np.hstack(cols)
+    med = np.asarray(spec["medians"], float)
+    F = np.where(np.isnan(E), med[None, :], E)
+    ind = spec["indicators"]
+    Zr = np.hstack([F, np.isnan(E[:, ind]).astype(float)]) if ind else F
+    owner += [owner[j] for j in ind]
+    terms = (Zr - np.asarray(spec["mean"])) / np.asarray(spec["scale"]) * np.asarray(spec["coef"])
+    lp = terms.sum(axis=1)
+    phi = np.zeros((len(X), A.shape[1]))
+    for j, o in enumerate(owner):
+        phi[:, o] += terms[:, j]
+    th = np.asarray(spec["theta"], float) + (spec.get("theta_shift", 0.0) if recent else 0.0)
+    return lp, probs(th, lp), phi
+
 
 def tune_scores(X, y, K, seed, spec=R.V110, groups=None, repeats=5, knot_options=R.KNOT_OPTIONS, row_folds=None):
     """{knots: (layout, Z of unique patients, fold x penalty ordinal log-loss)}, with folds stratified

@@ -210,6 +210,7 @@
             row[tg] = {};
             for (const nm of learnersOf(st, tg)) row[tg][nm] = A.predictStage(st, x, tg, nm).p;
           }
+          if (A.OB) row.ordinal = A.ordinalStage(st, x);      // MTOP ordinal (secondary model)
           preds[i][st] = row;
         }
         done++;
@@ -230,6 +231,18 @@
         }
       }
     }
+    // MTOP ordinal: the whole 90-day mRS distribution (docs/registrations/ordinal_plan.md, section 12)
+    const ordRes = {};
+    if (A.OB) {
+      for (const st of STAGES) {
+        const idxs = recs.map((x, i) => i).filter((i) => preds[i][st] && preds[i][st].ordinal);
+        ordRes[st] = idxs.length >= 20
+          ? MX.ordinalSummary(idxs.map((i) => recs[i].mrs90), idxs.map((i) => preds[i][st].ordinal), A.OB.utility_weights, 10)
+          : { n: idxs.length, insufficient: true };
+        await tick();
+      }
+    }
+    NS.ordResults = A.OB ? ordRes : null;
     NS.preds = preds;
     NS.results = results;
     NS.running = false;
@@ -270,6 +283,8 @@
         out.stages[st][tg] = Object.assign({ chosen: ch, models: per }, per[ch]);
       }
     }
+    // the ordinal model's results, tied to its own fingerprint
+    if (NS.ordResults && A.OB) out.ordinal = { model: "MTOP ordinal", model_version: A.OB.version, model_fingerprint: A.OB.fingerprint, stages: NS.ordResults };
     return JSON.stringify(out, null, 1);
   }
   // a site's result for one learner from either file format
@@ -458,6 +473,28 @@
     return box;
   }
 
+  // MTOP ordinal on the centre's data: the whole mRS distribution (a secondary model)
+  function ordinalBlock() {
+    if (!NS.ordResults || !A.OB) return null;
+    const dev = (A.ORES && A.ORES.bootstrap) || {};
+    const box = h("div", { class: "card-inner" });
+    box.appendChild(h("div", { class: "chart-sub", style: "margin-top:14px", text: tx(`MTOP ordinal ${A.OB.version} (secondary model): all seven mRS grades`, `MTOP ordinal ${A.OB.version} (sekundární model): všech sedm stupňů mRS`) }));
+    const cell = (r, k) => (r[k] && !r[k].insufficient ? num(r[k].auroc, 3) : "–");
+    box.appendChild(h("div", { class: "table-scroll" }, h("table", { class: "data" },
+      h("thead", null, h("tr", null, [tx("Stage", "Fáze"), "n", "RPS", tx("C (utility)", "C (užitek)"), "AUROC 0–2", tx("AUROC death", "AUROC úmrtí"), tx("Utility predicted / observed", "Užitek predikovaný / pozorovaný"), tx("FNO RPS (corrected)", "FNO RPS (korigované)")].map((x) => h("th", { scope: "col", text: x })))),
+      h("tbody", null, STAGES.map((st) => {
+        const r = NS.ordResults[st];
+        const fno = dev[st] && dev[st]["Ordinal regression"] ? num(dev[st]["Ordinal regression"].corrected.rps, 4) : "–";
+        if (r.insufficient) return h("tr", null, h("th", { scope: "row", text: A.stageLabel(st) }), h("td", { text: num(r.n) }), h("td", { colspan: 5, text: tx("too few patients", "příliš málo pacientů") }), h("td", { text: fno }));
+        return h("tr", null, h("th", { scope: "row", text: A.stageLabel(st) }), h("td", { text: num(r.n) }), h("td", { text: num(r.rps, 4) }), h("td", { text: num(r.genc_uw, 3) }),
+          h("td", { text: cell(r, "mrs02") }), h("td", { text: cell(r, "death") }), h("td", { text: `${num(r.uw_pred, 2)} / ${num(r.uw_obs, 2)}` }), h("td", { text: fno }));
+      })))));
+    box.appendChild(h("p", { class: "note", text: tx(
+      `RPS: ranked probability score over the seven grades (lower is better); C (utility): generalised concordance on the expected utility-weighted mRS. The results file carries these numbers with the ordinal model's own fingerprint (${A.OB.fingerprint.slice(0, 12)}…).`,
+      `RPS: skóre pořadové pravděpodobnosti přes sedm stupňů (nižší je lepší); C (užitek): zobecněná konkordance na očekávaném užitkově váženém mRS. Soubor výsledků nese tato čísla s vlastním otiskem ordinálního modelu (${A.OB.fingerprint.slice(0, 12)}…).`) }));
+    return box;
+  }
+
   function resultsBlock(root) {
     const box = h("div", { class: "results" });
     const seg = h("div", { class: "mini-seg", role: "group", "aria-label": A.t().outcome },
@@ -515,6 +552,8 @@
         tipFmt: (v, p) => `${A.pct(v, 1)} · n ${p.n}`, tipHead: (xv) => `${A.t().predicted} ${A.pct(xv, 1)}`, aria: "local calibration" });
     } else calBox.appendChild(h("p", { class: "note", text: tx("Not enough patients or events at this stage.", "V této fázi není dost pacientů nebo událostí.") }));
     box.appendChild(calBox);
+    const ob = ordinalBlock();
+    if (ob) box.appendChild(ob);
 
     // export
     const nameIn = h("input", { type: "text", id: "lv-site", class: "text-in", value: NS.label, placeholder: tx("Site name", "Název centra") });

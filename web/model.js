@@ -267,7 +267,7 @@
   function raw(L, x) {
     if (L.kind === "lgbm" || L.kind === "xgb") return rawTrees(L, x);
     if (L.kind === "lr") return lrRaw(L.spec, x);
-    if (L.kind === "spline") return lrRaw(L.spec, splineExpand(L.spec, x).row);
+    if (L.kind === "spline" || L.kind === "ordinal") return lrRaw(L.spec, splineExpand(L.spec, x).row);
     if (L.kind === "ebm") return ebmTerms(L.spec, x).reduce((a, b) => a + b, L.spec.intercept);
     // stacking: the meta-model on the base models' log-odds
     if (L.kind === "stack") return L.bases.reduce((s, b, k) => s + L.meta.coef[k] * raw(b, x), L.meta.intercept);
@@ -279,6 +279,20 @@
     const r = raw(L, x);
     const shift = opts && opts.recent === false ? 0 : L.intercept_recent || 0;
     return { raw: r, logit: r + shift, p: sigmoid(r + shift, L.sigmoid) };
+  }
+
+  /** MTOP ordinal (src/mtop/ordinal.py): logit P(mRS <= k) = theta_k + shift - lp, k = 0..5, one
+   *  linear predictor lp shared by all cut-points. Returns lp, the six cumulative probabilities and
+   *  the seven grade probabilities; `recent` (default true) applies the recent-era threshold shift. */
+  function ordinal(L, x, opts) {
+    const lp = raw(L, x);
+    const s = opts && opts.recent === false ? 0 : L.spec.theta_shift || 0;
+    const cum = L.spec.theta.map((t) => sigmoid(t + s - lp));
+    const p = [];
+    let prev = 0;
+    for (const c of cum) { p.push(Math.min(Math.max(c - prev, 0), 1)); prev = c; }
+    p.push(Math.min(Math.max(1 - prev, 0), 1));
+    return { lp, cum, p };
   }
 
   /** Exact attributions per model column on the log-odds scale: base + sum(phi) = raw score. */
@@ -365,7 +379,7 @@
     });
   }
 
-  const api = { prepare, predict, raw, rawTrees, shap, explain, buildRow, derivedValue, sigmoid, rcsTerms, splineExpand, lrRaw, ebmBin, ebmTerms };
+  const api = { prepare, predict, raw, rawTrees, shap, explain, buildRow, derivedValue, sigmoid, rcsTerms, splineExpand, lrRaw, ebmBin, ebmTerms, ordinal };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   root.MTOPModel = api;
 })(typeof globalThis !== "undefined" ? globalThis : this);
