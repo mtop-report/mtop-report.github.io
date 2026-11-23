@@ -8,7 +8,8 @@ and selectable in the app, so every published result can be reproduced.
 
 A new, separate model: a proportional-odds regression of all seven 90-day mRS grades at each stage,
 with the inputs of the v1.1 reference. Fingerprint `78436c388af37724da897a7d29e95f103b12b2a3a8c5de47d30b4286b393ea46`
-(`artifacts/public/ordinal_bundle.json`). Plan: [docs/registrations/ordinal_plan.md](docs/registrations/ordinal_plan.md),
+(`artifacts/public/ordinal_bundle.json`). Zenodo DOI
+[10.5281/zenodo.24463897](https://doi.org/10.5281/zenodo.24463897) (release ordinal-v1.0.0). Plan: [docs/registrations/ordinal_plan.md](docs/registrations/ordinal_plan.md),
 committed before any of its code, with amendment 1 committed before any result. Results:
 [docs/registrations/ordinal_results.md](docs/registrations/ordinal_results.md); model card:
 [docs/model_card_ordinal.md](docs/model_card_ordinal.md).

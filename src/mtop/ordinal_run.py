@@ -1543,8 +1543,9 @@ def model_card_md(path=None) -> str:
     w("")
     w("The bundle holds coefficients, thresholds, knots, medians and scaling only, no patient-level data; counts from 1 to 9 are "
       "shown as fewer than 10. The browser reimplementation (web/model.js) matches the Python model within 10⁻⁷ on every patient "
-      "and on the synthetic demonstration cohort. A new version gets a new fingerprint, a changelog entry and a Zenodo "
-      "version under the MTOP all-versions DOI (10.5281/zenodo.24396392).")
+      "and on the synthetic demonstration cohort. Archived on Zenodo (https://doi.org/10.5281/zenodo.24463897, release "
+      "ordinal-v1.0.0). A new version gets a new fingerprint, a changelog entry and a Zenodo version under the MTOP "
+      "all-versions DOI (10.5281/zenodo.24396392).")
     w("")
     txt = "\n".join(L) + "\n"
     path.write_text(txt, encoding="utf-8")
@@ -1572,7 +1573,7 @@ def external_md(path=None) -> str:
       "[10.5281/zenodo.24420424](https://doi.org/10.5281/zenodo.24420424) |")
     if dec["O2"]["send_to_external_validation"]:
         w(f"| MTOP ordinal (all seven mRS grades) | {b['version']} | `{b['fingerprint']}` | Secondary | "
-          "Zenodo version under 10.5281/zenodo.24396392 (at release) |")
+          "[10.5281/zenodo.24463897](https://doi.org/10.5281/zenodo.24463897) |")
     w("")
     w("Plans: [v1_1_plan.md](v1_1_plan.md), [ordinal_plan.md](ordinal_plan.md). The external analysis plan (the CONTRAST data "
       "request) sets the analyses and margins, including the comparison of MTOP ordinal with MR PREDICTS (its published ordinal "

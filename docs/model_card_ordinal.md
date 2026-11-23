@@ -57,5 +57,5 @@ The inputs are those of v1.1, which was designed with the 2023–2025 results kn
 
 ## 7. Privacy and maintenance
 
-The bundle holds coefficients, thresholds, knots, medians and scaling only, no patient-level data; counts from 1 to 9 are shown as fewer than 10. The browser reimplementation (web/model.js) matches the Python model within 10⁻⁷ on every patient and on the synthetic demonstration cohort. A new version gets a new fingerprint, a changelog entry and a Zenodo version under the MTOP all-versions DOI (10.5281/zenodo.24396392).
+The bundle holds coefficients, thresholds, knots, medians and scaling only, no patient-level data; counts from 1 to 9 are shown as fewer than 10. The browser reimplementation (web/model.js) matches the Python model within 10⁻⁷ on every patient and on the synthetic demonstration cohort. Archived on Zenodo (https://doi.org/10.5281/zenodo.24463897, release ordinal-v1.0.0). A new version gets a new fingerprint, a changelog entry and a Zenodo version under the MTOP all-versions DOI (10.5281/zenodo.24396392).
 
