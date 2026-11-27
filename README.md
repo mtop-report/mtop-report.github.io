@@ -330,5 +330,6 @@ docs/              model card (TRIPOD+AI), data dictionary, federated network, l
 
 Gajdošík V, Procházka V. *MTOP: staged, explainable prediction of 90-day outcome after
 mechanical thrombectomy.* University Hospital Ostrava / Faculty of Medicine, University of
-Ostrava, 2026. Code: MIT licence. The registry data are not included and not licensed.
+Ostrava, 2026. Code: MIT licence (`LICENSE`). The registry data are not included and not licensed.
+MTOP is a research tool and is not a medical device.
 The bundled typeface, Instrument Sans, is under the SIL Open Font License 1.1 (`web/assets/fonts/OFL.txt`).
