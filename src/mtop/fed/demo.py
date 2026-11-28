@@ -297,7 +297,7 @@ def leave_one_out(sites, co, target: str, p: GBDTParams, n_boot: int, seed: int)
 
 
 # --------------------------------------------------------------------------- proof of equivalence
-def equivalence(sites, co, p: GBDTParams, fold0) -> tuple[dict, dict]:
+def equivalence(sites, co, p: GBDTParams, fold0, eval_ids: list[str] | None = None) -> tuple[dict, dict]:
     ids = [s.site_id for s in sites]
     out = {}
     t0 = time.time()
@@ -322,9 +322,10 @@ def equivalence(sites, co, p: GBDTParams, fold0) -> tuple[dict, dict]:
                      "max_abs_risk_diff": float(np.max(np.abs(p_fed - p_ref))),
                      "max_abs_risk_diff_sklearn": float(np.max(np.abs(p_fed - sk.predict_proba(Z)[:, 1])))}
     model0, te0 = fold0
-    res, _ = federated_eval(co, ids, model0, te0)
+    eval_ids = ids if eval_ids is None else eval_ids          # centres large enough to evaluate (fold-0 test set)
+    res, _ = federated_eval(co, eval_ids, model0, te0)
     yy, pp = [], []
-    for s in sites:
+    for s in [s for s in sites if s.site_id in eval_ids]:
         d, B, y = s.cohort(STAGE, OUTCOMES[0])
         r = s.rows(STAGE, OUTCOMES[0], te0)
         yy.append(y[r])
@@ -335,7 +336,7 @@ def equivalence(sites, co, p: GBDTParams, fold0) -> tuple[dict, dict]:
     return out, {"gbdt": fed, "fold0": res}
 
 
-def http_run(sites, p: GBDTParams, reference: dict, fold0) -> dict:
+def http_run(sites, p: GBDTParams, reference: dict, fold0, eval_ids: list[str] | None = None) -> dict:
     """Coordinator and four site nodes talking over real HTTP sockets on this machine."""
     tokens = {s.site_id: secrets.token_urlsafe(24) for s in sites}
     hub = Hub({sid: token_hash(t) for sid, t in tokens.items()}, name="MTOP demo coordinator")
@@ -358,7 +359,7 @@ def http_run(sites, p: GBDTParams, reference: dict, fold0) -> dict:
         t_train = time.time() - t0
         model0, te0 = fold0
         t1 = time.time()
-        res, ejob = federated_eval(co, ids, model0, te0)
+        res, ejob = federated_eval(co, ids if eval_ids is None else eval_ids, model0, te0)
         t_eval = time.time() - t1
         stats = {sid: dict(v) for sid, v in hub.stats.items()}
         lat = [r["seconds"] for r in job.rounds]

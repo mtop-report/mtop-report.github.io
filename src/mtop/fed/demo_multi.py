@@ -280,10 +280,20 @@ def run(frames: dict[str, pd.DataFrame] | None = None, http: bool = True, quick:
                        "per_centre": [{"id": e["id"], "n": e["n"], "events": e["events"],
                                        **{m: e[m]["auroc"] for m in MODELS}} for e in res["per_centre"]]})
     eq = run_stats = None
+    declined = []
     if ref_sites is not None:
         co = Coordinator(LocalTransport(ref_sites), log=log.info)
-        eq, ref = equivalence(ref_sites, co, p, fold0)
-        run_stats = http_run(ref_sites, p, ref, fold0) if http else None
+        # the evaluation check runs on each centre's fold-0 test patients; a centre with fewer than
+        # min_site_patients there declines the job (the network's rule), which is recorded
+        te0 = fold0[1]
+        mins = int(fed_settings()["network"]["min_site_patients"])
+        eval_ids = [s.site_id for s in ref_sites if len(s.rows(STAGE, OUTCOMES[0], te0)) >= mins]
+        declined = [{"id": s.site_id, "patients": int(len(s.rows(STAGE, OUTCOMES[0], te0)))}
+                    for s in ref_sites if s.site_id not in eval_ids]
+        if len(eval_ids) >= 3:
+            eq, ref = equivalence(ref_sites, co, p, fold0, eval_ids)
+            eq["eval_declined"] = declined
+            run_stats = http_run(ref_sites, p, ref, fold0, eval_ids) if http else None
 
     centres = []
     for s in sites:
