@@ -23,6 +23,12 @@ Amendment 2: a third, disjoint sample of 1,200 synthetic MR CLEAN patients that 
 network tests the finished network models the way a new hospital would (a pipeline check, not a
 validation).
 
+Results (28 November 2026, [docs/registrations/v2_imaging_results.md](docs/registrations/v2_imaging_results.md)):
+the perfusion-volume extractor did not meet the pre-specified criterion on ISLES'24 (Spearman 0.27,
+95% CI 0.09–0.44, minimum 0.5), so it is not offered; the app's data page now asks partners to enter
+volumes from their own perfusion software. The ISLES'24 demonstration node reads correctly
+(148 patients, 128 with a 90-day outcome).
+
 ## MTOP ordinal 1.0.0 (22 November 2026)
 
 A new, separate model: a proportional-odds regression of all seven 90-day mRS grades at each stage,
