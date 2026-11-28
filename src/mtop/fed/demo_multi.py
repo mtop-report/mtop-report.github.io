@@ -8,6 +8,11 @@ Plan: docs/registrations/v2_imaging_plan.md, amendment 1. A software test, not a
   ISLES24      the ISLES'24 training set (Munich and Zurich), few clinical predictors,
                perfusion volumes from the extractor (src/mtop/isles.py)
 
+A fifth group, a third disjoint MR CLEAN sample of 1,200 (amendment 2), never joins the network:
+it plays a new hospital that downloads the finished network model and tests it at home. It comes
+from the same synthetic population as two of the training centres, so it checks the pipeline, not
+how the model transfers.
+
 The centres differ in country, size, case mix and which predictors they record, as real partners
 will. Each centre's rows are written in the MTOP upload template and read by its own site node.
 The analyses are those of the original demonstration (fed/demo.py): inside every centre, 5-fold
@@ -56,6 +61,7 @@ STAGES = (("admission", "good_outcome"), ("admission", "death90"), ("procedure",
 LABELS = {"Ostrava": "Ostrava (FNO registry)", "MRCLEAN_A": "MR CLEAN synthetic A",
           "MRCLEAN_B": "MR CLEAN synthetic B", "ISLES24": "Munich–Zurich (ISLES'24)"}
 OUT_DIR = paths.PROCESSED / "federated" / "multi"
+VALIDATION = "MRCLEAN_VAL"
 DEFAULT_MRS = paths.RAW / "mrs_clean" / "template_primary.csv"
 DEFAULT_ISLES = paths.RAW / "isles24" / "isles24_site.csv"
 
@@ -77,12 +83,14 @@ def source_frames(mrs_path: Path = DEFAULT_MRS, isles_path: Path = DEFAULT_ISLES
 
 
 def split_mrs(mrs: pd.DataFrame, n: int = MRS_PER_CENTRE, seed: int = SEED_SAMPLE) -> dict[str, pd.DataFrame]:
-    """Two disjoint random samples of n rows (fixed seed); drawn without looking at any value."""
-    if len(mrs) < 2 * n:
-        raise ValueError(f"MRS CLEAN has {len(mrs)} rows; two centres of {n} need {2 * n}")
+    """Three disjoint random samples of n rows (fixed seed), drawn without looking at any value:
+    two network centres and the held-out validation sample (amendment 2)."""
+    if len(mrs) < 3 * n:
+        raise ValueError(f"MRS CLEAN has {len(mrs)} rows; three samples of {n} need {3 * n}")
     idx = np.random.default_rng(seed).permutation(len(mrs))
     return {"MRCLEAN_A": mrs.iloc[idx[:n]].reset_index(drop=True),
-            "MRCLEAN_B": mrs.iloc[idx[n:2 * n]].reset_index(drop=True)}
+            "MRCLEAN_B": mrs.iloc[idx[n:2 * n]].reset_index(drop=True),
+            VALIDATION: mrs.iloc[idx[2 * n:3 * n]].reset_index(drop=True)}
 
 
 def make_sites(frames: dict[str, pd.DataFrame], out_dir: Path = OUT_DIR) -> tuple[list[SiteNode], dict]:
@@ -91,6 +99,8 @@ def make_sites(frames: dict[str, pd.DataFrame], out_dir: Path = OUT_DIR) -> tupl
         f.unlink()
     nodes, reports = [], {}
     for cid, raw in frames.items():
+        if cid == VALIDATION:
+            continue
         path = out_dir / f"centre_{cid}.csv"
         raw.to_csv(path, index=False)
         typed, rep = read_site_csv(path)
@@ -115,6 +125,50 @@ def recorded(df: pd.DataFrame) -> dict:
     share = {c: float(df[c].notna().mean()) for c in cols}
     return {"predictors": len(cols), "recorded_half_or_more": int(sum(v >= 0.5 for v in share.values())),
             "recorded_any": int(sum(v > 0 for v in share.values()))}
+
+
+# --------------------------------------------------------------------------- held-out validation
+def validation_node(frames: dict, out_dir: Path) -> SiteNode | None:
+    if VALIDATION not in frames:
+        return None
+    path = out_dir / f"centre_{VALIDATION}.csv"
+    frames[VALIDATION].to_csv(path, index=False)
+    typed, _ = read_site_csv(path)
+    return SiteNode(VALIDATION, typed, label="MR CLEAN synthetic, held-out validation sample")
+
+
+def external_check(sites, val: SiteNode, co, target: str, p: GBDTParams, n_boot: int, seed: int) -> dict:
+    """The finished network models (boosted trees and the regression with splines, trained on all
+    patients of all network centres) and each centre's own model, scored at the validation sample
+    the way a new hospital would score them at home."""
+    from .. import metrics as M
+    from .coordinator import PooledNetwork, federated_logreg, fit_gbdt
+    from .gbdt import raw_score, sigmoid
+    from .logreg import predict_spline
+
+    ids = [s.site_id for s in sites]
+    d, B, y = val.cohort(STAGE, target)
+    preds = {}
+    net, _ = federated_gbdt_all(co, ids, target, p)
+    preds["network_trees"] = sigmoid(raw_score(net, B))
+    lr, _ = federated_logreg(co, ids, STAGE, target, None)
+    preds["network_regression"] = predict_spline(lr, d)
+    for s in sites:
+        own = fit_gbdt(PooledNetwork.from_sites([s], STAGE, target, None), STAGE, target, p)
+        preds[f"alone_{s.site_id}"] = sigmoid(raw_score(own, B))
+    ci = M.bootstrap_ci(y, preds, n_boot=n_boot, seed=seed + 50, ref="network_trees")
+    out = {"n": int(len(y)), "events": int(y.sum()), "observed": _r(y.mean()), "models": {}}
+    for name, pr in preds.items():
+        sm = M.summary(y, pr)
+        out["models"][name] = {**{k: _r(sm[k]) for k in ("auroc", "brier", "citl", "slope", "mean_pred")},
+                               "auroc_ci": [_r(v) for v in ci[name]["auroc"]]}
+    return out
+
+
+def federated_gbdt_all(co, ids, target, p):
+    from .coordinator import federated_gbdt
+
+    return federated_gbdt(co, ids, STAGE, target, None, p)
 
 
 # --------------------------------------------------------------------------- suppression
@@ -153,6 +207,8 @@ def suppress(out: dict, k: int) -> dict:
         for r in res.get("regression", {}).values():
             for g in r["per_centre"]:
                 blank(g)
+        if res.get("validation"):
+            blank(res["validation"])
     for st in out["stages"]:
         for g in st.get("per_centre", []):
             blank(g)
@@ -167,6 +223,8 @@ def check_public(out: dict, k: int) -> None:
         groups += res["per_centre"] + res["loso"]
         for r in res.get("regression", {}).values():
             groups += r["per_centre"]
+        if res.get("validation"):
+            groups.append(res["validation"])
     for st in out["stages"]:
         groups += st.get("per_centre", [])
     for g in groups:
@@ -187,6 +245,7 @@ def run(frames: dict[str, pd.DataFrame] | None = None, http: bool = True, quick:
     checks = list(range(0, p.trees + 1, 5))
     frames = frames if frames is not None else source_frames()
     sites, reports = make_sites(frames, out_dir)
+    val = validation_node(frames, out_dir)
     t0 = time.time()
 
     outcomes, fold0, ref_sites = {}, None, None
@@ -205,6 +264,8 @@ def run(frames: dict[str, pd.DataFrame] | None = None, http: bool = True, quick:
         res["size"] = size_effect(q, STAGE, target, p, folds, seed, reps, res, sizes=sizes) if sizes else None
         res["loso"] = leave_one_out(q, co, target, p, n_boot, seed)
         res["regression"] = compare_regression(q, co, STAGE, target, folds, seed)
+        if val is not None:
+            res["validation"] = external_check(q, val, co, target, p, n_boot, seed)
         outcomes[target] = res
     stages = []
     for st, t in STAGES[2:]:

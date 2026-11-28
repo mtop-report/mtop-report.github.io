@@ -19,6 +19,10 @@ samples of 1,200 synthetic MR CLEAN patients, and ISLES'24. A software test, not
 shown in the app only after the MR CLEAN team has seen it. The extractor reads NIfTI and greyscale
 DICOM maps (`python -m mtop perfusion`); it is offered in the app only if it passes the plan's check.
 
+Amendment 2: a third, disjoint sample of 1,200 synthetic MR CLEAN patients that never joins the
+network tests the finished network models the way a new hospital would (a pipeline check, not a
+validation).
+
 ## MTOP ordinal 1.0.0 (22 November 2026)
 
 A new, separate model: a proportional-odds regression of all seven 90-day mRS grades at each stage,

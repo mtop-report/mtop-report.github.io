@@ -229,3 +229,27 @@ the upload template, as a research tool that fills the template's perfusion colu
   `ctp_software`.
 
 If the criterion is not met, the tool is not offered and the data page says why.
+
+## Amendment 2 (28 November 2026): a held-out validation sample in the simulation
+
+Committed before the simulation of amendment 1 is run on real data; code in the same module, tested
+on synthetic centres only.
+
+**Reason.** The simulation does not yet test the last step of the network's workflow: a hospital
+that did not take part downloads the finished model and tests it on its own patients.
+
+- **The sample.** A third random sample of 1,200 patients from MRS CLEAN, drawn with the same seed
+  together with the two network samples and disjoint from both. It never joins the network.
+- **What is scored.** Before thrombectomy, for both outcomes:
+  - the network's boosted trees and its regression with splines, each trained on all patients of
+    all network centres;
+  - each centre's own boosted-tree model, trained on all of its patients.
+- **Measures.** AUROC (area under the receiver operating characteristic curve) with a 95 %
+  bootstrap interval, Brier score, calibration-in-the-large and slope, and mean predicted against
+  observed risk.
+- **Interpretation, fixed here.** The sample comes from the same synthetic population as two of
+  the network centres. The results therefore check the pipeline and are expected to favour the
+  MR CLEAN centres' own models. They do not show how MTOP or the network model transfers to a new
+  hospital.
+- **Rules.** The same as amendment 1, section A1.3: aggregates only, suppression of small groups,
+  and the MR CLEAN team sees the results before any other use.

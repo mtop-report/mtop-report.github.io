@@ -45,9 +45,10 @@ def test_mr_clean_split_is_disjoint_and_fixed():
     a = DM.split_mrs(df, n=300)
     b = DM.split_mrs(df, n=300)
     assert a["MRCLEAN_A"].equals(b["MRCLEAN_A"])
-    assert not set(a["MRCLEAN_A"]["x"]) & set(a["MRCLEAN_B"]["x"])
+    parts = [set(a[k]["x"]) for k in ("MRCLEAN_A", "MRCLEAN_B", DM.VALIDATION)]
+    assert not (parts[0] & parts[1]) and not (parts[0] & parts[2]) and not (parts[1] & parts[2])
     with pytest.raises(ValueError):
-        DM.split_mrs(df, n=600)
+        DM.split_mrs(df, n=400)
 
 
 def test_suppression_blanks_small_groups():
@@ -73,6 +74,11 @@ def test_four_centre_run_end_to_end(frames, tmp_path):
     adm = out["outcomes"]["good_outcome"]
     assert set(adm["centres_used"]) == {"Ostrava", "MRCLEAN_A", "MRCLEAN_B", "ISLES24"}
     assert out["equivalence"]["gbdt"]["identical"]
+    v = adm["validation"]                                   # held-out sample, never in the network
+    assert v["n"] == 300 and "MRCLEAN_VAL" not in adm["centres_used"]
+    assert set(v["models"]) == {"network_trees", "network_regression", "alone_Ostrava", "alone_MRCLEAN_A",
+                                "alone_MRCLEAN_B", "alone_ISLES24"}
+    assert v["models"]["network_trees"]["auroc_ci"][0] <= v["models"]["network_trees"]["auroc"]
     h24 = next(s for s in out["stages"] if s["stage"] == "h24")
     assert "ISLES24" not in h24["centres_used"]            # no 24-hour NIHSS recorded
     saved = json.loads(pub.read_text())
