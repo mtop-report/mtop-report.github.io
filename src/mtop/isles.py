@@ -100,7 +100,11 @@ def _drop_small(mask: np.ndarray, min_voxels: float) -> np.ndarray:
 
 
 def load_map(path: Path) -> tuple[np.ndarray, float]:
-    """A 3D map and its voxel volume in mL (from the header)."""
+    """A 3D map and its voxel volume in mL. NIfTI (.nii, .nii.gz) or DICOM: a folder holding one
+    greyscale series, or a single (multi-frame) DICOM file."""
+    path = Path(path)
+    if path.is_dir() or not path.name.lower().endswith(NII):
+        return load_dicom(path)
     import nibabel as nib
 
     img = nib.load(str(path))
@@ -111,6 +115,78 @@ def load_map(path: Path) -> tuple[np.ndarray, float]:
         raise ValueError(f"{path.name}: expected a 3D map, got shape {data.shape}")
     zooms = img.header.get_zooms()[:3]
     return data, float(np.prod(zooms)) / 1000.0
+
+
+def load_dicom(path: Path) -> tuple[np.ndarray, float]:
+    """A greyscale DICOM parametric map (one series) as a 3D array in its stored units after the
+    rescale slope and intercept, and the voxel volume in mL. Colour images (screenshots or overlays
+    exported by some perfusion programs) are refused: their pixels are not measurements."""
+    import pydicom
+
+    files = sorted(p for p in Path(path).rglob("*") if p.is_file()) if Path(path).is_dir() else [Path(path)]
+    dss = []
+    for f in files:
+        try:
+            ds = pydicom.dcmread(str(f), force=True)
+        except Exception:                          # noqa: BLE001 - not a DICOM file: skipped
+            continue
+        if "PixelData" in ds:
+            dss.append(ds)
+    if not dss:
+        raise FileNotFoundError(f"{path}: no DICOM image found")
+    for ds in dss:
+        if int(getattr(ds, "SamplesPerPixel", 1)) != 1 or str(getattr(ds, "PhotometricInterpretation", "")).startswith(("RGB", "YBR", "PALETTE")):
+            raise ValueError(f"{path}: colour DICOM image (a screenshot or overlay); export the greyscale parametric map instead")
+    uids = {str(getattr(ds, "SeriesInstanceUID", "")) for ds in dss}
+    if len(uids) > 1:
+        raise ValueError(f"{path}: {len(uids)} DICOM series in one folder; give one map per folder")
+
+    def scaled(ds):
+        a = ds.pixel_array.astype(np.float32)
+        return a * float(getattr(ds, "RescaleSlope", 1) or 1) + float(getattr(ds, "RescaleIntercept", 0) or 0)
+
+    if len(dss) == 1 and int(getattr(dss[0], "NumberOfFrames", 1)) > 1:   # multi-frame file
+        ds = dss[0]
+        vol = np.moveaxis(scaled(ds), 0, -1)
+        px = [float(v) for v in getattr(ds, "PixelSpacing", [np.nan, np.nan])]
+        dz = float(getattr(ds, "SpacingBetweenSlices", 0) or getattr(ds, "SliceThickness", 0) or np.nan)
+    else:
+        def zpos(ds):
+            iop = getattr(ds, "ImageOrientationPatient", None)
+            ipp = getattr(ds, "ImagePositionPatient", None)
+            if iop is not None and ipp is not None:
+                n = np.cross(np.asarray(iop[:3], float), np.asarray(iop[3:], float))
+                return float(np.dot(n, np.asarray(ipp, float)))
+            return float(getattr(ds, "InstanceNumber", 0) or 0)
+
+        dss.sort(key=zpos)
+        if len({(int(d.Rows), int(d.Columns)) for d in dss}) != 1:
+            raise ValueError(f"{path}: slices of different sizes")
+        vol = np.stack([scaled(d) for d in dss], axis=-1)
+        px = [float(v) for v in getattr(dss[0], "PixelSpacing", [np.nan, np.nan])]
+        z = np.array([zpos(d) for d in dss])
+        dz = float(np.median(np.diff(z))) if len(z) > 1 and np.ptp(z) > 0 else \
+            float(getattr(dss[0], "SpacingBetweenSlices", 0) or getattr(dss[0], "SliceThickness", 0) or np.nan)
+    vox = px[0] * px[1] * abs(dz) / 1000.0
+    if not np.isfinite(vox) or vox <= 0:
+        raise ValueError(f"{path}: voxel size missing from the DICOM header")
+    return vol, vox
+
+
+def perfusion(tmax_path: Path, cbf_path: Path, cfg: dict | None = None) -> dict:
+    """The template's perfusion columns for one patient from its Tmax and CBF maps (NIfTI or DICOM)."""
+    cfg = cfg or settings()
+    t, vt = load_map(Path(tmax_path))
+    c, vc = load_map(Path(cbf_path))
+    if not np.isclose(vt, vc, rtol=1e-3):
+        raise ValueError("Tmax and CBF voxel sizes differ")
+    v = volumes(t, c, vt, cfg["extractor"])
+    keys = ["ctp_core_ml", "ctp_tmax6_ml", "ctp_mismatch_ml", "ctp_mismatch_ratio", "ctp_mismatch_rel"]
+    return {"ctp_done": 1, **{k: (None if not np.isfinite(v[k]) else round(float(v[k]), 2)) for k in keys},
+            "ctp_software": "MTOP extractor (research use only)",
+            "check": {"reference_cbf": v["reference_cbf"], "reference_voxels": v["reference_voxels"],
+                      "tmax_p5_p50_p95": [round(float(q), 2) for q in np.nanpercentile(t[np.isfinite(t) & (t > 0)], [5, 50, 95])]
+                      if np.any(np.isfinite(t) & (t > 0)) else None}}
 
 
 def lesion_ml(path: Path) -> float:

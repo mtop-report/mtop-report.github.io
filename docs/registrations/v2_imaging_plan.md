@@ -142,3 +142,90 @@ If the extractor passes, it is offered to partner centres as an optional local t
 the perfusion columns of the template. Whether perfusion volumes improve MTOP is tested later, under
 amendment 1, on centres' own data with at least 100 patients in each outcome group and before any
 model includes them. That analysis needs its own registered plan.
+
+## Amendment 1 (28 November 2026): a four-centre network simulation and the extractor in the app
+
+Committed before the ISLES'24 data are downloaded or unpacked and before the simulation below is
+run on real data; its code (`src/mtop/fed/demo_multi.py`) was tested on synthetic centres only
+(`tests/test_fed_multi.py`).
+
+**Reason.** The network's current demonstration splits FNO's own registry into four virtual centres
+by treatment years. They share one hospital's population, practice and way of recording data, so
+the demonstration is easier than a real network. A simulation with centres from different sources
+shows how the network behaves when centres differ in country, size, case mix and recorded
+predictors, as real partners will.
+
+### A1.1 Centres
+
+| Centre | Source | Patients |
+|---|---|---|
+| Ostrava | FNO registry, the cohort of the main analysis | all eligible |
+| MRCLEAN_A | MRS CLEAN synthetic data (MR CLEAN Registry and trials), primary template | random sample of 1,200 |
+| MRCLEAN_B | the same file, a second random sample, disjoint from A | 1,200 |
+| ISLES24 | ISLES'24 training set: the template file of section 5, with the perfusion columns | all |
+
+- The two MR CLEAN samples are drawn with a fixed seed (2026) from the row order alone, before
+  any value is read. The file has no source-cohort variable, so a split by cohort is not possible.
+  Samples of 1,200 keep the centres within the range of real stroke centres; all 15,000 would
+  dominate every network model.
+- ISLES'24 enters with the mapping fixed under section 5. Its outcomes are used only inside this
+  simulation. This replaces, for this simulation only, the statement in section 2 that ISLES'24
+  outcomes are not analysed.
+
+### A1.2 Analyses
+
+The analyses are those of the existing demonstration (`fed/demo.py`), unchanged:
+
+- inside every centre, 5-fold cross-validation;
+- each centre scores its own held-out patients with three models: trained on its own patients
+  (alone), trained by the network (network), and the network model with 10 boosting steps on its
+  own patients (adapted);
+- the regression with splines and the linear regression, alone and in the network;
+- leave-one-centre-out validation;
+- centre size: a centre that contributes only 50 or 100 of its training patients. 200 is omitted
+  because ISLES'24 has fewer training patients than that per fold;
+- the check that federated training equals pooled training;
+- one run over HTTP.
+
+Two rules are added, both fixed here:
+
+- **Which centres take part.** A stage and outcome is run only with the centres that have at
+  least 50 eligible patients (the network's existing rule) and at least 10 patients in each
+  outcome group. It is skipped when fewer than three centres qualify, the minimum for secure
+  aggregation. ISLES'24 is therefore expected to take part before thrombectomy only, and MRS CLEAN
+  not on day 7.
+- **Suppression.** Any centre-level result based on fewer than 10 patients, or fewer than 10 in
+  either outcome group, is suppressed in the published output, as in all public MTOP outputs.
+
+Also reported, as aggregates: how many template predictors each centre records for at least half
+of its patients, and how many patients have perfusion volumes.
+
+### A1.3 What the results are and are not
+
+- They are a **software test**: they show how the network behaves with heterogeneous centres.
+  They are not a validation of MTOP, and no model built here is used anywhere.
+- MRS CLEAN is synthetic, and its licence allows private use only. The results go to the MR CLEAN
+  team before any other use. The app's Multicentre page keeps the current demonstration until
+  they have seen them. Output: `artifacts/public/federated_multi.json`, aggregates only.
+- Row-level files stay in a git-ignored folder (`data/processed/federated/multi/`). FNO patient
+  data are processed only on the computer used for the main analysis, never on MetaCentrum.
+  Only the ISLES'24 template file (derived from public data) is copied from MetaCentrum.
+
+### A1.4 The extractor in the app
+
+If the extractor meets the criterion of section 4.2, it is offered on the app's data page, next to
+the upload template, as a research tool that fills the template's perfusion columns. The rules:
+
+- **Runs locally.** It runs on the user's own computer, or in the browser without uploading
+  anything, and no image leaves the hospital. It reads NIfTI and greyscale DICOM parametric maps
+  (`python -m mtop perfusion --tmax ... --cbf ...`). Colour DICOM images, such as screenshots or
+  overlays exported by some programs, are refused because their pixels are not measurements.
+- **Research use only.** It is labelled as research software, not a medical device, and not for
+  diagnosis or treatment decisions. It outputs numbers for the research template, not images or
+  maps for clinical reading.
+- **Stated limits.** The page states that it was checked only on the ISLES'24 maps, against the
+  follow-up infarct; that volumes differ between programs and thresholds; and that results from
+  vendor software (for example RAPID) are preferred where available, with the program named in
+  `ctp_software`.
+
+If the criterion is not met, the tool is not offered and the data page says why.

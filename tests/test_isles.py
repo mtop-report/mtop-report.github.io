@@ -132,3 +132,56 @@ def test_agreement_is_aggregate_and_reproducible():
     assert a == b and a["n"] == 60 and a["usable"] is True
     assert a["spearman_ci95"][0] <= a["spearman"] <= a["spearman_ci95"][1]
     assert I.agreement(vol.head(5))["n"] == 5
+
+
+# ---------------------------------------------------------------- DICOM input
+pydicom = pytest.importorskip("pydicom")
+
+
+def _dicom_series(arr, folder, slope=1.0, intercept=0.0, rgb=False, uid="1.2.3"):
+    from pydicom.dataset import FileDataset, FileMetaDataset
+    from pydicom.uid import ExplicitVRLittleEndian, SecondaryCaptureImageStorage
+
+    folder.mkdir(parents=True, exist_ok=True)
+    stored = np.round((arr - intercept) / slope).astype(np.uint16)
+    for k in range(arr.shape[2]):
+        meta = FileMetaDataset()
+        meta.MediaStorageSOPClassUID = SecondaryCaptureImageStorage
+        meta.MediaStorageSOPInstanceUID = f"{uid}.{k + 1}"
+        meta.TransferSyntaxUID = ExplicitVRLittleEndian
+        ds = FileDataset(str(folder / f"im{k:03d}.dcm"), {}, file_meta=meta, preamble=b"\0" * 128)
+        ds.SeriesInstanceUID = uid
+        ds.Rows, ds.Columns = arr.shape[0], arr.shape[1]
+        ds.PixelSpacing = [VOX_MM[0], VOX_MM[1]]
+        ds.ImageOrientationPatient = [1, 0, 0, 0, 1, 0]
+        ds.ImagePositionPatient = [0, 0, (arr.shape[2] - 1 - k) * VOX_MM[2]]      # written in reverse order
+        ds.InstanceNumber = k + 1
+        ds.RescaleSlope, ds.RescaleIntercept = slope, intercept
+        ds.BitsAllocated, ds.BitsStored, ds.HighBit, ds.PixelRepresentation = 16, 16, 15, 0
+        if rgb:
+            ds.SamplesPerPixel, ds.PhotometricInterpretation, ds.PlanarConfiguration = 3, "RGB", 0
+            ds.BitsAllocated, ds.BitsStored, ds.HighBit = 8, 8, 7
+            ds.PixelData = np.zeros((arr.shape[0], arr.shape[1], 3), np.uint8).tobytes()
+        else:
+            ds.SamplesPerPixel, ds.PhotometricInterpretation = 1, "MONOCHROME2"
+            ds.PixelData = np.ascontiguousarray(stored[:, :, arr.shape[2] - 1 - k]).tobytes()
+        ds.save_as(str(folder / f"im{k:03d}.dcm"), enforce_file_format=True)
+
+
+def test_dicom_series_gives_the_same_volumes_as_nifti(tmp_path):
+    t, c = _maps()
+    _dicom_series(t, tmp_path / "tmax", slope=0.01, uid="1.2.3.1")       # Tmax stored in 1/100 s
+    _dicom_series(c, tmp_path / "cbf", uid="1.2.3.2")
+    arr, vox = I.load_map(tmp_path / "tmax")
+    assert vox == pytest.approx(VOX_ML)
+    assert np.allclose(arr, t, atol=0.006)
+    out = I.perfusion(tmp_path / "tmax", tmp_path / "cbf")
+    assert out["ctp_tmax6_ml"] == pytest.approx(8.0) and out["ctp_core_ml"] == pytest.approx(0.8)
+    assert out["ctp_mismatch_ratio"] == pytest.approx(10.0)
+
+
+def test_colour_dicom_is_refused(tmp_path):
+    t, _ = _maps()
+    _dicom_series(t[:, :, :3], tmp_path / "shot", rgb=True)
+    with pytest.raises(ValueError, match="colour"):
+        I.load_map(tmp_path / "shot")

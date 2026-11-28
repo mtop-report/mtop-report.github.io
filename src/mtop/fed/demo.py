@@ -241,9 +241,10 @@ def compare_regression(sites, co, stage: str, target: str, folds: int, seed: int
     return out
 
 
-def size_effect(sites, stage: str, target: str, p: GBDTParams, folds: int, seed: int, reps: int, full: dict) -> dict:
+def size_effect(sites, stage: str, target: str, p: GBDTParams, folds: int, seed: int, reps: int, full: dict,
+                sizes: tuple = SIZES) -> dict:
     """A centre that contributes only m of its training patients: alone vs joined with the others."""
-    acc = {(m, r, s.site_id, kind): [] for m in SIZES for r in range(reps) for s in sites for kind in ("alone", "joined")}
+    acc = {(m, r, s.site_id, kind): [] for m in sizes for r in range(reps) for s in sites for kind in ("alone", "joined")}
     ys = {s.site_id: [] for s in sites}
     for k in range(folds):
         tr, te = _cv(k, folds, seed)
@@ -257,7 +258,7 @@ def size_effect(sites, stage: str, target: str, p: GBDTParams, folds: int, seed:
                     ds, Bs, yy = s.cohort(stage, target)
                     rr = s.rows(stage, target, tr)
                     others.append((ds.iloc[rr], Bs[rr], yy[rr]))
-            for m in SIZES:
+            for m in sizes:
                 for r in range(reps):
                     rng = np.random.default_rng([seed, k, m, r, hi])
                     pos, neg = r_tr[y[r_tr] == 1], r_tr[y[r_tr] == 0]
@@ -269,14 +270,14 @@ def size_effect(sites, stage: str, target: str, p: GBDTParams, folds: int, seed:
                     acc[(m, r, h.site_id, "alone")].append(raw_score(alone, B[r_te]))
                     acc[(m, r, h.site_id, "joined")].append(raw_score(joined, B[r_te]))
         log.info("size effect %s fold %d", target, k + 1)
-    out = {"sizes": list(SIZES), "alone": [], "network": [], "per_centre": {}}
+    out = {"sizes": list(sizes), "alone": [], "network": [], "per_centre": {}}
     for s in sites:
         y = _cat(ys[s.site_id])
         out["per_centre"][s.site_id] = {
-            kind: [_r(np.mean([auc(y, sigmoid(_cat(acc[(m, r, s.site_id, src)]))) for r in range(reps)])) for m in SIZES]
+            kind: [_r(np.mean([auc(y, sigmoid(_cat(acc[(m, r, s.site_id, src)]))) for r in range(reps)])) for m in sizes]
             for kind, src in (("alone", "alone"), ("network", "joined"))}
     for kind in ("alone", "network"):
-        out[kind] = [_r(np.mean([out["per_centre"][s.site_id][kind][j] for s in sites])) for j in range(len(SIZES))]
+        out[kind] = [_r(np.mean([out["per_centre"][s.site_id][kind][j] for s in sites])) for j in range(len(sizes))]
     out["full"] = {"n_train": int(np.mean([e["n_train"] for e in full["per_centre"]])),
                    "alone": full["mean"]["alone"], "network": full["mean"]["network"]}
     return out

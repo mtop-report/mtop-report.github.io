@@ -11,7 +11,13 @@ committed before the ISLES'24 data are downloaded: a fixed CT perfusion volume e
 Tmax > 6 s, mismatch) checked against the follow-up infarct, and a technical demonstration node
 that writes the ISLES'24 cases in the network template. Code `src/mtop/isles.py`
 (`python -m mtop isles`), settings `config/isles24.yaml`, tests on synthetic maps
-`tests/test_isles.py`. Optional dependency `nibabel` (`pip install .[imaging]`).
+`tests/test_isles.py`. Optional dependencies `nibabel` and `pydicom` (`pip install .[imaging]`).
+
+Amendment 1 of the same plan: a four-centre network simulation (`python -m mtop fed-multi`, code
+`src/mtop/fed/demo_multi.py`, tests `tests/test_fed_multi.py`): Ostrava, two disjoint random
+samples of 1,200 synthetic MR CLEAN patients, and ISLES'24. A software test, not a validation;
+shown in the app only after the MR CLEAN team has seen it. The extractor reads NIfTI and greyscale
+DICOM maps (`python -m mtop perfusion`); it is offered in the app only if it passes the plan's check.
 
 ## MTOP ordinal 1.0.0 (22 November 2026)
 

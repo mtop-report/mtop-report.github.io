@@ -14,6 +14,9 @@
             (--comparators-only refreshes just the comparator panel)
   adaptive  model-updating experiments, drift monitor, era validation (artifacts/public)
   fed-demo  federated network demo: four virtual centres from the registry (artifacts/public)
+  fed-multi four-centre simulation: Ostrava, two MR CLEAN synthetic samples, ISLES'24 (plan v2, amendment 1)
+  isles     ISLES'24 perfusion-volume extractor and demonstration node (docs/registrations/v2_imaging_plan.md)
+  perfusion one patient's template perfusion columns from Tmax and CBF maps (NIfTI or DICOM; research use only)
             (the network itself: python -m mtop.fed coordinator | site | template | check)
   explorer  suppressed aggregate statistics for the cohort explorer (artifacts/public)
   preprocessing  cohort flow, data checks, missingness, outcome availability, variable map
@@ -258,6 +261,31 @@ def cmd_pool(args):
     pool_main(args)
 
 
+def cmd_fed_multi(args):
+    from pathlib import Path
+
+    from .fed import demo_multi as DM
+
+    frames = DM.source_frames(Path(args.mrs) if args.mrs else DM.DEFAULT_MRS,
+                              Path(args.isles) if args.isles else DM.DEFAULT_ISLES)
+    out = DM.run(frames, http=not args.no_http, quick=args.quick)
+    for t, r in out["outcomes"].items():
+        if "mean" in r:
+            print(f"fed-multi {t}: mean AUROC alone {r['mean']['alone']}, network {r['mean']['network']}, "
+                  f"adapted {r['mean']['adapted']}")
+    print("fed-multi: aggregates in artifacts/public/federated_multi.json (not shown in the app until the "
+          "MR CLEAN team has seen them)")
+
+
+def cmd_perfusion(args):
+    import json
+
+    from .isles import perfusion
+
+    print("MTOP perfusion extractor: research use only, not a medical device, not for diagnosis or treatment.")
+    print(json.dumps(perfusion(args.tmax, args.cbf), indent=1))
+
+
 def cmd_isles(args):
     from .isles import main as isles_main
 
@@ -302,7 +330,7 @@ def main(argv=None):
                      ("extras", cmd_extras), ("adaptive", cmd_adaptive), ("fed-demo", cmd_fed_demo),
                      ("explorer", cmd_explorer), ("preprocessing", cmd_preprocessing), ("reporting", cmd_reporting),
                      ("associations", cmd_associations), ("analyses", cmd_analyses), ("shap", cmd_shap), ("report", cmd_report), ("site", cmd_site),
-                     ("all", cmd_all), ("synth", cmd_synth), ("studio", cmd_studio), ("pool", cmd_pool), ("isles", cmd_isles)]:
+                     ("all", cmd_all), ("synth", cmd_synth), ("studio", cmd_studio), ("pool", cmd_pool), ("isles", cmd_isles), ("fed-multi", cmd_fed_multi), ("perfusion", cmd_perfusion)]:
         p = sub.add_parser(name)
         p.set_defaults(fn=fn)
         if name in ("clean", "all", "studio"):
@@ -310,6 +338,14 @@ def main(argv=None):
         if name in ("clean", "all"):
             p.add_argument("--no-corrections", action="store_true",
                            help="ignore data/studio/corrections.csv (clean the export exactly as recorded)")
+        if name == "perfusion":
+            p.add_argument("--tmax", required=True, help="Tmax map: NIfTI file, DICOM file or a folder with one DICOM series")
+            p.add_argument("--cbf", required=True, help="CBF map, same formats")
+        if name == "fed-multi":
+            p.add_argument("--mrs", help="MRS CLEAN primary template (default data/raw/mrs_clean/template_primary.csv)")
+            p.add_argument("--isles", help="ISLES'24 site file (default data/raw/isles24/isles24_site.csv)")
+            p.add_argument("--quick", action="store_true", help="fewer trees and folds, for testing")
+            p.add_argument("--no-http", action="store_true", help="skip the run over HTTP")
         if name == "isles":
             p.add_argument("--root", required=True, help="unpacked ISLES'24 training set (BIDS tree)")
             p.add_argument("--out", help="folder for row-level outputs (default data/raw/isles24, git-ignored)")
