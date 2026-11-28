@@ -34,7 +34,7 @@ studio = ["streamlit>=1.40"]
 # optional speed-up of the ordinal solver (src/mtop/ordinal.py; same results, tested)
 fast = ["numba>=0.60"]
 # ISLES'24 perfusion-volume extractor (python -m mtop isles; docs/registrations/v2_imaging_plan.md)
-imaging = ["nibabel>=5", "pydicom>=2.4"]
+imaging = ["nibabel>=5", "pydicom>=2.4", "cryptography>=41"]   # cryptography: the demonstration node reads the template with the network's site code
 dev = ["pytest>=8", "cryptography>=41"]
 
 [project.scripts]
