@@ -258,6 +258,12 @@ def cmd_pool(args):
     pool_main(args)
 
 
+def cmd_isles(args):
+    from .isles import main as isles_main
+
+    isles_main(args)
+
+
 def cmd_all(args):
     t = time.time()
     cmd_clean(args)
@@ -296,7 +302,7 @@ def main(argv=None):
                      ("extras", cmd_extras), ("adaptive", cmd_adaptive), ("fed-demo", cmd_fed_demo),
                      ("explorer", cmd_explorer), ("preprocessing", cmd_preprocessing), ("reporting", cmd_reporting),
                      ("associations", cmd_associations), ("analyses", cmd_analyses), ("shap", cmd_shap), ("report", cmd_report), ("site", cmd_site),
-                     ("all", cmd_all), ("synth", cmd_synth), ("studio", cmd_studio), ("pool", cmd_pool)]:
+                     ("all", cmd_all), ("synth", cmd_synth), ("studio", cmd_studio), ("pool", cmd_pool), ("isles", cmd_isles)]:
         p = sub.add_parser(name)
         p.set_defaults(fn=fn)
         if name in ("clean", "all", "studio"):
@@ -304,6 +310,11 @@ def main(argv=None):
         if name in ("clean", "all"):
             p.add_argument("--no-corrections", action="store_true",
                            help="ignore data/studio/corrections.csv (clean the export exactly as recorded)")
+        if name == "isles":
+            p.add_argument("--root", required=True, help="unpacked ISLES'24 training set (BIDS tree)")
+            p.add_argument("--out", help="folder for row-level outputs (default data/raw/isles24, git-ignored)")
+            p.add_argument("--headers-only", action="store_true",
+                           help="step 1: clinical column names and missing counts only (plan, section 5)")
         if name == "studio":
             p.add_argument("--port", type=int, default=8765)
             p.add_argument("--set-password", action="store_true", help="set or change the studio password")

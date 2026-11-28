@@ -1,0 +1,54 @@
+# ISLES'24 training set: perfusion-volume extractor and technical demonstration node
+# (plan: docs/registrations/v2_imaging_plan.md). Fixed before the data are downloaded.
+#
+# The extractor turns a case's perfusion maps into the optional future columns of the partner
+# template (config/future.yaml). None of these values is a model input.
+
+dataset:
+  name: "ISLES'24 training set"
+  record: "https://zenodo.org/records/16748089/latest"   # version and MD5 recorded at download
+  licence: "CC BY-NC-SA 4.0"
+  software_label: "ISLES'24 maps"                        # written to ctp_software
+
+extractor:
+  tmax_threshold_s: 6.0          # hypoperfusion: Tmax > 6 s
+  tmax_unit_factor: 1.0          # multiplies the Tmax map to get seconds; checked on the value ranges in step 1
+  rcbf_threshold: 0.30           # core: relative CBF < 30 % ...
+  core_requires_tmax: true       # ... inside the Tmax > 6 s region
+  reference_tmax_below_s: 4.0    # reference CBF: median CBF of valid voxels with Tmax < 4 s
+  min_reference_voxels: 1000     # fewer -> core not computed (missing)
+  tmax_valid_range_s: [0.0, 30.0]  # outside, or not finite, or CBF <= 0: voxel not valid tissue
+  min_cluster_ml: 0.5            # sensitivity analysis only: drop connected clusters smaller than this
+
+agreement:                       # Aim A: automated core against the follow-up infarct (ses-0002)
+  bootstrap: 2000
+  seed: 2026
+  usable_if_spearman_at_least: 0.5   # pre-specified; below it the extractor is not offered to centres
+
+# File patterns inside the BIDS tree (case-insensitive substrings; the first match is used).
+files:
+  tmax: ["tmax"]
+  cbf: ["cbf"]
+  followup_lesion: ["lesion-msk", "lesion_msk", "msk"]   # searched only in ses-0002
+  demographics: ["demographic_baseline"]
+  outcome: ["outcome"]
+
+# Clinical table -> MTOP template. Each key lists candidate column names (compared without case,
+# spaces or symbols). Status stays "draft" until the column names (not the values) have been read;
+# then the mapping is fixed, the status set to "fixed" with the date, and committed before the
+# node is run (plan, section 5).
+mapping_status: draft
+mapping:
+  age: ["age", "age_years"]
+  sex_male: ["sex", "gender"]
+  mrs_pre: ["mrs_pre", "prestroke_mrs", "mrs_prestroke", "premorbid_mrs", "mrs_admission"]
+  nihss_adm: ["nihss_admission", "nihss_baseline", "admission_nihss", "nihss"]
+  ivt: ["ivt", "iv_thrombolysis", "thrombolysis", "rtpa", "tpa"]
+  htn: ["hypertension", "arterial_hypertension", "htn"]
+  dm: ["diabetes", "diabetes_mellitus", "dm"]
+  hld: ["hyperlipidemia", "dyslipidemia", "hypercholesterolemia", "hld"]
+  arrhythmia: ["atrial_fibrillation", "afib", "af", "arrhythmia"]
+  stroke_prior: ["prior_stroke", "previous_stroke", "stroke_history"]
+  smoking: ["smoking", "smoker"]
+  tici: ["tici", "mtici", "etici", "reperfusion_grade"]
+  mrs90: ["mrs_3month", "mrs_90", "mrs90", "mrs_3m", "mrs_90days"]

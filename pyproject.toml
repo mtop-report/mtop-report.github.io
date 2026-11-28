@@ -33,6 +33,8 @@ compare = ["catboost>=1.2", "torch>=2.2", "rtdl_revisiting_models>=0.0.2"]
 studio = ["streamlit>=1.40"]
 # optional speed-up of the ordinal solver (src/mtop/ordinal.py; same results, tested)
 fast = ["numba>=0.60"]
+# ISLES'24 perfusion-volume extractor (python -m mtop isles; docs/registrations/v2_imaging_plan.md)
+imaging = ["nibabel>=5"]
 dev = ["pytest>=8", "cryptography>=41"]
 
 [project.scripts]

@@ -4,6 +4,15 @@ Every published model version has its own fingerprint (SHA-256 of the models in
 `artifacts/public/model_bundle.json`), shown on the app's About tab. Earlier versions stay archived
 and selectable in the app, so every published result can be reproduced.
 
+## Unreleased: version 2.0 imaging module, registered (28 November 2026)
+
+No model changes. Plan [docs/registrations/v2_imaging_plan.md](docs/registrations/v2_imaging_plan.md),
+committed before the ISLES'24 data are downloaded: a fixed CT perfusion volume extractor (core,
+Tmax > 6 s, mismatch) checked against the follow-up infarct, and a technical demonstration node
+that writes the ISLES'24 cases in the network template. Code `src/mtop/isles.py`
+(`python -m mtop isles`), settings `config/isles24.yaml`, tests on synthetic maps
+`tests/test_isles.py`. Optional dependency `nibabel` (`pip install .[imaging]`).
+
 ## MTOP ordinal 1.0.0 (22 November 2026)
 
 A new, separate model: a proportional-odds regression of all seven 90-day mRS grades at each stage,
