@@ -111,6 +111,7 @@ def test_site_csv_is_read_by_the_network_template(tmp_path):
 
     _tree(tmp_path)
     cfg = I.settings()
+    cfg["mapping"] = {"age": ["age"], "sex_male": ["sex"], "nihss_adm": ["nihss_admission"], "mrs90": ["mrs_3month"]}
     clin, rep = I.map_clinical(I.clinical(tmp_path, cfg), cfg)
     assert rep["mapped"] == {"age": "age", "sex_male": "sex", "nihss_adm": "nihss_admission", "mrs90": "mrs_3month"}
     site = I.build_site(I.extract(tmp_path, cfg), clin, cfg)
@@ -185,3 +186,15 @@ def test_colour_dicom_is_refused(tmp_path):
     _dicom_series(t[:, :, :3], tmp_path / "shot", rgb=True)
     with pytest.raises(ValueError, match="colour"):
         I.load_map(tmp_path / "shot")
+
+
+def test_fixed_mapping_names_the_isles_columns():
+    cfg = I.settings()
+    assert cfg["mapping_status"] == "fixed"
+    d = pd.DataFrame({"case": ["sub-stroke0001"], "Age": ["70"], "mRS premorbid": ["1.0"], "mRS 3 months": ["2"],
+                      "Sex": ["1"], "Glucose": ["120"]})
+    out, rep = I.map_clinical(d, cfg)
+    assert rep["mapped"]["mrs90"] == "mRS 3 months" and "sex_male" not in rep["mapped"]
+    assert set(rep["unused_columns"]) == {"Sex", "Glucose"}
+    assert I._whole("1.0") == "1" and I._whole("2b") == "2b" and I._whole("7.5") == "7.5"
+

@@ -264,9 +264,17 @@ def extract(root: Path, cfg: dict | None = None) -> pd.DataFrame:
 
 # ---------------------------------------------------------------- clinical tables
 
+def _whole(v):
+    """Excel numbers read as text keep a trailing '.0' (for example '1.0'); the template reader
+    expects '1'. Other values are unchanged."""
+    if isinstance(v, str) and re.fullmatch(r"-?\d+\.0+", v.strip()):
+        return v.strip().split(".")[0]
+    return v
+
+
 def _read_table(p: Path) -> pd.DataFrame:
     if p.suffix.lower() in (".xlsx", ".xls"):
-        return pd.read_excel(p, dtype=str)
+        return pd.read_excel(p, dtype=str).map(_whole)
     head = p.read_text(encoding="utf-8", errors="replace").splitlines()[:1]
     sep = "\t" if p.suffix.lower() == ".tsv" else next((s for s in (",", ";", "\t") if head and s in head[0]), ",")
     return pd.read_csv(p, sep=sep, dtype=str, keep_default_na=False)
@@ -408,6 +416,8 @@ def main(args) -> None:
     vol.to_csv(out / "isles24_volumes.csv", index=False)
     summary = {
         "dataset": cfg["dataset"]["name"],
+        "dataset_version": cfg["dataset"].get("downloaded"),
+        "mapping_fixed_on": cfg.get("mapping_fixed_on"),
         "run_date": date.today().isoformat(),
         "cases_with_images": int(len(vol)),
         "cases_with_volumes": int((vol["error"] == "").sum()),

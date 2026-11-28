@@ -6,7 +6,8 @@
 
 dataset:
   name: "ISLES'24 training set"
-  record: "https://zenodo.org/records/16748089/latest"   # version and MD5 recorded at download
+  record: "https://zenodo.org/records/16748089/latest"
+  downloaded: "version v7 (record 17652035, 20 Nov 2025), train.7z MD5 4959a5dd2438d53e3c86d6858484e781, checked 28 Nov 2026"
   licence: "CC BY-NC-SA 4.0"
   software_label: "ISLES'24 maps"                        # written to ctp_software
 
@@ -33,22 +34,27 @@ files:
   demographics: ["demographic_baseline"]
   outcome: ["outcome"]
 
-# Clinical table -> MTOP template. Each key lists candidate column names (compared without case,
-# spaces or symbols). Status stays "draft" until the column names (not the values) have been read;
-# then the mapping is fixed, the status set to "fixed" with the date, and committed before the
-# node is run (plan, section 5).
-mapping_status: draft
+# Clinical table -> MTOP template (plan, section 5). Fixed on 28 November 2026 from the column
+# names and missing counts printed by step 1 (148 cases with clinical tables; no missing values
+# reported), before any value or outcome was read. Each key lists the ISLES'24 column name.
+# Left unmapped because the name alone does not fix their meaning or unit:
+#   Sex (coding not stated), Glucose (mg/dL or mmol/L), Referral and In-House (admission route),
+#   Anticoagulation and PAIs (would need a derived three-level category), Onset to door and
+#   Door to groin (a derived onset-to-puncture time, units not stated), Wake-up.
+# Not template predictors: Center, Leucocytes, CRP, INR, Alert to door, Door to imaging,
+#   Door to first series, Time of intervention, Door to recanalization, mRS at admission,
+#   mRS 24h, NIHSS discharge, mRS discharge.
+mapping_status: fixed
+mapping_fixed_on: "2026-11-28"
 mapping:
-  age: ["age", "age_years"]
-  sex_male: ["sex", "gender"]
-  mrs_pre: ["mrs_pre", "prestroke_mrs", "mrs_prestroke", "premorbid_mrs", "mrs_admission"]
-  nihss_adm: ["nihss_admission", "nihss_baseline", "admission_nihss", "nihss"]
-  ivt: ["ivt", "iv_thrombolysis", "thrombolysis", "rtpa", "tpa"]
-  htn: ["hypertension", "arterial_hypertension", "htn"]
-  dm: ["diabetes", "diabetes_mellitus", "dm"]
-  hld: ["hyperlipidemia", "dyslipidemia", "hypercholesterolemia", "hld"]
-  arrhythmia: ["atrial_fibrillation", "afib", "af", "arrhythmia"]
-  stroke_prior: ["prior_stroke", "previous_stroke", "stroke_history"]
-  smoking: ["smoking", "smoker"]
-  tici: ["tici", "mtici", "etici", "reperfusion_grade"]
-  mrs90: ["mrs_3month", "mrs_90", "mrs90", "mrs_3m", "mrs_90days"]
+  age: ["Age"]
+  mrs_pre: ["mRS premorbid"]
+  nihss_adm: ["NIHSS at admission"]
+  arrhythmia: ["Atrial fibrillation"]
+  htn: ["Hypertension"]
+  dm: ["Diabetes"]
+  hld: ["Hyperlipidemia"]
+  statin: ["Lipid lowering drugs"]
+  tici: ["TICI postinterventional"]
+  nihss_24h: ["NIHSS 24h"]
+  mrs90: ["mRS 3 months"]
